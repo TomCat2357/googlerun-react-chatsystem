@@ -8,6 +8,9 @@ export default function Header() {
         const auth = getAuth();
         try {
             await auth.signOut();
+            await axios.post('http://localhost:8080/app/logout', null, {
+                withCredentials: true
+            });
             navigate('/');
         } catch (error) {
             console.error('Logout error:', error);

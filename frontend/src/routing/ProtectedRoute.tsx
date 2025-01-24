@@ -7,17 +7,21 @@ interface ProtectedRouteProps {
 }
 
 export default function ProtectedRoute({ children }: ProtectedRouteProps) {
-  const { currentUser } = useAuth();
+  const { currentUser, checkAuthStatus } = useAuth();
   const navigate = useNavigate();
 
   useEffect(() => {
-    if (!currentUser) {
-      navigate('/', { replace: true });
-    }
-  }, [currentUser, navigate]);
+    const verifyAuth = async () => {
+      const isAuthenticated = await checkAuthStatus();
+      if (!isAuthenticated) {
+        navigate('/', { replace: true });
+      }
+    };
 
-  // ログインチェックが完了するまでローディング表示
-  if (currentUser === null) {
+    verifyAuth();
+  }, [checkAuthStatus, navigate]);
+
+  if (!currentUser) {
     return <div>Loading...</div>;
   }
 
