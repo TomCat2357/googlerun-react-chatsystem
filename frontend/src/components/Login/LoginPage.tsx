@@ -11,7 +11,7 @@ export default function LoginPage() {
   const { setCurrentUser } = useAuth();  // 変更点2
   const onLoginSuccess = (user) => {
     setCurrentUser(user);
-    navigate('/main');
+    navigate('/app/main');
   };
 
   const handleLogin = async () => {

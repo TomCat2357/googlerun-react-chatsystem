@@ -12,7 +12,7 @@ export default function App() {
         <Routes>
           <Route path="/" element={<LoginPage />} />
           <Route
-            path="/main"
+            path="/app/main"
             element={
               <ProtectedRoute>
                 <MainPage />
