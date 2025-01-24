@@ -1,15 +1,23 @@
 // src/App.tsx
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
-import LoginPage from './components/Login/LoginPage';  // importを修正
-import MainPage from './components/Main/MainPage';     // importを修正
+import LoginPage from './components/Login/LoginPage';
+import MainPage from './components/Main/MainPage';
+import Header from './components/Header/Header';
 
 function App() {
   return (
     <BrowserRouter>
-      <Routes>
-        <Route path="/" element={<LoginPage />} />
-        <Route path="/main" element={<MainPage />} />
-      </Routes>
+      <div>
+        <Routes>
+          <Route path="/" element={<LoginPage />} />
+          <Route path="/main" element={
+            <>
+              <Header />
+              <MainPage />
+            </>
+          } />
+        </Routes>
+      </div>
     </BrowserRouter>
   );
 }

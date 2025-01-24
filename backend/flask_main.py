@@ -32,5 +32,17 @@ def login():
     except Exception as e:
         return jsonify({"error": str(e)}), 401
 
+@app.route("/app/logout", methods=["POST"])
+def logout():
+    try:
+        return jsonify({
+            "status": "success",
+            "message": "Logged out successfully"
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 401
+
 if __name__ == "__main__":
     app.run(port=8080)
+
+
