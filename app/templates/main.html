@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+
+{% block title %}メインUI{% endblock %}
+
+{% block head %}
+<header class="header">
+    <div class="header-title">メインUI</div>
+    <div class="user-info">
+        <span id="user-email">{{ user_email }}</span>
+        <button id="logoutButton" class="logout-button">ログアウト</button>
+    </div>
+    <script src="{{ url_for('static', filename='js/logout_button.js') }}"></script>
+</header>
+
+
+{% endblock %}
+
+{% block content %}
+<div class="main-content">
+    <!-- チャットコンポーネントをインポート -->
+    {% from "macros/chat_component.html" import render_chat %}
+    {{ render_chat(models) }}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/firebase_token_manager_macro.js') }}"></script>
+{% endblock %}

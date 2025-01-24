@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>{% block title %}{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+    <meta http-equiv="Cross-Origin-Opener-Policy" content="same-origin-allow-popups">
+    <!-- baseClassとAPI_GATEWAY_KEYの読み込み -->
+    {% from "macros/base_class_setup.html" import base_class_setup %}
+    {{ base_class_setup(API_GATEWAY_KEY) }}
+    <!-- Firebase SDKの読み込み -->
+    {% from "macros/firebase_setup.html" import firebase_base_setup %}
+    {{ firebase_base_setup(firebase_config) }}
+    {% block head %}{% endblock %}
+</head>
+<body>
+    {% block content %}{% endblock %}
+    {% block scripts %}{% endblock %}
+</body>
+</html>

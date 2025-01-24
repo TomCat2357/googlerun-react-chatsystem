@@ -1,0 +1,48 @@
+{% macro render_chat(models) %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/chat.css') }}">
+<script src="{{ url_for('static', filename='js/chat_manager.js') }}"></script>
+<div class="chat-layout">
+    <!-- 左サイドバー -->
+    <div class="sidebar">
+      <div class="sidebar-controls">
+        <label for="model-selector" class="model-select-label">モデルを選択</label>
+        <select id="model-selector" class="model-select">
+          {% for model in models.split(',') %}
+            <option value="{{ model.strip() }}">{{ model.strip() }}</option>
+          {% endfor %}
+        </select>
+        <button id="clear-history-button" class="sidebar-button">
+          新規チャットを始める
+        </button>
+        
+        <!-- 履歴セクションを追加 -->
+        <div class="chat-history-section">
+          <h3>最近のチャット</h3>
+          <div id="chat-history-list" class="chat-history-list">
+            <!-- 履歴アイテムが動的に追加される -->
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- メインチャットエリア -->
+    <div class="chat-container">
+      <div class="message-container" id="message-container">
+        <!-- メッセージが動的に追加されます -->
+      </div>
+      <div class="input-container">
+        <textarea 
+          id="message-input" 
+          class="message-input"
+          placeholder="メッセージを入力してください..."
+          rows="2"
+        ></textarea>
+        <button id="send-button" class="send-button" data-action="send">
+          送信
+        </button>
+      </div>
+    </div>
+</div>
+{% endmacro %}
+
+

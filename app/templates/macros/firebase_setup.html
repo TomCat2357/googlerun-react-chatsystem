@@ -1,0 +1,9 @@
+{% macro firebase_base_setup(firebase_config) %}
+    <!-- Firebase SDKの読み込みと初期化までを行う -->
+    <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-auth-compat.js"></script> 
+    <script>
+        const firebaseConfig = {{ firebase_config|tojson }};
+        firebase.initializeApp(firebaseConfig);
+    </script>
+{% endmacro %}

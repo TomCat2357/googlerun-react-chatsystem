@@ -1,0 +1,14 @@
+version: '3.8'
+
+services:
+  logintest:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: logintest-app:local
+    env_file:
+      - app/config/.env
+    ports:
+      - "8080:8080"
+    extra_hosts:
+      - "localhost:192.168.1.103"
