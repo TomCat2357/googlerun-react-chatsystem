@@ -1,30 +1,27 @@
 // src/components/Login/LoginPage.tsx
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { initializeApp } from 'firebase/app';
+import { useAuth } from '../../contexts/AuthContext';  // 変更点1
 import { getAuth, signInWithPopup, GoogleAuthProvider } from 'firebase/auth';
+import { app } from '../../firebase/firebase'; // Import the Firebase app instance
 
-const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN
-};
-
-// Firebaseの初期化
-initializeApp(firebaseConfig);
-
-// exportの方法を修正
-export default function LoginPage() {  // defaultエクスポートに変更
+export default function LoginPage() {
   const [error, setError] = useState<string>('');
   const navigate = useNavigate();
-  
+  const { setCurrentUser } = useAuth();  // 変更点2
+  const onLoginSuccess = (user) => {
+    setCurrentUser(user);
+    navigate('/main');
+  };
+
   const handleLogin = async () => {
     try {
-      const auth = getAuth();
+      const auth = getAuth(app); // Use the imported Firebase app instance
       const provider = new GoogleAuthProvider();
       const result = await signInWithPopup(auth, provider);
       
       console.log('Logged in user:', result.user.email);
-      navigate('/main');
+      onLoginSuccess(result.user);
     } catch (err) {
       setError('ログインに失敗しました');
       console.error('Login error:', err);

@@ -1,25 +1,26 @@
 // src/App.tsx
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
-import LoginPage from './components/Login/LoginPage';
 import MainPage from './components/Main/MainPage';
-import Header from './components/Header/Header';
+import LoginPage from './components/Login/LoginPage';
+import ProtectedRoute from './routing/ProtectedRoute';
+import { AuthProvider } from './contexts/AuthContext';  // 追加
 
-function App() {
+export default function App() {
   return (
-    <BrowserRouter>
-      <div>
+    <AuthProvider>      {/* AuthProvider を追加 */}
+      <BrowserRouter>
         <Routes>
           <Route path="/" element={<LoginPage />} />
-          <Route path="/main" element={
-            <>
-              <Header />
-              <MainPage />
-            </>
-          } />
+          <Route
+            path="/main"
+            element={
+              <ProtectedRoute>
+                <MainPage />
+              </ProtectedRoute>
+            }
+          />
         </Routes>
-      </div>
-    </BrowserRouter>
+      </BrowserRouter>
+    </AuthProvider>
   );
 }
-
-export default App;
