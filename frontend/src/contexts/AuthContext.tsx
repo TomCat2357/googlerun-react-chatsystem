@@ -6,7 +6,7 @@ interface AuthContextType {
   currentUser: User | null;
   setCurrentUser: (user: User | null) => void;
   checkAuthStatus: () => Promise<boolean>;
-  setUserToken: (user: User) => Promise<void>;
+  
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -30,11 +30,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => unsubscribe();
   }, []);
 
-  const setUserToken = async (user: User) => {
-    const token = await user.getIdToken();
-    console.log('Setting new token:', token);
-    localStorage.setItem('firebaseToken', token);
-  };
+
 
   const checkAuthStatus = async () => {
     try {
@@ -69,7 +65,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     currentUser,
     setCurrentUser,
     checkAuthStatus,
-    setUserToken,
+    
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
