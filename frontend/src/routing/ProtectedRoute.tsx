@@ -9,7 +9,8 @@ interface ProtectedRouteProps {
 export default function ProtectedRoute({ children }: ProtectedRouteProps) {
   const { currentUser, checkAuthStatus, loading } = useAuth();
   const navigate = useNavigate();
-  const [authChecked, setAuthChecked] = useState(false);
+  // ↓もしかして使っていない？
+  // const [authChecked, setAuthChecked] = useState(false);
 
 
   useEffect(() => {

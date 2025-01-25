@@ -25,11 +25,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (user) {
         // ユーザーがログインしている場合
         const token = await user.getIdToken();
-        localStorage.setItem('firebaseToken', token);  // トークンをローカルストレージに保存
+        // localStorage.setItem('firebaseToken', token);  // トークンをローカルストレージに保存
         setCurrentUser(user);
       } else {
         // ユーザーがログアウトしている場合
-        localStorage.removeItem('firebaseToken');
+        // localStorage.removeItem('firebaseToken');
         setCurrentUser(null);
       }
       setLoading(false); // 読み込みが完了したことを示すフラグを設定

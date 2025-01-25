@@ -38,7 +38,7 @@ def get_token_from_request():
 @app.route("/app/verify-auth", methods=["GET"])
 def verify_auth():
     try:
-        logger.info("Request headers: %s", request.headers)
+        logger.info("Verify_auth start.")
         
         token = get_token_from_request()
         if not token:
