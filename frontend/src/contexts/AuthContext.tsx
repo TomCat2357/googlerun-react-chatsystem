@@ -39,8 +39,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // バックエンドとの認証状態の検証
   const checkAuthStatus = async () => {
     try {
+      console.log('checkAuthStatus called');
       if (!auth.currentUser) {
-        console.log('No current user found');
+        console.log('Current auth state:', auth);
+        console.log('Current user state:', currentUser);
         return false;
       }
       // 最新のトークンを取得
@@ -58,8 +60,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       console.log('Backend response:', response.data);
       return response.data.status === 'success';
     } catch (error) {
-      // エラー詳細のログ出力
-      console.error('Auth check detailed error:', {
+      console.error('Auth check error:', {
+        name: error.name,
         message: error.message,
         response: error.response?.data,
         status: error.response?.status

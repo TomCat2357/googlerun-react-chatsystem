@@ -28,21 +28,26 @@ def get_token_from_request():
     """リクエストからトークンを取得する関数"""
     auth_header = request.headers.get("Authorization")
     if auth_header and auth_header.startswith("Bearer "):
-        return auth_header.split("Bearer ")[1]
-    return request.cookies.get('access_token')
+        ret_token = auth_header.split("Bearer ")[1]
+        logger.info('Token getted from request headers: %s', ret_token[:10])
+    else:
+        ret_token = request.cookies.get('access_token')
+        logger.info('Token getted from cookies: %s', ret_token[:10])
+    return ret_token
 
 @app.route("/app/verify-auth", methods=["GET"])
 def verify_auth():
     try:
-        logger.info("Verify auth request received")
+        logger.info("Request headers: %s", request.headers)
+        logger.info("Request cookies: %s", request.cookies)
         token = get_token_from_request()
         if not token:
             logger.warning("No token found in request")
             return jsonify({"error": "認証が必要です"}), 401
             
-        logger.info(f"Token received: {token[:10]}...")
+        logger.info("Token received: %s...", token[:10])
         decoded_token = auth.verify_id_token(token)
-        logger.info(f"Token successfully decoded for user: {decoded_token.get('email')}")
+        logger.info("Token successfully decoded for user: %s", decoded_token.get('email'))
         
         response_data = {
             "status": "success", 
@@ -64,13 +69,12 @@ def verify_auth():
             path='/'
         )
         
-        logger.info(f"Sending successful response: {response_data}")
+        logger.info("Sending successful response: %s", response_data)
         return response
 
     except Exception as e:
-        logger.error(f"Authentication error: {str(e)}", exc_info=True)
+        logger.error("Authentication error: %s", str(e), exc_info=True)
         return jsonify({"error": str(e)}), 401
-
 @app.route("/app/logout", methods=["POST"])
 def logout():
     try:

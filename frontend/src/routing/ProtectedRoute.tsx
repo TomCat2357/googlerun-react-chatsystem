@@ -12,14 +12,18 @@ export default function ProtectedRoute({ children }: ProtectedRouteProps) {
 
   useEffect(() => {
     const verifyAuth = async () => {
+      console.log('ProtectedRoute: Starting auth verification');
+      console.log('Current user state:', currentUser);
       const isAuthenticated = await checkAuthStatus();
+      console.log('Authentication result:', isAuthenticated);
       if (!isAuthenticated) {
+        console.log('Redirecting to login page');
         navigate('/', { replace: true });
       }
     };
 
     verifyAuth();
-  }, [checkAuthStatus, navigate]);
+  }, [checkAuthStatus, navigate, currentUser]);
 
   if (!currentUser) {
     return <div>Loading...</div>;
