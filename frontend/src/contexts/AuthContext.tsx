@@ -2,46 +2,53 @@ import { createContext, useContext, useState, useEffect, ReactNode } from 'react
 import { User, getAuth, onAuthStateChanged } from 'firebase/auth';
 import axios from 'axios';
 
+// 認証コンテキストの型定義
 interface AuthContextType {
-  currentUser: User | null;
-  setCurrentUser: (user: User | null) => void;
-  checkAuthStatus: () => Promise<boolean>;
-  
+  currentUser: User | null;  // 現在のユーザー情報
+  setCurrentUser: (user: User | null) => void;  // ユーザー情報を更新する関数
+  checkAuthStatus: () => Promise<boolean>;  // 認証状態を確認する関数
 }
 
+// 認証コンテキストの作成
 const AuthContext = createContext<AuthContextType | null>(null);
 
+// 認証プロバイダーコンポーネント
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const auth = getAuth();
 
+  // Firebaseの認証状態変更を監視
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
+        // ユーザーがログインしている場合
         const token = await user.getIdToken();
-        localStorage.setItem('firebaseToken', token);
+        localStorage.setItem('firebaseToken', token);  // トークンをローカルストレージに保存
         setCurrentUser(user);
       } else {
+        // ユーザーがログアウトしている場合
         localStorage.removeItem('firebaseToken');
         setCurrentUser(null);
       }
     });
 
+    // クリーンアップ関数
     return () => unsubscribe();
   }, []);
 
-
-
+  // バックエンドとの認証状態の検証
   const checkAuthStatus = async () => {
     try {
       if (!auth.currentUser) {
         console.log('No current user found');
         return false;
       }
+      // 最新のトークンを取得
       const token = await auth.currentUser.getIdToken(true);
       console.log('Token obtained:', token.substring(0, 10) + '...');
       localStorage.setItem('firebaseToken', token);
       
+      // バックエンドへ認証確認リクエスト
       console.log('Making verification request to backend...');
       const response = await axios.get('http://localhost:8080/app/verify-auth', {
         withCredentials: true,
@@ -52,6 +59,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       console.log('Backend response:', response.data);
       return response.data.status === 'success';
     } catch (error) {
+      // エラー詳細のログ出力
       console.error('Auth check detailed error:', {
         message: error.message,
         response: error.response?.data,
@@ -61,16 +69,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  // コンテキストで提供する値
   const value = {
     currentUser,
     setCurrentUser,
     checkAuthStatus,
-    
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
+// カスタムフック - 認証コンテキストを使用するためのヘルパー
 export function useAuth() {
   const context = useContext(AuthContext);
   if (!context) {

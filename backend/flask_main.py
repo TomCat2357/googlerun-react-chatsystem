@@ -1,5 +1,5 @@
 # flask_main.pyの修正
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, make_response, Response
 from flask_cors import CORS
 import firebase_admin
 from firebase_admin import auth, credentials, initialize_app
