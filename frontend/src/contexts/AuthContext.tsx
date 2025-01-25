@@ -7,6 +7,7 @@ interface AuthContextType {
   currentUser: User | null;  // 現在のユーザー情報
   setCurrentUser: (user: User | null) => void;  // ユーザー情報を更新する関数
   checkAuthStatus: () => Promise<boolean>;  // 認証状態を確認する関数
+  loading: boolean; // 追加: 認証情報を読み込み中かどうかを示すフラグ
 }
 
 // 認証コンテキストの作成
@@ -15,6 +16,7 @@ const AuthContext = createContext<AuthContextType | null>(null);
 // 認証プロバイダーコンポーネント
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true); // 追加
   const auth = getAuth();
 
   // Firebaseの認証状態変更を監視
@@ -30,6 +32,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         localStorage.removeItem('firebaseToken');
         setCurrentUser(null);
       }
+      setLoading(false); // 読み込みが完了したことを示すフラグを設定
+      console.log('Loading state:', loading);
     });
 
     // クリーンアップ関数
@@ -75,6 +79,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     currentUser,
     setCurrentUser,
     checkAuthStatus,
+    loading, // 追加: 読み込み中かどうかを示すフラグ
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

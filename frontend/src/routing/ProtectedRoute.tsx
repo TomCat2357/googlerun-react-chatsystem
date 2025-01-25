@@ -1,4 +1,4 @@
-import { ReactNode, useEffect } from 'react';
+import { ReactNode, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -7,11 +7,15 @@ interface ProtectedRouteProps {
 }
 
 export default function ProtectedRoute({ children }: ProtectedRouteProps) {
-  const { currentUser, checkAuthStatus } = useAuth();
+  const { currentUser, checkAuthStatus, loading } = useAuth();
   const navigate = useNavigate();
+  const [authChecked, setAuthChecked] = useState(false);
+
 
   useEffect(() => {
     const verifyAuth = async () => {
+      if (loading) return;  
+      // 認証チェック処理
       console.log('ProtectedRoute: Starting auth verification');
       console.log('Current user state:', currentUser);
       const isAuthenticated = await checkAuthStatus();
@@ -23,10 +27,10 @@ export default function ProtectedRoute({ children }: ProtectedRouteProps) {
     };
 
     verifyAuth();
-  }, [checkAuthStatus, navigate, currentUser]);
+  }, [loading, checkAuthStatus, navigate, currentUser]);
 
-  if (!currentUser) {
-    return <div>Loading...</div>;
+  if (loading) {
+    return <div>認証状態確認中...</div>;  // コンポーネントのトップレベルでのローディング表示
   }
 
   return <>{children}</>;

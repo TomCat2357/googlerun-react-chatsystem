@@ -39,14 +39,14 @@ def get_token_from_request():
 def verify_auth():
     try:
         logger.info("Request headers: %s", request.headers)
-        logger.info("Request cookies: %s", request.cookies)
+        
         token = get_token_from_request()
         if not token:
             logger.warning("No token found in request")
             return jsonify({"error": "認証が必要です"}), 401
             
         logger.info("Token received: %s...", token[:10])
-        decoded_token = auth.verify_id_token(token)
+        decoded_token = auth.verify_id_token(token, clock_skew_seconds=60)
         logger.info("Token successfully decoded for user: %s", decoded_token.get('email'))
         
         response_data = {
