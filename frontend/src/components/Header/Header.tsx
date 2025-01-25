@@ -1,6 +1,6 @@
 import { getAuth } from 'firebase/auth';
 import { useNavigate } from 'react-router-dom';
-
+import axios from 'axios';  // この行を追加
 export default function Header() {
     const navigate = useNavigate();
     

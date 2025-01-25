@@ -31,48 +31,6 @@ def get_token_from_request():
         return auth_header.split("Bearer ")[1]
     return request.cookies.get('access_token')
 
-@app.route("/app/login", methods=["POST"])
-def login():
-    try:
-        token = get_token_from_request()
-        if not token:
-            return jsonify({"error": "トークンがありません"}), 401
-        
-        decoded_token = auth.verify_id_token(token)
-        user_email = decoded_token.get("email", "Unknown User")
-        
-        response = make_response(jsonify({
-            "status": "success",
-            "user": {"email": user_email}
-        }))
-        
-        response.set_cookie(
-            'access_token',
-            token,
-            httponly=True,
-            secure=True,
-            samesite='Strict',
-            max_age=3600,
-            path='/'
-        )
-        
-        return response
-        
-    except Exception as e:
-        return jsonify({"error": str(e)}), 401
-
-@app.route("/app/logout", methods=["POST"])
-def logout():
-    try:
-        response = make_response(jsonify({
-            "status": "success",
-            "message": "Logged out successfully"
-        }))
-        response.delete_cookie('access_token')
-        return response
-    except Exception as e:
-        return jsonify({"error": str(e)}), 401
-
 @app.route("/app/verify-auth", methods=["GET"])
 def verify_auth():
     try:
@@ -93,10 +51,37 @@ def verify_auth():
                 "uid": decoded_token.get("uid")
             }
         }
+
+        # レスポンスを作成し、クッキーを設定
+        response = make_response(jsonify(response_data))
+        response.set_cookie(
+            'access_token',
+            token,
+            httponly=True,
+            secure=True,
+            samesite='Strict',
+            max_age=3600,
+            path='/'
+        )
+        
         logger.info(f"Sending successful response: {response_data}")
-        return jsonify(response_data)
+        return response
+
     except Exception as e:
         logger.error(f"Authentication error: {str(e)}", exc_info=True)
         return jsonify({"error": str(e)}), 401
 
-app.run(port=8080)
+@app.route("/app/logout", methods=["POST"])
+def logout():
+    try:
+        response = make_response(jsonify({
+            "status": "success",
+            "message": "Logged out successfully"
+        }))
+        response.delete_cookie('access_token')
+        return response
+    except Exception as e:
+        return jsonify({"error": str(e)}), 401
+
+if  __name__ == "__main__":
+    app.run(port=8080)  
