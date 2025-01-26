@@ -21,23 +21,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // Firebaseの認証状態変更を監視
   useEffect(() => {
+    // ユーザーの認証状態が変化した際に呼び出される
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      console.log('onAuthStateChangedが呼び出されました。ユーザー情報:', user);
       if (user) {
         // ユーザーがログインしている場合
         const token = await user.getIdToken();
-        // localStorage.setItem('firebaseToken', token);  // トークンをローカルストレージに保存
+        console.log('Firebaseトークンを取得:', token.substring(0, 10) + '...');
         setCurrentUser(user);
       } else {
         // ユーザーがログアウトしている場合
-        // localStorage.removeItem('firebaseToken');
+        console.log('ログアウトまたは未ログインの状態です');
         setCurrentUser(null);
       }
-      setLoading(false); // 読み込みが完了したことを示すフラグを設定
-      console.log('Loading state:', loading);
+      setLoading(false); // データの読み込みが完了
+      console.log('Loadingステートがfalseに設定されました');
     });
 
-    // クリーンアップ関数
-    return () => unsubscribe();
+    // コンポーネントのアンマウント時にリスナーを解除
+    return () => {
+      console.log('onAuthStateChangedリスナーを解除します');
+      unsubscribe();
+    };
   }, []);
 
   // バックエンドとの認証状態の検証
@@ -45,26 +50,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       console.log('checkAuthStatus called');
       if (!auth.currentUser) {
-        console.log('Current auth state:', auth);
-        console.log('Current user state:', currentUser);
+        console.log('ログイン中のユーザーが存在しません');
+        console.log('Authオブジェクトの状態:', auth);
+        console.log('currentUserの状態:', currentUser);
         return false;
       }
       // 最新のトークンを取得
-      const token = await auth.currentUser.getIdToken(true);
-      console.log('Token obtained:', token.substring(0, 10) + '...');
-
+      const token = await auth.currentUser.getIdToken(false);
+      console.log('取得した最新トークン(先頭10文字):', token.substring(0, 10) + '...');
+      
       // バックエンドへ認証確認リクエスト
-      console.log('Making verification request to backend...');
+      console.log('バックエンドへ認証確認のリクエストを送信します...');
       const response = await axios.get('http://localhost:8080/app/verify-auth', {
         withCredentials: true,
         headers: {
           Authorization: `Bearer ${token}`,
         },
       });
-      console.log('Backend response:', response.data);
+      console.log('バックエンドからのレスポンス:', response.data);
       return response.data.status === 'success';
-    } catch (error) {
-      console.error('Auth check error:', {
+    } catch (error: any) {
+      console.error('認証チェック中にエラーが発生:', {
         name: error.name,
         message: error.message,
         response: error.response?.data,
@@ -75,11 +81,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   // コンテキストで提供する値
-  const value = {
+  const value: AuthContextType = {
     currentUser,
     setCurrentUser,
     checkAuthStatus,
-    loading, // 追加: 読み込み中かどうかを示すフラグ
+    loading,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
@@ -89,7 +95,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 export function useAuth() {
   const context = useContext(AuthContext);
   if (!context) {
-    throw new Error('useAuth must be used within an AuthProvider');
+    throw new Error('useAuthはAuthProvider内でのみ使用可能です');
   }
   return context;
 }
