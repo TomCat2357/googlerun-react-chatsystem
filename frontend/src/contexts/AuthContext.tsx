@@ -8,8 +8,8 @@ import axios from 'axios';
     setCurrentUser: (user: User | null) => void;
     checkAuthStatus: () => Promise<boolean>;
     loading: boolean;
-    refreshToken: () => Promise<string | null>;        // 追加
-    checkTokenExpiration: () => Promise<string | null>; // 追加
+    refreshToken: () => Promise<string | null>;        
+    checkTokenExpiration: () => Promise<string | null>; 
   }
 
 // 認証コンテキストの作成
@@ -18,7 +18,7 @@ const AuthContext = createContext<AuthContextType | null>(null);
 // 認証プロバイダーコンポーネント
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true); // 追加
+  const [loading, setLoading] = useState(true); 
   const auth = getAuth();
 
   // ここに定数とトークン関連の関数を追加
@@ -166,8 +166,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setCurrentUser,
     checkAuthStatus,
     loading,
-    refreshToken,        // 追加
-    checkTokenExpiration // 追加
+    refreshToken,        
+    checkTokenExpiration 
   };
 
   console.log('AuthProviderがレンダリングされました。提供する値:', value);
