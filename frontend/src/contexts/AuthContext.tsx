@@ -22,7 +22,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const auth = getAuth();
 
   // ここに定数とトークン関連の関数を追加
-  const TOKEN_REFRESH_THRESHOLD = 5 * 60; // 5分前にリフレッシュ
+  const TOKEN_REFRESH_THRESHOLD = 10 * 60; // 10分前にリフレッシュ
 
   const refreshToken = async () => {
     console.log('refreshToken関数が呼び出されました');
@@ -36,16 +36,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return null;
   };
 
+  const base64Decode = (str: string): string => {
+    // Base64URLをBase64に変換
+    const base64 = str.replace(/-/g, '+').replace(/_/g, '/');
+    // パディングを追加
+    const pad = base64.length % 4;
+    if (pad) {
+      return base64 + '='.repeat(4 - pad);
+    }
+    return base64;
+  };
+
   const checkTokenExpiration = async () => {
     console.log('checkTokenExpiration関数が呼び出されました');
     if (auth.currentUser) {
       console.log('現在のユーザーが存在します。トークンの有効期限を確認します。');
       const token = await auth.currentUser.getIdToken();
-      const decodedToken = JSON.parse(atob(token.split('.')[1]));
+      const payload = token.split('.')[1];
+      const decodedToken = JSON.parse(atob(base64Decode(payload)));
       const expirationTime = decodedToken.exp;
       const currentTime = Math.floor(Date.now() / 1000);
-      console.log(`トークンの有効期限: ${expirationTime}, 現在の時刻: ${currentTime}`);
-      
+      console.log(`トークンの有効期限: ${expirationTime}, 現在の時刻: ${currentTime}, リフレッシュまで: ${expirationTime - currentTime - TOKEN_REFRESH_THRESHOLD}秒`);
+    
       if (expirationTime - currentTime < TOKEN_REFRESH_THRESHOLD) {
         console.log('トークンの有効期限が閾値を下回ったため、トークンをリフレッシュします');
         const newToken = await refreshToken();
@@ -63,7 +75,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     return null;
   };
-
   // Firebaseの認証状態変更を監視
   useEffect(() => {
     console.log('AuthProviderのuseEffectが実行されました');
