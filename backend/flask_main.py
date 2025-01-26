@@ -84,16 +84,7 @@ def verify_auth() -> Response:
 
         # レスポンスの作成とクッキーの設定
         response: Response = make_response(jsonify(response_data))
-        response.set_cookie(
-            "access_token",
-            token,
-            httponly=True,
-            secure=True,
-            samesite="Strict",
-            max_age=3600,
-            path="/",
-        )
-
+        
         logger.info("認証成功。正常なレスポンスを送信")
         return response
 
@@ -115,9 +106,6 @@ def logout() -> Response:
         response: Response = make_response(
             jsonify({"status": "success", "message": "ログアウトに成功しました"})
         )
-        # クッキーからトークンを削除
-        response.delete_cookie("access_token")
-        logger.info("クッキーのトークンを削除し、ログアウト処理完了")
         return response
     except Exception as e:
         logger.error("ログアウト処理中にエラーが発生: %s", str(e), exc_info=True)

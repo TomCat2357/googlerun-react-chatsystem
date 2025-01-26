@@ -62,7 +62,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // バックエンドへ認証確認リクエスト
       console.log('バックエンドへ認証確認のリクエストを送信します...');
       const response = await axios.get('http://localhost:8080/app/verify-auth', {
-        withCredentials: true,
         headers: {
           Authorization: `Bearer ${token}`,
         },
