@@ -1,88 +1,156 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
+import { Message, ChatRequest } from '../../types/apiTypes';
 
-interface Message {
-  role: 'user' | 'assistant';
-  content: string;
+interface ChatContainerProps {
+  apiKey?: string;
 }
 
-const ChatContainer = () => {
+export const ChatContainer: React.FC<ChatContainerProps> = ({ apiKey }) => {
   const [messages, setMessages] = useState<Message[]>([]);
-  const [inputMessage, setInputMessage] = useState('');
-  const [selectedModel, setSelectedModel] = useState('anthropic/claude-3-haiku-20240307');
+  const [input, setInput] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
+  const messageContainerRef = useRef<HTMLDivElement>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!inputMessage.trim() || isProcessing) return;
+  useEffect(() => {
+    if (messageContainerRef.current) {
+      messageContainerRef.current.scrollTop = messageContainerRef.current.scrollHeight;
+    }
+  }, [messages]);
 
-    console.log('Message to send:', inputMessage);
-    console.log('Selected model:', selectedModel);
+  const appendApiKey = (url: string) => {
+    if (!apiKey) return url;
+    const separator = url.includes('?') ? '&' : '?';
+    return `${url}${separator}x-api-key=${apiKey}`;
+  };
+
+  const sendMessage = async () => {
+    if (!input.trim() || isProcessing) return;
+
+    try {
+      setIsProcessing(true);
+      const newUserMessage: Message = { role: 'user', content: input };
+      setMessages(prev => [...prev, newUserMessage]);
+      setInput('');
+
+      abortControllerRef.current = new AbortController();
+      const signal = abortControllerRef.current.signal;
+
+      const chatRequest: ChatRequest = {
+        messages: [...messages, newUserMessage],
+        model: 'gpt-3.5-turbo'
+      };
+
+      const response = await fetch(appendApiKey('/app/chat'), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'text/event-stream',
+        },
+        credentials: 'include',
+        signal,
+        body: JSON.stringify(chatRequest)
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      let assistantMessage = '';
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+
+      if (reader) {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          const text = decoder.decode(value, { stream: true });
+          assistantMessage += text;
+          
+          setMessages(prev => {
+            const newMessages = [...prev];
+            const lastMessage = newMessages[newMessages.length - 1];
+            if (lastMessage && lastMessage.role === 'assistant') {
+              lastMessage.content = assistantMessage;
+              return [...newMessages];
+            } else {
+              return [...newMessages, { role: 'assistant', content: assistantMessage }];
+            }
+          });
+        }
+      }
+
+    } catch (error) {
+      if (error.name !== 'AbortError') {
+        console.error('Error:', error);
+        setMessages(prev => [...prev, { 
+          role: 'assistant', 
+          content: 'エラーが発生しました: ' + (error instanceof Error ? error.message : 'Unknown error') 
+        }]);
+      }
+    } finally {
+      setIsProcessing(false);
+      abortControllerRef.current = null;
+    }
+  };
+
+  const handleKeyPress = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
+  };
+
+  const stopGeneration = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      setIsProcessing(false);
+    }
   };
 
   return (
-    <div className="flex h-screen bg-white">
-      {/* サイドバー */}
-      <div className="w-64 bg-gray-50 border-r border-gray-200 p-4">
-        <select
-          value={selectedModel}
-          onChange={(e) => setSelectedModel(e.target.value)}
-          className="w-full p-2 mb-4 border rounded bg-white text-gray-900"
-        >
-          <option value="anthropic/claude-3-haiku-20240307">Claude 3 Haiku</option>
-          <option value="ollama/aya:latest">Aya</option>
-          <option value="ollama/phi3:mini">Phi-3 Mini</option>
-        </select>
-        <button 
-          className="w-full p-2 bg-gray-100 text-gray-700 rounded hover:bg-gray-200 border border-gray-300"
-          onClick={() => setMessages([])}
-        >
-          新規チャットを始める
-        </button>
+    <div className="flex flex-col h-full bg-white rounded-lg shadow">
+      <div 
+        ref={messageContainerRef}
+        className="flex-1 overflow-y-auto p-4 space-y-4"
+      >
+        {messages.map((message, index) => (
+          <div
+            key={index}
+            className={`p-2 rounded-lg ${
+              message.role === 'user' 
+                ? 'bg-blue-100 ml-auto max-w-[80%]' 
+                : 'bg-gray-100 mr-auto max-w-[80%]'
+            }`}
+          >
+            {message.content}
+          </div>
+        ))}
       </div>
-
-      {/* メインチャットエリア */}
-      <div className="flex-1 flex flex-col bg-white">
-        {/* メッセージ表示エリア */}
-        <div className="flex-1 overflow-y-auto p-4">
-          {messages.map((message, index) => (
-            <div
-              key={index}
-              className={`mb-4 p-3 rounded max-w-3xl ${
-                message.role === 'user' 
-                  ? 'bg-blue-50 ml-auto text-gray-900' 
-                  : 'bg-gray-50 text-gray-900'
-              }`}
-            >
-              {message.content}
-            </div>
-          ))}
-        </div>
-
-        {/* 入力エリア */}
-        <div className="border-t border-gray-200 p-4 bg-white">
-          <form onSubmit={handleSubmit} className="max-w-4xl mx-auto">
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={inputMessage}
-                onChange={(e) => setInputMessage(e.target.value)}
-                className="flex-1 p-2 border border-gray-300 rounded bg-white text-gray-900"
-                placeholder="メッセージを入力..."
-                disabled={isProcessing}
-              />
-              <button
-                type="submit"
-                disabled={isProcessing}
-                className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:bg-gray-400 disabled:cursor-not-allowed"
-              >
-                {isProcessing ? '送信中...' : '送信'}
-              </button>
-            </div>
-          </form>
+      <div className="border-t p-4">
+        <div className="flex space-x-2">
+          <textarea
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyPress={handleKeyPress}
+            className="flex-1 p-2 border rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
+            placeholder="メッセージを入力..."
+            rows={2}
+            disabled={isProcessing}
+          />
+          <button
+            onClick={isProcessing ? stopGeneration : sendMessage}
+            className={`px-4 py-2 rounded-lg ${
+              isProcessing 
+                ? 'bg-red-500 hover:bg-red-600' 
+                : 'bg-blue-500 hover:bg-blue-600'
+            } text-white transition-colors`}
+          >
+            {isProcessing ? '停止' : '送信'}
+          </button>
         </div>
       </div>
     </div>
   );
 };
-
-export default ChatContainer;
