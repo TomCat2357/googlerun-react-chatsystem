@@ -9,13 +9,11 @@ interface ProtectedRouteProps {
 export default function ProtectedRoute({ children }: ProtectedRouteProps) {
   const { currentUser, checkAuthStatus, loading } = useAuth();
   const navigate = useNavigate();
-  // ↓もしかして使っていない？
-  // const [authChecked, setAuthChecked] = useState(false);
 
 
   useEffect(() => {
     const verifyAuth = async () => {
-      if (loading) return;  
+      if (loading) return;
       // 認証チェック処理
       console.log('ProtectedRoute: Starting auth verification');
       console.log('Current user state:', currentUser);

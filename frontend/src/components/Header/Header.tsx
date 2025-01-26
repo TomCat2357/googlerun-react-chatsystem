@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import axios from 'axios';  // この行を追加
 export default function Header() {
     const navigate = useNavigate();
-    
+
     const handleLogout = async () => {
         const auth = getAuth();
         try {
@@ -43,7 +43,7 @@ export default function Header() {
                 alignItems: 'center',
                 marginRight: '2rem'
             }}>
-                <button 
+                <button
                     onClick={handleLogout}
                     style={{
                         padding: '0.5rem 1rem',

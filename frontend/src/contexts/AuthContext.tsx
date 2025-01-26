@@ -52,7 +52,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // 最新のトークンを取得
       const token = await auth.currentUser.getIdToken(true);
       console.log('Token obtained:', token.substring(0, 10) + '...');
-      
+
       // バックエンドへ認証確認リクエスト
       console.log('Making verification request to backend...');
       const response = await axios.get('http://localhost:8080/app/verify-auth', {

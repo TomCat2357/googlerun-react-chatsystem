@@ -19,7 +19,7 @@ export default function LoginPage() {
       const auth = getAuth(app); // Use the imported Firebase app instance
       const provider = new GoogleAuthProvider();
       const result = await signInWithPopup(auth, provider);
-      
+
       console.log('Logged in user:', result.user.email);
       onLoginSuccess(result.user);
     } catch (err) {
