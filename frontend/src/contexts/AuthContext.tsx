@@ -2,13 +2,15 @@ import { createContext, useContext, useState, useEffect, ReactNode } from 'react
 import { User, getAuth, onAuthStateChanged } from 'firebase/auth';
 import axios from 'axios';
 
-// 認証コンテキストの型定義
-interface AuthContextType {
-  currentUser: User | null;  // 現在のユーザー情報
-  setCurrentUser: (user: User | null) => void;  // ユーザー情報を更新する関数
-  checkAuthStatus: () => Promise<boolean>;  // 認証状態を確認する関数
-  loading: boolean; // 追加: 認証情報を読み込み中かどうかを示すフラグ
-}
+  // interfaceの更新も必要
+  interface AuthContextType {
+    currentUser: User | null;
+    setCurrentUser: (user: User | null) => void;
+    checkAuthStatus: () => Promise<boolean>;
+    loading: boolean;
+    refreshToken: () => Promise<string | null>;        // 追加
+    checkTokenExpiration: () => Promise<string | null>; // 追加
+  }
 
 // 認証コンテキストの作成
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -19,20 +21,67 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true); // 追加
   const auth = getAuth();
 
+  // ここに定数とトークン関連の関数を追加
+  const TOKEN_REFRESH_THRESHOLD = 5 * 60; // 5分前にリフレッシュ
+
+  const refreshToken = async () => {
+    console.log('refreshToken関数が呼び出されました');
+    if (auth.currentUser) {
+      console.log('現在のユーザーが存在します。トークンをリフレッシュします。');
+      const token = await auth.currentUser.getIdToken(true);
+      console.log('新しいトークンを取得しました:', token.substring(0, 10) + '...');
+      return token;
+    }
+    console.log('現在のユーザーが存在しないため、トークンをリフレッシュできません');
+    return null;
+  };
+
+  const checkTokenExpiration = async () => {
+    console.log('checkTokenExpiration関数が呼び出されました');
+    if (auth.currentUser) {
+      console.log('現在のユーザーが存在します。トークンの有効期限を確認します。');
+      const token = await auth.currentUser.getIdToken();
+      const decodedToken = JSON.parse(atob(token.split('.')[1]));
+      const expirationTime = decodedToken.exp;
+      const currentTime = Math.floor(Date.now() / 1000);
+      console.log(`トークンの有効期限: ${expirationTime}, 現在の時刻: ${currentTime}`);
+      
+      if (expirationTime - currentTime < TOKEN_REFRESH_THRESHOLD) {
+        console.log('トークンの有効期限が閾値を下回ったため、トークンをリフレッシュします');
+        const newToken = await refreshToken();
+        if (newToken) {
+          console.log('トークンを正常にリフレッシュしました');
+        } else {
+          console.log('トークンのリフレッシュに失敗しました');
+        }
+        return newToken;
+      } else {
+        console.log('トークンの有効期限は十分です');
+      }
+    } else {
+      console.log('現在のユーザーが存在しないため、トークンの有効期限を確認できません');
+    }
+    return null;
+  };
+
   // Firebaseの認証状態変更を監視
   useEffect(() => {
+    console.log('AuthProviderのuseEffectが実行されました');
     // ユーザーの認証状態が変化した際に呼び出される
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       console.log('onAuthStateChangedが呼び出されました。ユーザー情報:', user);
       if (user) {
         // ユーザーがログインしている場合
+        console.log('ユーザーがログインしています。トークンを取得します。');
         const token = await user.getIdToken();
         console.log('Firebaseトークンを取得:', token.substring(0, 10) + '...');
         setCurrentUser(user);
+        console.log('currentUserが更新されました:', user);
       } else {
         // ユーザーがログアウトしている場合
-        console.log('ログアウトまたは未ログインの状態です');
+        console.log('ユーザーがログアウトまたは未ログインの状態です');
         setCurrentUser(null);
+        console.log('currentUserがnullに設定されました');
       }
       setLoading(false); // データの読み込みが完了
       console.log('Loadingステートがfalseに設定されました');
@@ -43,12 +92,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       console.log('onAuthStateChangedリスナーを解除します');
       unsubscribe();
     };
-  }, []);
+  }, [auth]);
+  
+  // トークンリフレッシュ監視のuseEffect
+  useEffect(() => {
+    console.log('トークンリフレッシュ用のuseEffectが実行されました');
+    const tokenRefreshInterval = setInterval(async () => {
+      console.log('トークン有効期限チェックを実行します');
+      const newToken = await checkTokenExpiration();
+      if (newToken) {
+        console.log('トークンが更新されました:', newToken.substring(0, 10) + '...');
+      } else {
+        console.log('トークンの更新は不要または失敗しました');
+      }
+    }, 60000);
 
+    return () => {
+      console.log('トークンチェックインターバルをクリアします');
+      clearInterval(tokenRefreshInterval);
+    };
+  }, []);
+  
   // バックエンドとの認証状態の検証
   const checkAuthStatus = async () => {
+    console.log('checkAuthStatus関数が呼び出されました');
     try {
-      console.log('checkAuthStatus called');
       if (!auth.currentUser) {
         console.log('ログイン中のユーザーが存在しません');
         console.log('Authオブジェクトの状態:', auth);
@@ -67,9 +135,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         },
       });
       console.log('バックエンドからのレスポンス:', response.data);
-      return response.data.status === 'success';
+      const isSuccess = response.data.status === 'success';
+      console.log('認証ステータス:', isSuccess);
+      return isSuccess;
     } catch (error: any) {
-      console.error('認証チェック中にエラーが発生:', {
+      console.error('認証チェック中にエラーが発生しました:', {
         name: error.name,
         message: error.message,
         response: error.response?.data,
@@ -85,16 +155,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setCurrentUser,
     checkAuthStatus,
     loading,
+    refreshToken,        // 追加
+    checkTokenExpiration // 追加
   };
+
+  console.log('AuthProviderがレンダリングされました。提供する値:', value);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
 // カスタムフック - 認証コンテキストを使用するためのヘルパー
 export function useAuth() {
+  console.log('useAuthフックが呼び出されました');
   const context = useContext(AuthContext);
   if (!context) {
+    console.error('useAuthはAuthProvider内でのみ使用可能です');
     throw new Error('useAuthはAuthProvider内でのみ使用可能です');
   }
+  console.log('useAuthフックからコンテキストを取得:', context);
   return context;
 }
