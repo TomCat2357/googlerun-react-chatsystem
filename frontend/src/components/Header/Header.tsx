@@ -1,22 +1,6 @@
-import { getAuth } from 'firebase/auth';
-import { useNavigate } from 'react-router-dom';
-import axios from 'axios';  // この行を追加
+import LogoutButton from '../Auth/LogoutButton';
+
 export default function Header() {
-    const navigate = useNavigate();
-
-    const handleLogout = async () => {
-        const auth = getAuth();
-        try {
-            await auth.signOut();
-            await axios.post('http://localhost:8080/app/logout', null, {
-                withCredentials: true
-            });
-            navigate('/');
-        } catch (error) {
-            console.error('Logout error:', error);
-        }
-    };
-
     return (
         <header style={{
             width: '100%',
@@ -43,19 +27,7 @@ export default function Header() {
                 alignItems: 'center',
                 marginRight: '2rem'
             }}>
-                <button
-                    onClick={handleLogout}
-                    style={{
-                        padding: '0.5rem 1rem',
-                        backgroundColor: '#dc3545',
-                        color: 'white',
-                        border: 'none',
-                        borderRadius: '4px',
-                        cursor: 'pointer'
-                    }}
-                >
-                    ログアウト
-                </button>
+                <LogoutButton />
             </div>
         </header>
     );
