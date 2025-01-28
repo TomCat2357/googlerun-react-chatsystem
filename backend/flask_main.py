@@ -1,15 +1,14 @@
 from flask import Flask, request, Response, jsonify, make_response
 from flask_cors import CORS
-import firebase_admin
 from firebase_admin import auth, credentials
-import logging
 from dotenv import load_dotenv
 from functools import wraps
-import os
-from typing import Dict, Union, Optional, Tuple, Callable, Any
+import os, json, logging, firebase_admin
+from typing import Dict, Union, Optional, Tuple, Callable, Any, List
+from litellm import completion, token_counter
 
 # .envファイルを読み込み
-load_dotenv()
+load_dotenv('./config/.env')
 
 # ロギング設定
 logging.basicConfig(
@@ -34,6 +33,35 @@ CORS(
     allow_headers=["Content-Type", "Authorization"],
 )
 
+def get_api_key_for_model(model: str) -> Optional[str]:
+    """モデル名からソース名を抽出してAPIキーを取得"""
+    source = model.split('/')[0] if '/' in model else model
+    return json.loads(os.getenv("MODEL_API_KEYS", "{}")).get(source, '')
+
+def common_message_function(
+    *, model: str, messages: List, stream: bool = False, **kwargs
+):
+    if stream:
+
+        def chat_stream():
+            for i, text in enumerate(
+                completion(messages=messages, model=model, stream=True, **kwargs)
+            ):
+                # 先行して実行することでいち早くエラーを引き起こさせる。
+                if not i:
+                    yield
+                yield text["choices"][0]["delta"].get("content", "") or ""
+
+        cs = chat_stream()
+        # これでif not i: yieldの処理を行わせる。そのためにはcompletionの処理が実行されて、エラーが起きるとしたらここで起きる。
+        cs.__next__()
+        return cs
+    else:
+        return completion(messages=messages, model=model, stream=False, **kwargs)[
+            "choices"
+        ][0]["message"]["content"]
+
+
 
 def require_auth(function: Callable) -> Callable:
     @wraps(function)
@@ -51,15 +79,40 @@ def require_auth(function: Callable) -> Callable:
             decoded_token: Dict = auth.verify_id_token(token, clock_skew_seconds=60)
 
             # デコレートされた関数にトークン情報を渡す
-            response: Tuple[Response, int] = function(decoded_token, *args, **kwargs)
+            response : Response = function(decoded_token, *args, **kwargs)
 
             return response
-
         except Exception as e:
             logger.error("認証エラー: %s", str(e), exc_info=True)
-            return jsonify({"error": str(e)}), 401
+            response : Response = make_response(jsonify({"error": str(e)}))
+            response.status_code = 401
+            return response
 
     return decorated_function
+
+@app.route("/app/models", methods=["GET"])
+@require_auth
+def get_models(decoded_token: Dict) -> Response:
+    """
+    環境変数 MODELS に記載されているモデル一覧を返すエンドポイント
+    """
+    try:
+        logger.info("モデル一覧取得処理を開始")
+        raw_models = os.getenv("MODELS", "")
+        logger.info(f"環境変数 MODELS の値: {raw_models}")
+        # MODELS をカンマ区切りで分割し、strip() で前後空白を除去
+        model_list = [m.strip() for m in raw_models.split(",") if m.strip()]
+        logger.info(f"モデル一覧: {model_list}")
+
+        response : Response = make_response(jsonify({"models": model_list}))
+        response.status_code = 200
+        return response
+
+    except Exception as e:
+        logger.error(f"モデル一覧取得中にエラーが発生しました: {e}", exc_info=True)
+        error_response : Response = make_response(jsonify({"error": str(e)}))
+        error_response.status_code = 500
+        return error_response
 
 
 @app.route("/app/verify-auth", methods=["GET"])
@@ -82,14 +135,53 @@ def verify_auth(decoded_token: Dict) -> Tuple[Response, int]:
                 "uid": decoded_token.get("uid"),
             },
         }
-
-        response: Response = make_response(jsonify(response_data))
-        logger.info("認証成功。正常なレスポンスを送信")
-        return response, 200
-
+        logger.info("認証検証完了")
+        renponse : Response = make_response(jsonify(response_data))
+        renponse.status_code = 200
+        return renponse
     except Exception as e:
         logger.error("認証エラー: %s", str(e), exc_info=True)
-        return jsonify({"error": str(e)}), 401
+        response : Response = make_response(jsonify({"error": str(e)}))
+        response.status_code = 401
+        return response
+
+@app.route("/app/chat", methods=["POST"])
+@require_auth
+def chat(decoded_token : Dict) -> Response:
+    """チャットエンドポイント"""
+    logger.info("チャットリクエストを処理中")
+    try:
+        data = request.json
+        messages = data.get("messages", [])
+        model = data.get("model")  # モデル情報を取得。デフォルト値を設定
+        logger.info(f"モデル: {model}")
+        if model is None:
+            raise ValueError("モデル情報が提供されていません")
+        model_api_key = get_api_key_for_model(model)
+        
+        # 選択されたモデルを使用してチャット応答を生成
+        logger.info(f"選択されたモデル: {model}")
+        logger.info(f"messages: {messages}")
+
+
+        response = Response(
+            common_message_function(
+                # 取得したモデルを渡す
+                model=model, stream=True, messages=messages,
+                api_key=model_api_key,
+                
+            ),
+            mimetype="text/event-stream",
+            headers={"Cache-Control": "no-cache", "Transfer-Encoding": "chunked"},
+        )
+        response.status_code = 200
+        return response
+
+    except Exception as e:
+        logger.error(f"チャットエラー: {e}", exc_info=True)
+        error_response = make_response(jsonify({"status": "error", "message": str(e)}))
+        error_response.status_code = 500
+        return error_response
 
 
 @app.route("/app/logout", methods=["POST"])
@@ -117,3 +209,24 @@ if __name__ == "__main__":
     app.run(
         port=int(os.getenv("PORT", "8080")), debug=bool(os.getenv("DEBUG", "False"))
     )
+
+@app.route("/app/models", methods=["GET"])
+@require_auth
+def get_models(decoded_token: Dict) -> Response:
+    """
+    環境変数 MODELS に記載されているモデル一覧を返すエンドポイント
+    """
+    try:
+        logger.info("モデル一覧取得処理を開始")
+        raw_models = os.getenv("MODELS", "")
+        # MODELS をカンマ区切りで分割し、strip() で前後空白を除去
+        model_list = [m.strip() for m in raw_models.split(",") if m.strip()]
+
+        response_data = {"models": model_list}
+        return make_response(jsonify(response_data)), 200
+
+    except Exception as e:
+        logger.error(f"モデル一覧取得中にエラーが発生しました: {e}", exc_info=True)
+        error_response = make_response(jsonify({"error": str(e)}))
+        error_response.status_code = 500
+        return error_response
