@@ -33,24 +33,6 @@ CORS(
     allow_headers=["Content-Type", "Authorization"],
 )
 
-def get_token_from_request() -> Optional[str]:
-    """
-    リクエストヘッダーまたはクッキーからトークンを取得
-
-    Returns:
-        Optional[str]: 取得したトークン。見つからない場合はNone
-    """
-    logger.debug("get_token_from_request関数が呼び出されました")
-    auth_header: Optional[str] = request.headers.get("Authorization")
-    if auth_header and auth_header.startswith("Bearer "):
-        # Bearerトークン形式で送られている場合
-        ret_token: str = auth_header.split("Bearer ")[1]
-        logger.info("ヘッダーからトークンを取得: %s", ret_token[:10])
-    else:
-        # ヘッダーに含まれていなければCookieから取得
-        ret_token: Optional[str] = request.cookies.get("access_token")
-        logger.info("クッキーからトークンを取得: %s", ret_token[:10] if ret_token else None)
-    return ret_token
 
 @app.route("/app/verify-auth", methods=["GET"])
 def verify_auth() -> Response:
@@ -63,17 +45,18 @@ def verify_auth() -> Response:
     try:
         logger.info("認証検証開始")
 
-        token: Optional[str] = get_token_from_request()
-        if not token:
+        auth_header: Optional[str] = request.headers.get("Authorization")
+        if not auth_header or not auth_header.startswith("Bearer "):
             logger.warning("トークンが見つかりません。認証エラーを返します")
             return jsonify({"error": "認証が必要です"}), 401
 
+        token: str = auth_header.split("Bearer ")[1]
         logger.info("受信トークン(先頭10文字): %s", token[:10])
+        
         # Firebase Admin SDKでトークンを検証
         decoded_token: Dict = auth.verify_id_token(token, clock_skew_seconds=60)
         logger.info("トークンの復号化成功。ユーザー: %s", decoded_token.get("email"))
 
-        # 認証成功時のレスポンスデータ
         response_data: Dict[str, Union[str, Dict]] = {
             "status": "success",
             "user": {
@@ -82,17 +65,13 @@ def verify_auth() -> Response:
             },
         }
 
-        # レスポンスの作成とクッキーの設定
         response: Response = make_response(jsonify(response_data))
-        
         logger.info("認証成功。正常なレスポンスを送信")
         return response
 
     except Exception as e:
-        # 例外発生時は401エラーを返す
         logger.error("認証エラー: %s", str(e), exc_info=True)
         return jsonify({"error": str(e)}), 401
-
 @app.route("/app/logout", methods=["POST"])
 def logout() -> Response:
     """
