@@ -82,7 +82,10 @@ export const ChatContainer: React.FC = () => {
       }
     };
     fetchModels();
-  }, [token]);
+  }, 
+  //[token],
+  [currentUser],
+);
 
   const sendMessage = async () => {
     if (!input.trim() || isProcessing || !token) return;
