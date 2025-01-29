@@ -187,56 +187,69 @@ const ChatContainer = () => {
   
 
   return (
-    <div className="flex flex-col h-full bg-white rounded-lg shadow">
-      <div ref={messageContainerRef} className="flex-1 overflow-y-auto p-4 space-y-4">
-        {messages.map((message, index) => (
-          <div
-            key={index}
-            className={`p-2 rounded-lg ${
-              message.role === 'user'
-                ? 'bg-blue-100 ml-auto max-w-[80%]'
-                : 'bg-gray-100 mr-auto max-w-[80%]'
-            }`}
+    <div className="flex h-screen bg-gray-100">
+      {/* サイドバー */}
+      <div className="w-64 bg-white shadow-lg">
+        <div className="p-4">
+          <h2 className="text-lg font-semibold mb-4">モデル選択</h2>
+          <select
+            value={selectedModel}
+            onChange={(e) => setSelectedModel(e.target.value)}
+            className="w-full p-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
           >
-            {message.content}
-          </div>
-        ))}
+            {models.map((m) => (
+              <option key={m} value={m}>
+                {m}
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
 
-      <div className="p-2">
-        <label className="mr-2">モデル:</label>
-        <select
-          value={selectedModel}
-          onChange={(e) => setSelectedModel(e.target.value)}
-          className="p-1 border rounded"
+      {/* メインチャットエリア */}
+      <div className="flex-1 flex flex-col h-full">
+        {/* メッセージ表示エリア */}
+        <div
+          ref={messageContainerRef}
+          className="flex-1 overflow-y-auto p-4 space-y-4"
         >
-          {models.map((m) => (
-            <option key={m} value={m}>{m}</option>
+          {messages.map((message, index) => (
+            <div
+              key={index}
+              className={`p-2 rounded-lg ${
+                message.role === 'user'
+                  ? 'bg-blue-100 ml-auto max-w-[80%]'
+                  : 'bg-gray-100 mr-auto max-w-[80%]'
+              }`}
+            >
+              {message.content}
+            </div>
           ))}
-        </select>
-      </div>
+        </div>
 
-      <div className="border-t p-4">
-        <div className="flex space-x-2">
-          <textarea
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyPress={handleKeyPress}
-            className="flex-1 p-2 border rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
-            placeholder="メッセージを入力..."
-            rows={2}
-            disabled={isProcessing}
-          />
-          <button
-            onClick={isProcessing ? stopGeneration : sendMessage}
-            className={`px-4 py-2 rounded-lg ${
-              isProcessing
-                ? 'bg-red-500 hover:bg-red-600'
-                : 'bg-blue-500 hover:bg-blue-600'
-            } text-white transition-colors`}
-          >
-            {isProcessing ? '停止' : '送信'}
-          </button>
+        {/* 入力エリア */}
+        <div className="border-t p-4 bg-white">
+          <div className="flex space-x-2">
+            <textarea
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyPress={handleKeyPress}
+              className="flex-1 p-2 border rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
+              placeholder="メッセージを入力..."
+              rows={2}
+              disabled={isProcessing}
+            />
+            <button
+              onClick={isProcessing ? stopGeneration : sendMessage}
+              className={`px-4 py-2 rounded-lg ${
+                isProcessing
+                  ? 'bg-red-500 hover:bg-red-600'
+                  : 'bg-blue-500 hover:bg-blue-600'
+              } text-white transition-colors`}
+            >
+              {isProcessing ? '停止' : '送信'}
+            </button>
+          </div>
         </div>
       </div>
     </div>
