@@ -5,7 +5,7 @@ import LoginPage from './components/Login/LoginPage';
 import ProtectedRoute from './routing/ProtectedRoute';
 import { AuthProvider } from './contexts/AuthContext';
 import LoadingHandler from './components/Common/LoadingHandler';
-import { ChatContainer } from './components/Chat/ChatContainer';  // 追加
+import ChatContainer from './components/Chat/ChatContainer';  // 追加
 
 export default function App() {
   return (

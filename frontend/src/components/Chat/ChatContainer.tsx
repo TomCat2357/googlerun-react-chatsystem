@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Message, ChatRequest } from '../../types/apiTypes';
 import { useAuth } from '../../contexts/AuthContext';
 
-export const ChatContainer: React.FC = () => {
+const ChatContainer = () => {
   const { currentUser } = useAuth();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
@@ -83,9 +83,9 @@ export const ChatContainer: React.FC = () => {
     };
     fetchModels();
   }, 
-  //[token],
-  [currentUser],
-);
+  [token],
+  //[currentUser],
+)
 
   const sendMessage = async () => {
     if (!input.trim() || isProcessing || !token) return;
@@ -242,3 +242,4 @@ export const ChatContainer: React.FC = () => {
     </div>
   );
 };
+export default ChatContainer;
