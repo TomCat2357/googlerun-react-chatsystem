@@ -14,6 +14,7 @@ interface ChatHistory {
 // チャットコンテナのメインコンポーネント
 const ChatContainer = () => {
   // ステート変数の定義
+  const [currentChatId, setCurrentChatId] = useState<number | null>(null);// 現在のチャットID
   const { currentUser } = useAuth();
   const [messages, setMessages] = useState<Message[]>([]); // チャットメッセージの配列
   const [input, setInput] = useState(''); // ユーザー入力テキスト
@@ -114,11 +115,18 @@ const ChatContainer = () => {
     fetchModels();
   }, [token]);
 
-  const saveChatHistory = async (currentMessages: Message[]) => {
+  const saveChatHistory = async (currentMessages: Message[],chatId: number | null) => {
     if (currentMessages.length === 0) return;
-
+    
+    const newChatId = chatId ?? Date.now();
+    // 新規のチャットIDがまだ設定されていなければ、現在時刻をIDとして設定
+    if (!currentChatId) {
+      setCurrentChatId(newChatId);
+    }
+    
+    
     const historyItem: ChatHistory = {
-      id: Date.now(),
+      id: newChatId,
       title: currentMessages[0].content.slice(0, 10) + '...',
       messages: [...currentMessages],
       date: new Date().toISOString(),
@@ -135,9 +143,7 @@ const ChatContainer = () => {
         const histories = (e.target as IDBRequest).result as ChatHistory[];
         
         // 重複をチェックして新しい履歴のみを追加
-        const existingIndex = histories.findIndex(h => 
-          h.messages[0]?.content === historyItem.messages[0]?.content
-        );
+        const existingIndex = histories.findIndex((h) => h.id === chatId);
         let updatedHistories = [...histories];
         
         if (existingIndex !== -1) {
@@ -189,6 +195,7 @@ const ChatContainer = () => {
 
   // 選択したチャット履歴を復元する関数
   const restoreHistory = (history: ChatHistory) => {
+    setCurrentChatId(history.id);
     setMessages(history.messages);
     // 履歴の更新や並び替えは行わない
   };
@@ -199,6 +206,8 @@ const ChatContainer = () => {
 
     try {
       setIsProcessing(true);
+
+
       const newUserMessage: Message = { role: 'user', content: input.trim() };
 
       // 1. まず、ユーザーメッセージを既存messagesに加えた配列を自前で作る
@@ -261,7 +270,7 @@ const ChatContainer = () => {
         }
       }
       updatedMessages[updatedMessages.length - 1].content = assistantMessage;
-      await saveChatHistory(updatedMessages);  
+      await saveChatHistory(updatedMessages, currentChatId);  
       }
 
       // 4. 全て受信し終わった段階で、上記updatedMessagesには
@@ -304,6 +313,7 @@ const ChatContainer = () => {
   // チャットをクリアする関数
   const clearChat = () => {
     setMessages([]);
+    setCurrentChatId(null);
   };
 
 // サイドバーの既存のコードの中で、clearChatボタンの下に追加
