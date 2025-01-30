@@ -306,6 +306,53 @@ const ChatContainer = () => {
     setMessages([]);
   };
 
+// サイドバーの既存のコードの中で、clearChatボタンの下に追加
+
+// 履歴のダウンロード関数を追加
+const downloadHistory = () => {
+  const historyData = JSON.stringify(chatHistories, null, 2);
+  const blob = new Blob([historyData], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `chat-history-${new Date().toISOString()}.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+};
+
+// 履歴のアップロード関数を追加
+const uploadHistory = async (event: React.ChangeEvent<HTMLInputElement>) => {
+  const file = event.target.files?.[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = async (e) => {
+    try {
+      const content = e.target?.result as string;
+      const uploadedHistories = JSON.parse(content) as ChatHistory[];
+      
+      const request = indexedDB.open('ChatHistoryDB', 1);
+      request.onsuccess = (event) => {
+        const db = (event.target as IDBOpenDBRequest).result;
+        const transaction = db.transaction(['chatHistory'], 'readwrite');
+        const store = transaction.objectStore('chatHistory');
+        
+        store.clear().onsuccess = () => {
+          uploadedHistories.forEach(history => store.add(history));
+          setChatHistories(uploadedHistories);
+        };
+      };
+    } catch (error) {
+      console.error('履歴のアップロードエラー:', error);
+    }
+  };
+  reader.readAsText(file);
+};
+
+
+
   // UIレンダリング
   return (
     <div className="flex h-screen bg-gray-100">
@@ -323,14 +370,32 @@ const ChatContainer = () => {
             ))}
           </select>
         </div>
+          <button
+            onClick={clearChat}
+            className="w-full mb-6 p-2 bg-gray-200 hover:bg-gray-300 rounded-lg transition-colors"
+          >
+            新規チャット
+          </button>
 
-        <button
-          onClick={clearChat}
-          className="w-full mb-6 p-2 bg-gray-200 hover:bg-gray-300 rounded-lg transition-colors"
-        >
-          新規チャット
-        </button>
-
+          <div className="flex space-x-2 mb-6">
+            <button
+              onClick={downloadHistory}
+              className="flex-1 p-2 bg-green-500 hover:bg-green-600 text-white rounded-lg transition-colors"
+            >
+              履歴保存
+            </button>
+            <label className="flex-1">
+              <input
+                type="file"
+                accept=".json"
+                onChange={uploadHistory}
+                className="hidden"
+              />
+              <span className="block p-2 bg-purple-500 hover:bg-purple-600 text-white rounded-lg transition-colors text-center cursor-pointer">
+                履歴読込
+              </span>
+            </label>
+          </div>
         {/* チャット履歴 */}
         <div>
           <h2 className="text-lg font-semibold mb-4">最近のチャット</h2>
