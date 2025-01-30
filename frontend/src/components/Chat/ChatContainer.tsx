@@ -81,9 +81,6 @@ const ChatContainer = () => {
       messageContainerRef.current.scrollTop = messageContainerRef.current.scrollHeight;
     }
 
-    if (messages.length > 0) {
-      saveChatHistory();
-    }
   }, [messages]);
 
   // 利用可能なAIモデル一覧の取得
@@ -117,16 +114,15 @@ const ChatContainer = () => {
     fetchModels();
   }, [token]);
 
-  // チャット履歴をIndexedDBに保存する関数
-  const saveChatHistory = async () => {
-    if (messages.length === 0) return;
+  const saveChatHistory = async (currentMessages: Message[]) => {
+    if (currentMessages.length === 0) return;
 
     const historyItem: ChatHistory = {
       id: Date.now(),
-      title: messages[0].content.slice(0, 10) + '...',
-      messages: [...messages],
+      title: currentMessages[0].content.slice(0, 10) + '...',
+      messages: [...currentMessages],
       date: new Date().toISOString(),
-      lastPromptDate: new Date().toISOString() // 新しく追加
+      lastPromptDate: new Date().toISOString()
     };
 
     const request = indexedDB.open('ChatHistoryDB', 1);
@@ -204,14 +200,19 @@ const ChatContainer = () => {
     try {
       setIsProcessing(true);
       const newUserMessage: Message = { role: 'user', content: input.trim() };
-      setMessages(prev => [...prev, newUserMessage]);
+
+      // 1. まず、ユーザーメッセージを既存messagesに加えた配列を自前で作る
+      let updatedMessages: Message[] = [...messages, newUserMessage];
+
+      // 2. それを一度 setMessages しつつ、以降の処理で参照できるように自己変数にも保持
+      setMessages(updatedMessages);
       setInput('');
 
       abortControllerRef.current = new AbortController();
       const signal = abortControllerRef.current.signal;
 
       const chatRequest: ChatRequest = {
-        messages: [...messages, newUserMessage],
+        messages: updatedMessages,
         model: selectedModel
       };
 
@@ -238,25 +239,37 @@ const ChatContainer = () => {
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
-          
+
           const text = decoder.decode(value, { stream: true });
           assistantMessage += text;
-          setMessages(prev => {
-            const newMessages = [...prev];
-            const lastMessage = newMessages[newMessages.length - 1];
-            if (lastMessage && lastMessage.role === 'assistant') {
-              lastMessage.content = assistantMessage;
-              return [...newMessages];
-            } else {
-              return [...newMessages, { role: 'assistant', content: assistantMessage }];
-            }
-          });
+
+          // 3. 受信したテキストをassistantメッセージとしてupdatedMessagesに更新し続ける
+          //    この時点で最新の配列を都度保持しておけば、そのままsaveChatHistoryにも渡せる
+          const lastMessage = updatedMessages[updatedMessages.length - 1];
+          if (lastMessage?.role === 'assistant') {
+            // すでにアシスタントメッセージが末尾にある場合は、それを上書き
+            lastMessage.content = assistantMessage;
+          } else {
+            // まだなければ新規追加
+            updatedMessages = [...updatedMessages, { role: 'assistant', content: assistantMessage }];
+          }
         }
+        // ステート更新
+        setMessages([...updatedMessages]);
+        
+        }
+      await saveChatHistory(updatedMessages);  
       }
-    } catch (error: any) {
+
+      // 4. 全て受信し終わった段階で、上記updatedMessagesには
+      //    「newUserMessage + 最終的なassistantメッセージ」がすでに含まれている
+      //    よってsaveChatHistoryに渡せば、意図した内容で保存される
+      
+
+     catch (error: any) {
       if (error.name !== 'AbortError') {
         console.error('メッセージ送信エラー:', error);
-        setMessages(prev => [
+        setMessages((prev) => [
           ...prev,
           {
             role: 'assistant',
@@ -269,7 +282,6 @@ const ChatContainer = () => {
       abortControllerRef.current = null;
     }
   };
-
   // キーボードイベントハンドラ（Enterキーでメッセージ送信）
   const handleKeyPress = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
