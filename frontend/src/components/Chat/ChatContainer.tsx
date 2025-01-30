@@ -11,44 +11,55 @@ interface ChatHistory {
   lastPromptDate: string; // 新しく追加
 }
 
+// チャットコンテナのメインコンポーネント
 const ChatContainer = () => {
+  // ステート変数の定義
   const { currentUser } = useAuth();
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [input, setInput] = useState('');
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [models, setModels] = useState<string[]>([]);
-  const [selectedModel, setSelectedModel] = useState<string>('');
-  const [chatHistories, setChatHistories] = useState<ChatHistory[]>([]);
-  const messageContainerRef = useRef<HTMLDivElement>(null);
-  const abortControllerRef = useRef<AbortController | null>(null);
-  const [token, setToken] = useState<string>('');
+  const [messages, setMessages] = useState<Message[]>([]); // チャットメッセージの配列
+  const [input, setInput] = useState(''); // ユーザー入力テキスト
+  const [isProcessing, setIsProcessing] = useState(false); // メッセージ処理中フラグ
+  const [models, setModels] = useState<string[]>([]); // 利用可能なAIモデルリスト
+  const [selectedModel, setSelectedModel] = useState<string>(''); // 選択中のAIモデル
+  const [chatHistories, setChatHistories] = useState<ChatHistory[]>([]); // チャット履歴
+  const messageContainerRef = useRef<HTMLDivElement>(null); // メッセージ表示エリアのref
+  const abortControllerRef = useRef<AbortController | null>(null); // API通信中断用コントローラー
+  const [token, setToken] = useState<string>(''); // 認証トークン
 
-  // IndexedDB初期化
+  // IndexedDBの初期化とチャット履歴の読み込みを行うEffect
   useEffect(() => {
     const initDB = async () => {
+      // データベースを開く（存在しない場合は作成）
+      // 'ChatHistoryDB'という名前でバージョン1のデータベースを作成
       const request = indexedDB.open('ChatHistoryDB', 1);
       
+      // データベース接続エラー時の処理
       request.onerror = (event) => {
         console.error('IndexedDB初期化エラー:', (event.target as IDBRequest).error);
       };
       
+      // データベースのバージョンアップグレード時の処理
       request.onupgradeneeded = (event) => {
         const db = (event.target as IDBOpenDBRequest).result;
+        // 'chatHistory'オブジェクトストアが存在しない場合のみ作成
+        // keyPathとして'id'を指定し、一意のキーとして使用
         if (!db.objectStoreNames.contains('chatHistory')) {
           db.createObjectStore('chatHistory', { keyPath: 'id' });
         }
       };
 
+      // データベース接続成功時の処理
       request.onsuccess = () => {
         console.log('IndexedDB初期化成功');
+        // チャット履歴を読み込む
         loadChatHistories();
       };
     };
     
+    // 初期化処理の実行
     initDB();
   }, []);
 
-  // トークン取得
+  // 認証トークンの取得処理
   useEffect(() => {
     const fetchToken = async () => {
       if (currentUser) {
@@ -64,7 +75,7 @@ const ChatContainer = () => {
     fetchToken();
   }, [currentUser]);
 
-  // メッセージ自動スクロールと履歴保存
+  // メッセージの自動スクロールと履歴保存
   useEffect(() => {
     if (messageContainerRef.current) {
       messageContainerRef.current.scrollTop = messageContainerRef.current.scrollHeight;
@@ -75,7 +86,7 @@ const ChatContainer = () => {
     }
   }, [messages]);
 
-  // モデル一覧取得
+  // 利用可能なAIモデル一覧の取得
   useEffect(() => {
     const fetchModels = async () => {
       if (!token) return;
@@ -96,7 +107,7 @@ const ChatContainer = () => {
         const data = await response.json();
         if (Array.isArray(data.models)) {
           setModels(data.models);
-          setSelectedModel(data.models[0] || '');
+          setSelectedModel(data.models[0]);
         }
       } catch (error) {
         console.error('モデル一覧取得エラー:', error);
@@ -106,6 +117,7 @@ const ChatContainer = () => {
     fetchModels();
   }, [token]);
 
+  // チャット履歴をIndexedDBに保存する関数
   const saveChatHistory = async () => {
     if (messages.length === 0) return;
 
@@ -157,6 +169,7 @@ const ChatContainer = () => {
     };
   };
 
+  // IndexedDBからチャット履歴を読み込む関数
   const loadChatHistories = async () => {
     const request = indexedDB.open('ChatHistoryDB', 1);
     request.onsuccess = (event) => {
@@ -178,12 +191,13 @@ const ChatContainer = () => {
     };
   };
 
-  // restoreHistory関数の修正 - メッセージの復元のみを行い、順序は変更しない
+  // 選択したチャット履歴を復元する関数
   const restoreHistory = (history: ChatHistory) => {
     setMessages(history.messages);
     // 履歴の更新や並び替えは行わない
   };
 
+  // メッセージ送信処理
   const sendMessage = async () => {
     if (!input.trim() || isProcessing || !token) return;
 
@@ -256,6 +270,7 @@ const ChatContainer = () => {
     }
   };
 
+  // キーボードイベントハンドラ（Enterキーでメッセージ送信）
   const handleKeyPress = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -263,6 +278,7 @@ const ChatContainer = () => {
     }
   };
 
+  // メッセージ生成を停止する関数
   const stopGeneration = () => {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
@@ -270,10 +286,12 @@ const ChatContainer = () => {
     }
   };
 
+  // チャットをクリアする関数
   const clearChat = () => {
     setMessages([]);
   };
 
+  // UIレンダリング
   return (
     <div className="flex h-screen bg-gray-100">
       {/* サイドバー */}
