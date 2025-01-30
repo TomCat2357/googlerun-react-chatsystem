@@ -236,28 +236,31 @@ const ChatContainer = () => {
       const decoder = new TextDecoder();
 
       if (reader) {
+        // 最初にアシスタントの空メッセージを追加
+        updatedMessages = [...updatedMessages, { role: 'assistant', content: '' }];
+        setMessages(updatedMessages);
+        
+
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
 
           const text = decoder.decode(value, { stream: true });
           assistantMessage += text;
+          
 
-          // 3. 受信したテキストをassistantメッセージとしてupdatedMessagesに更新し続ける
-          //    この時点で最新の配列を都度保持しておけば、そのままsaveChatHistoryにも渡せる
-          const lastMessage = updatedMessages[updatedMessages.length - 1];
-          if (lastMessage?.role === 'assistant') {
-            // すでにアシスタントメッセージが末尾にある場合は、それを上書き
-            lastMessage.content = assistantMessage;
-          } else {
-            // まだなければ新規追加
-            updatedMessages = [...updatedMessages, { role: 'assistant', content: assistantMessage }];
-          }
+          // 即座に画面に反映されるよう、setMessagesを都度呼び出す
+          setMessages(messages => {
+            const newMessages = [...messages];
+            newMessages[newMessages.length - 1] = {
+              role: 'assistant',
+              content: assistantMessage
+            };
+            return newMessages;
+          });
         }
-        // ステート更新
-        setMessages([...updatedMessages]);
-        
-        }
+      }
+      updatedMessages[updatedMessages.length - 1].content = assistantMessage;
       await saveChatHistory(updatedMessages);  
       }
 
