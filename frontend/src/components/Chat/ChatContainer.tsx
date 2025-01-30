@@ -161,7 +161,7 @@ const ChatContainer = () => {
         // 最終プロンプト時間でソートして最新5件のみを保持
         updatedHistories = updatedHistories
           .sort((a, b) => new Date(b.lastPromptDate).getTime() - new Date(a.lastPromptDate).getTime())
-          .slice(0, 5);
+          .slice(0, 30);
         
         store.clear().onsuccess = () => {
           updatedHistories.forEach(history => store.add(history));
@@ -183,7 +183,7 @@ const ChatContainer = () => {
         const histories = (e.target as IDBRequest).result as ChatHistory[];
         const sortedHistories = histories
           .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-          .slice(0, 5);
+          .slice(0, 30);
         setChatHistories(sortedHistories);
       };
     };
@@ -365,11 +365,11 @@ const uploadHistory = async (event: React.ChangeEvent<HTMLInputElement>) => {
 
   // UIレンダリング
   return (
-    <div className="flex h-screen bg-gray-100">
-      {/* サイドバー */}
-      <div className="w-64 bg-white shadow-lg p-4">
-        <div className="mb-6">
-          <h2 className="text-lg font-semibold mb-4">モデル選択</h2>
+    <div className="flex flex-1 h-[calc(100vh-64px)] mt-10 overflow-hidden">
+    {/* サイドバー */}
+    <div className="w-64 bg-white shadow-lg p-4 overflow-y-auto">
+      <div className="mb-6">
+        <h2 className="text-lg font-semibold mb-4">モデル選択</h2>
           <select
             value={selectedModel}
             onChange={(e) => setSelectedModel(e.target.value)}

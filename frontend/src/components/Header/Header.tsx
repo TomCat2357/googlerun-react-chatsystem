@@ -7,25 +7,26 @@ export default function Header() {
             position: 'fixed',
             top: 0,
             left: 0,
-            padding: '1rem',
+            padding: '0.5rem',
             backgroundColor: '#f8f9fa',
             display: 'flex',
             justifyContent: 'space-between',
             alignItems: 'center',
             boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
-            zIndex: 1000
+            zIndex: 1000,
+            height : '48px'
         }}>
             <div style={{
-                fontSize: '1.2rem',
+                fontSize: '1.0rem',
                 fontWeight: 'bold',
-                marginLeft: '2rem'
+                marginLeft: '1rem'
             }}>
                 メインUI
             </div>
             <div style={{
                 display: 'flex',
                 alignItems: 'center',
-                marginRight: '2rem'
+                marginRight: '1rem'
             }}>
                 <LogoutButton />
             </div>
