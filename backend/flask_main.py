@@ -4,6 +4,7 @@ from firebase_admin import auth, credentials
 from dotenv import load_dotenv
 from functools import wraps
 import os, json, logging, firebase_admin
+from PIL import Image
 from typing import Dict, Union, Optional, Tuple, Callable, Any, List
 from litellm import completion, token_counter
 
@@ -203,6 +204,11 @@ def logout() -> Response:
         return jsonify({"error": str(e)}), 401
 
 
+
+
+
+
+
 if __name__ == "__main__":
     # Flaskアプリ起動時のログを出力
     logger.info("Flaskアプリを起動します")
@@ -210,23 +216,3 @@ if __name__ == "__main__":
         port=int(os.getenv("PORT", "8080")), debug=bool(os.getenv("DEBUG", "False"))
     )
 
-@app.route("/app/models", methods=["GET"])
-@require_auth
-def get_models(decoded_token: Dict) -> Response:
-    """
-    環境変数 MODELS に記載されているモデル一覧を返すエンドポイント
-    """
-    try:
-        logger.info("モデル一覧取得処理を開始")
-        raw_models = os.getenv("MODELS", "")
-        # MODELS をカンマ区切りで分割し、strip() で前後空白を除去
-        model_list = [m.strip() for m in raw_models.split(",") if m.strip()]
-
-        response_data = {"models": model_list}
-        return make_response(jsonify(response_data)), 200
-
-    except Exception as e:
-        logger.error(f"モデル一覧取得中にエラーが発生しました: {e}", exc_info=True)
-        error_response = make_response(jsonify({"error": str(e)}))
-        error_response.status_code = 500
-        return error_response
