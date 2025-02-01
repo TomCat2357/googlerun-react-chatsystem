@@ -13,7 +13,7 @@ load_dotenv('./config/.env')
 
 # ロギング設定
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=logging.INFO,
     format="%(asctime)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s",
     handlers=[logging.StreamHandler(), logging.FileHandler("app.log")],
 )
@@ -161,7 +161,7 @@ def chat(decoded_token: Dict) -> Response:
         model_api_key = get_api_key_for_model(model)
 
         # ここで特定のキーワードをチェックする
-        error_keyword = "trigger_error"  # 例：このキーワードが含まれるとエラー発生
+        error_keyword = "debug_trigger_error"  # 例：このキーワードが含まれるとエラー発生
         for msg in messages:
             content = msg.get("content", "")
             #logger.debug('メッセージの内容: %s', content)
@@ -174,21 +174,17 @@ def chat(decoded_token: Dict) -> Response:
             # ユーザーのメッセージで、画像がアップロードされている場合
             if msg.get("role") == "user" and msg.get("images"):
                 parts = []
-                # テキスト部分がある場合、"text"オブジェクトとして追加
                 if msg.get("content"):
-                    parts.append({
-                        "type": "text",
-                        "text": msg["content"]
-                    })
-                # 各画像について、"image_base64"として追加
+                    parts.append({"type": "text", "text": msg["content"]})
                 for image in msg["images"]:
+                    # image_base64 ではなく image_url を使い、内部に url キーを設定する
                     parts.append({
-                        "type": "image_base64",
-                        "base64": image
+                        "type": "image_url",
+                        "image_url": {"url": image}
                     })
-                # 変換後の内容を設定し、不要な"images"フィールドは削除
                 msg["content"] = parts
                 msg.pop("images", None)
+
             transformed_messages.append(msg)
         
         logger.info(f"変換後のmessages: {transformed_messages}")
