@@ -2,58 +2,154 @@ import React, { useState, useRef, useEffect, ChangeEvent } from 'react';
 import { Message, ChatRequest, ChatHistory } from '../../types/apiTypes';
 import { useAuth } from '../../contexts/AuthContext';
 
-// チャットコンテナのメインコンポーネント
-const ChatContainer = () => {
+// 環境変数から定数を取得（Vite の場合、import.meta.env を利用）
+const MAX_IMAGES = Number(import.meta.env.VITE_MAX_IMAGES) || 5; // 例：最大5枚
+const MAX_LONG_EDGE = Number(import.meta.env.VITE_MAX_LONG_EDGE) || 1568; // 例：最大1568px
+const MAX_IMAGE_SIZE = Number(import.meta.env.VITE_MAX_IMAGE_SIZE) || (5 * 1024 * 1024); // 例：最大5MB（バイト）
+
+/**
+ * processImageFile
+ *
+ * 画像ファイルを読み込み、FileReader で base64 文字列を取得し、
+ * その後、長辺制限と容量制限を適用した dataURL を返す関数です。
+ *
+ * ※ この関数内で、まず以下のコードが実行されます。
+ * 
+ * const reader = new FileReader();
+ * reader.onload = (event) => {
+ *   if (event.target?.result) {
+ *     resolve(event.target.result as string);
+ *   } else {
+ *     reject(new Error('Failed to read file'));
+ *   }
+ * };
+ *
+ * この部分がファイル読み込み処理として必要となります。
+ */
+const processImageFile = (file: File): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    console.log('[processImageFile] 処理開始：', file.name);
+    // --- FileReader によるファイル読み込み（base64 変換） ---
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      if (event.target?.result) {
+        const dataUrl = event.target.result as string;
+        // 読み込んだ dataURL を元に画像オブジェクトを生成
+        const image = new Image();
+        image.onload = () => {
+          console.log('[processImageFile] 画像読み込み完了：', file.name);
+          let { naturalWidth: width, naturalHeight: height } = image;
+          console.log(`[processImageFile] 元サイズ: ${width}x${height}`);
+          // 長辺判定とリサイズ（必要な場合）
+          const longEdge = Math.max(width, height);
+          let scale = 1;
+          if (longEdge > MAX_LONG_EDGE) {
+            scale = MAX_LONG_EDGE / longEdge;
+            width = Math.floor(width * scale);
+            height = Math.floor(height * scale);
+            console.log(`[processImageFile] リサイズ実施：新サイズ ${width}x${height}`);
+          } else {
+            console.log('[processImageFile] リサイズ不要');
+          }
+          // キャンバスに描画
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            reject(new Error('キャンバスの取得に失敗しました'));
+            return;
+          }
+          ctx.drawImage(image, 0, 0, width, height);
+  
+          // JPEG形式で出力（初期品質 0.85）
+          let quality = 0.85;
+          const minQuality = 0.3;
+          const processCanvas = () => {
+            const newDataUrl = canvas.toDataURL('image/jpeg', quality);
+            // dataURL を Blob に変換してサイズチェック
+            const arr = newDataUrl.split(',');
+            const byteString = atob(arr[1]);
+            const buffer = new ArrayBuffer(byteString.length);
+            const intArray = new Uint8Array(buffer);
+            for (let i = 0; i < byteString.length; i++) {
+              intArray[i] = byteString.charCodeAt(i);
+            }
+            const blob = new Blob([buffer], { type: 'image/jpeg' });
+            console.log(`[processImageFile] 現在の品質 ${quality}, Blobサイズ: ${blob.size} bytes`);
+            if (blob.size > MAX_IMAGE_SIZE && quality > minQuality) {
+              quality -= 0.1;
+              console.log(`[processImageFile] サイズ超過のため再圧縮：新品質 ${quality}`);
+              processCanvas();
+            } else {
+              console.log('[processImageFile] 画像処理完了');
+              resolve(newDataUrl);
+            }
+          };
+          processCanvas();
+        };
+        image.onerror = () => {
+          console.error('[processImageFile] 画像読み込みエラー', file.name);
+          reject(new Error('画像読み込みエラー'));
+        };
+        image.src = dataUrl;
+      } else {
+        reject(new Error('Failed to read file'));
+      }
+    };
+    reader.onerror = () => {
+      console.error('[processImageFile] ファイル読み込みエラー', file.name);
+      reject(new Error('ファイル読み込みエラー'));
+    };
+    reader.readAsDataURL(file);
+  });
+};
+
+const ChatContainer: React.FC = () => {
   // ==========================
-  //  ステートやRefの定義
+  //  State, Ref の定義
   // ==========================
-  const [currentChatId, setCurrentChatId] = useState<number | null>(null); // 現在のチャットID
+  const [currentChatId, setCurrentChatId] = useState<number | null>(null);
   const { currentUser } = useAuth();
-  const [messages, setMessages] = useState<Message[]>([]); // チャットメッセージ
-  const [input, setInput] = useState('');                  // テキスト入力
-  const [isProcessing, setIsProcessing] = useState(false); // メッセージ処理中フラグ
-  const [models, setModels] = useState<string[]>([]);      // 利用可能なAIモデル一覧
-  const [selectedModel, setSelectedModel] = useState<string>(''); // 選択中のAIモデル
-  const [chatHistories, setChatHistories] = useState<ChatHistory[]>([]); // チャット履歴
-  const messageContainerRef = useRef<HTMLDivElement>(null);  // メッセージ表示エリアのref
-  const abortControllerRef = useRef<AbortController | null>(null); // API通信中断用
-  const [token, setToken] = useState<string>('');           // 認証トークン
-
-  // 複数画像の一時保管用: base64文字列を配列で保持
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [input, setInput] = useState('');
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [models, setModels] = useState<string[]>([]);
+  const [selectedModel, setSelectedModel] = useState<string>('');
+  const [chatHistories, setChatHistories] = useState<ChatHistory[]>([]);
+  const messageContainerRef = useRef<HTMLDivElement>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const [token, setToken] = useState<string>('');
   const [selectedImagesBase64, setSelectedImagesBase64] = useState<string[]>([]);
-
-  // ==========================
-  //  追加: エラーメッセージ用
-  // ==========================
   const [errorMessage, setErrorMessage] = useState<string>('');
-
+  
   // ==========================
-  //  IndexedDB初期化
+  //  IndexedDB 初期化とチャット履歴の読み込み
   // ==========================
   useEffect(() => {
     const initDB = async () => {
       const request = indexedDB.open('ChatHistoryDB', 1);
-
+  
       request.onerror = (event) => {
         console.error('IndexedDB初期化エラー:', (event.target as IDBRequest).error);
       };
-
+  
       request.onupgradeneeded = (event) => {
         const db = (event.target as IDBOpenDBRequest).result;
         if (!db.objectStoreNames.contains('chatHistory')) {
           db.createObjectStore('chatHistory', { keyPath: 'id' });
         }
       };
-
+  
       request.onsuccess = () => {
         console.log('IndexedDB初期化成功');
         loadChatHistories();
       };
     };
-
+  
     initDB();
   }, []);
-
+  
   // ==========================
   //  認証トークンの取得
   // ==========================
@@ -71,7 +167,7 @@ const ChatContainer = () => {
     };
     fetchToken();
   }, [currentUser]);
-
+  
   // ==========================
   //  メッセージ表示エリアの自動スクロール
   // ==========================
@@ -80,7 +176,7 @@ const ChatContainer = () => {
       messageContainerRef.current.scrollTop = messageContainerRef.current.scrollHeight;
     }
   }, [messages]);
-
+  
   // ==========================
   //  利用可能なAIモデル一覧の取得
   // ==========================
@@ -95,11 +191,11 @@ const ChatContainer = () => {
             'Content-Type': 'application/json'
           }
         });
-
+  
         if (!response.ok) {
           throw new Error(`HTTP error! status: ${response.status}`);
         }
-
+  
         const data = await response.json();
         if (Array.isArray(data.models)) {
           setModels(data.models);
@@ -111,9 +207,9 @@ const ChatContainer = () => {
     };
     fetchModels();
   }, [token]);
-
+  
   // ==========================
-  //  IndexedDBから履歴を読み込み
+  //  IndexedDB から履歴を読み込み
   // ==========================
   const loadChatHistories = async () => {
     const request = indexedDB.open('ChatHistoryDB', 1);
@@ -121,7 +217,7 @@ const ChatContainer = () => {
       const db = (event.target as IDBOpenDBRequest).result;
       const transaction = db.transaction(['chatHistory'], 'readonly');
       const store = transaction.objectStore('chatHistory');
-
+  
       store.getAll().onsuccess = (e) => {
         const histories = (e.target as IDBRequest).result as ChatHistory[];
         const sortedHistories = histories
@@ -130,23 +226,23 @@ const ChatContainer = () => {
         setChatHistories(sortedHistories);
       };
     };
-
+  
     request.onerror = (event) => {
       console.error('履歴読み込みエラー:', (event.target as IDBRequest).error);
     };
   };
-
+  
   // ==========================
-  //  IndexedDBに履歴を保存
+  //  IndexedDB に履歴を保存
   // ==========================
   const saveChatHistory = async (currentMessages: Message[], chatId: number | null) => {
     if (currentMessages.length === 0) return;
-
+  
     const newChatId = chatId ?? Date.now();
     if (!currentChatId) {
       setCurrentChatId(newChatId);
     }
-
+  
     const historyItem: ChatHistory = {
       id: newChatId,
       title: currentMessages[0].content.slice(0, 10) + '...',
@@ -154,36 +250,33 @@ const ChatContainer = () => {
       date: new Date().toISOString(),
       lastPromptDate: new Date().toISOString()
     };
-
+  
     const request = indexedDB.open('ChatHistoryDB', 1);
     request.onsuccess = (event) => {
       const db = (event.target as IDBOpenDBRequest).result;
       const transaction = db.transaction(['chatHistory'], 'readwrite');
       const store = transaction.objectStore('chatHistory');
-
+  
       store.getAll().onsuccess = (e) => {
         const histories = (e.target as IDBRequest).result as ChatHistory[];
-
+  
         const existingIndex = histories.findIndex((h) => h.id === chatId);
         let updatedHistories = [...histories];
-
+  
         if (existingIndex !== -1) {
-          // 既存履歴の更新
           updatedHistories[existingIndex] = {
             ...histories[existingIndex],
             messages: historyItem.messages,
             lastPromptDate: historyItem.lastPromptDate
           };
         } else {
-          // 新規履歴の追加
           updatedHistories.push(historyItem);
         }
-
-        // 最新30件のみを保持
+  
         updatedHistories = updatedHistories
           .sort((a, b) => new Date(b.lastPromptDate).getTime() - new Date(a.lastPromptDate).getTime())
           .slice(0, 30);
-
+  
         store.clear().onsuccess = () => {
           updatedHistories.forEach(history => store.add(history));
           setChatHistories(updatedHistories);
@@ -191,7 +284,7 @@ const ChatContainer = () => {
       };
     };
   };
-
+  
   // ==========================
   //  履歴を復元
   // ==========================
@@ -199,7 +292,7 @@ const ChatContainer = () => {
     setCurrentChatId(history.id);
     setMessages(history.messages);
   };
-
+  
   // ==========================
   //  チャットをクリア
   // ==========================
@@ -208,89 +301,70 @@ const ChatContainer = () => {
     setCurrentChatId(null);
     setSelectedImagesBase64([]);
   };
-
+  
   // ==========================
-  //  画像アップロード(複数)
+  //  画像アップロードハンドラー（枚数・長辺・容量制限付き）
   // ==========================
   const handleImageUpload = async (e: ChangeEvent<HTMLInputElement>) => {
+    console.log('[handleImageUpload] ファイル選択イベント発生');
     if (!e.target.files) return;
     const files = Array.from(e.target.files);
-
-    const promises = files.map(file => {
-      return new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = (event) => {
-          if (event.target?.result) {
-            resolve(event.target.result as string);
-          } else {
-            reject(new Error('Failed to read file'));
-          }
-        };
-        reader.onerror = reject;
-        reader.readAsDataURL(file);
-      });
-    });
-
+  
+    // 既に選択されている画像枚数と合わせ、最大枚数を超えないようにする
+    const allowedCount = MAX_IMAGES - selectedImagesBase64.length;
+    if (files.length > allowedCount) {
+      setErrorMessage(`一度にアップロードできる画像は最大 ${MAX_IMAGES} 枚です`);
+      files.splice(allowedCount);
+    }
+  
+    const promises = files.map(file => processImageFile(file));
+  
     try {
       const newBase64s = await Promise.all(promises);
+      console.log('[handleImageUpload] 画像処理完了:', newBase64s);
       setSelectedImagesBase64(prev => [...prev, ...newBase64s]);
     } catch (error) {
-      console.error('画像アップロードエラー:', error);
+      console.error('[handleImageUpload] 画像アップロードエラー:', error);
+      setErrorMessage('画像の処理中にエラーが発生しました');
     }
   };
-
-  // ==========================
-  //  選択画像を個別削除
-  // ==========================
-  const removeImage = (index: number) => {
-    setSelectedImagesBase64((prev) => prev.filter((_, i) => i !== index));
-  };
-
+  
   // ==========================
   //  メッセージ送信
   // ==========================
   const sendMessage = async () => {
-    // 送信前の状態をバックアップするための変数を事前に宣言
     let backupInput = '';
     let backupImages: string[] = [];
     let backupMessages: Message[] = [];
   
-    // 入力テキストも画像も両方空なら送信しない
     if (!input.trim() && selectedImagesBase64.length === 0) return;
-    // 既に処理中 or トークンなし は送信不可
     if (isProcessing || !token) return;
   
-    // エラー表示をリセット
     setErrorMessage('');
   
     try {
       setIsProcessing(true);
   
-      // ---- 送信前の状態をバックアップ ----
+      // 送信前の状態をバックアップ
       backupInput = input;
       backupImages = [...selectedImagesBase64];
       backupMessages = [...messages];
   
-      // ユーザーの新しいメッセージを作成
       const newUserMessage: Message = {
         role: 'user',
         content: input.trim() || '[Images Uploaded]',
         images: selectedImagesBase64.length > 0 ? [...selectedImagesBase64] : []
       };
   
-      // 表示更新: ユーザーメッセージを追加
       let updatedMessages: Message[] = [...messages, newUserMessage];
       setMessages(updatedMessages);
   
-      // 入力欄をクリア
       setInput('');
       setSelectedImagesBase64([]);
   
-      // AbortControllerを用意
       abortControllerRef.current = new AbortController();
       const signal = abortControllerRef.current.signal;
   
-      // バックエンド送信用データ
       const chatRequest: ChatRequest = {
         messages: updatedMessages,
         model: selectedModel
@@ -316,7 +390,6 @@ const ChatContainer = () => {
       const decoder = new TextDecoder();
   
       if (reader) {
-        // アシスタントの空メッセージを先に追加
         updatedMessages = [...updatedMessages, { role: 'assistant', content: '' }];
         setMessages(updatedMessages);
   
@@ -324,11 +397,9 @@ const ChatContainer = () => {
           const { done, value } = await reader.read();
           if (done) break;
   
-          // 逐次メッセージをデコード
           const text = decoder.decode(value, { stream: true });
           assistantMessage += text;
   
-          // リアルタイムで画面に反映
           setMessages((msgs) => {
             const newMsgs = [...msgs];
             newMsgs[newMsgs.length - 1] = {
@@ -340,22 +411,14 @@ const ChatContainer = () => {
         }
       }
   
-      // 最終的なアシスタントメッセージを更新
       updatedMessages[updatedMessages.length - 1].content = assistantMessage;
-  
-      // チャット履歴を保存
       await saveChatHistory(updatedMessages, currentChatId);
-  
     } catch (error: any) {
       if (error.name !== 'AbortError') {
         console.error('メッセージ送信エラー:', error);
-  
-        // ---- エラー時: バックアップから巻き戻す ----
         setMessages(backupMessages);
         setInput(backupInput);
         setSelectedImagesBase64(backupImages);
-  
-        // 3) ポップアップ(モーダル)でエラーを表示
         setErrorMessage(error instanceof Error ? error.message : '不明なエラー');
       }
     } finally {
@@ -364,7 +427,6 @@ const ChatContainer = () => {
     }
   };
   
-
   // ==========================
   //  キー押下時の送信トリガー
   // ==========================
@@ -374,9 +436,9 @@ const ChatContainer = () => {
       sendMessage();
     }
   };
-
+  
   // ==========================
-  //  送信停止
+  //  送信停止（AbortController を利用）
   // ==========================
   const stopGeneration = () => {
     if (abortControllerRef.current) {
@@ -384,7 +446,7 @@ const ChatContainer = () => {
       setIsProcessing(false);
     }
   };
-
+  
   // ==========================
   //  履歴ダウンロード
   // ==========================
@@ -400,26 +462,26 @@ const ChatContainer = () => {
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
   };
-
+  
   // ==========================
   //  履歴アップロード
   // ==========================
-  const uploadHistory = async (event: React.ChangeEvent<HTMLInputElement>) => {
+  const uploadHistory = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
-
+  
     const reader = new FileReader();
     reader.onload = async (e) => {
       try {
         const content = e.target?.result as string;
         const uploadedHistories = JSON.parse(content) as ChatHistory[];
-
+  
         const request = indexedDB.open('ChatHistoryDB', 1);
         request.onsuccess = (event) => {
           const db = (event.target as IDBOpenDBRequest).result;
           const transaction = db.transaction(['chatHistory'], 'readwrite');
           const store = transaction.objectStore('chatHistory');
-
+  
           store.clear().onsuccess = () => {
             uploadedHistories.forEach(history => store.add(history));
             setChatHistories(uploadedHistories);
@@ -431,13 +493,13 @@ const ChatContainer = () => {
     };
     reader.readAsText(file);
   };
-
+  
   // ==========================
-  //  JSXの描画部分
+  //  JSX の描画
   // ==========================
   return (
     <div className="flex flex-1 h-[calc(100vh-64px)] mt-10 overflow-hidden">
-      {/* -- エラーポップアップ（errorMessageが非空なら表示） -- */}
+      {/* エラーポップアップ */}
       {errorMessage && (
         <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50 z-10">
           <div className="bg-white p-6 rounded shadow">
@@ -452,10 +514,9 @@ const ChatContainer = () => {
           </div>
         </div>
       )}
-
+  
       {/* サイドバー */}
       <div className="w-64 bg-white shadow-lg p-4 overflow-y-auto">
-        {/* モデル選択 */}
         <div className="mb-6">
           <h2 className="text-lg font-semibold mb-4">モデル選択</h2>
           <select
@@ -468,14 +529,12 @@ const ChatContainer = () => {
             ))}
           </select>
         </div>
-
         <button
           onClick={clearChat}
           className="w-full mb-6 p-2 bg-gray-200 hover:bg-gray-300 rounded-lg transition-colors"
         >
           新規チャット
         </button>
-
         <div className="flex space-x-2 mb-6">
           <button
             onClick={downloadHistory}
@@ -495,8 +554,6 @@ const ChatContainer = () => {
             </span>
           </label>
         </div>
-
-        {/* チャット履歴一覧 */}
         <div>
           <h2 className="text-lg font-semibold mb-4">最近のチャット</h2>
           <div className="space-y-2">
@@ -515,7 +572,7 @@ const ChatContainer = () => {
           </div>
         </div>
       </div>
-
+  
       {/* メインチャットエリア */}
       <div className="flex-1 flex flex-col h-full">
         {/* メッセージ表示エリア */}
@@ -526,9 +583,7 @@ const ChatContainer = () => {
           {messages.map((message, index) => (
             <div
               key={index}
-              className={`max-w-[80%] ${
-                message.role === 'user' ? 'ml-auto' : 'mr-auto'
-              }`}
+              className={`max-w-[80%] ${message.role === 'user' ? 'ml-auto' : 'mr-auto'}`}
             >
               <div
                 className={`p-4 rounded-lg ${
@@ -537,10 +592,7 @@ const ChatContainer = () => {
                     : 'bg-white border-2 border-gray-200 shadow-sm text-gray-800'
                 }`}
               >
-                {/* テキスト表示 */}
                 <div>{message.content}</div>
-
-                {/* 複数画像を表示 */}
                 {message.images && message.images.length > 0 && (
                   <div className="mt-2 flex flex-wrap gap-2">
                     {message.images.map((img, i) => (
@@ -554,20 +606,16 @@ const ChatContainer = () => {
                   </div>
                 )}
               </div>
-              <div
-                className={`text-xs text-gray-500 mt-1 ${
-                  message.role === 'user' ? 'text-right' : 'text-left'
-                }`}
-              >
+              <div className={`text-xs text-gray-500 mt-1 ${message.role === 'user' ? 'text-right' : 'text-left'}`}>
                 {message.role === 'user' ? 'あなた' : 'アシスタント'}
               </div>
             </div>
           ))}
         </div>
-
+  
         {/* 入力エリア */}
         <div className="border-t p-4 bg-white">
-          {/* 選択画像プレビュー */}
+          {/* 選択された画像プレビュー */}
           {selectedImagesBase64.length > 0 && (
             <div className="flex flex-wrap mb-4 gap-2">
               {selectedImagesBase64.map((imgBase64, i) => (
@@ -579,7 +627,7 @@ const ChatContainer = () => {
                   />
                   <button
                     className="absolute top-0 right-0 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center"
-                    onClick={() => removeImage(i)}
+                    onClick={() => setSelectedImagesBase64(prev => prev.filter((_, index) => index !== i))}
                   >
                     ×
                   </button>
@@ -587,7 +635,6 @@ const ChatContainer = () => {
               ))}
             </div>
           )}
-
           <div className="flex space-x-2">
             <textarea
               value={input}
@@ -598,7 +645,6 @@ const ChatContainer = () => {
               rows={2}
               disabled={isProcessing}
             />
-            {/* 画像アップロードボタン（複数可能） */}
             <label className="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-800 rounded-lg cursor-pointer">
               画像選択
               <input
@@ -610,15 +656,9 @@ const ChatContainer = () => {
                 disabled={isProcessing}
               />
             </label>
-
-            {/* 送信 or 停止 ボタン */}
             <button
               onClick={isProcessing ? stopGeneration : sendMessage}
-              className={`px-4 py-2 rounded-lg ${
-                isProcessing
-                  ? 'bg-red-500 hover:bg-red-600'
-                  : 'bg-blue-500 hover:bg-blue-600'
-              } text-white transition-colors`}
+              className={`px-4 py-2 rounded-lg ${isProcessing ? 'bg-red-500 hover:bg-red-600' : 'bg-blue-500 hover:bg-blue-600'} text-white transition-colors`}
             >
               {isProcessing ? '停止' : '送信'}
             </button>
@@ -628,5 +668,5 @@ const ChatContainer = () => {
     </div>
   );
 };
-
+  
 export default ChatContainer;
