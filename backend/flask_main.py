@@ -164,7 +164,8 @@ def chat(decoded_token: Dict) -> Response:
         error_keyword = "trigger_error"  # 例：このキーワードが含まれるとエラー発生
         for msg in messages:
             content = msg.get("content", "")
-            if error_keyword in content:
+            #logger.debug('メッセージの内容: %s', content)
+            if error_keyword == content:
                 raise ValueError("不正なキーワードが含まれています")
 
         # 送信される各メッセージをLiteLLM向けの形式に変換する
