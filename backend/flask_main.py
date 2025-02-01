@@ -148,7 +148,7 @@ def verify_auth(decoded_token: Dict) -> Tuple[Response, int]:
 
 @app.route("/app/chat", methods=["POST"])
 @require_auth
-def chat(decoded_token : Dict) -> Response:
+def chat(decoded_token: Dict) -> Response:
     """チャットエンドポイント"""
     logger.info("チャットリクエストを処理中")
     try:
@@ -160,17 +160,39 @@ def chat(decoded_token : Dict) -> Response:
             raise ValueError("モデル情報が提供されていません")
         model_api_key = get_api_key_for_model(model)
         
+        # 送信される各メッセージをLiteLLM向けの形式に変換する
+        transformed_messages = []
+        for msg in messages:
+            # ユーザーのメッセージで、画像がアップロードされている場合
+            if msg.get("role") == "user" and msg.get("images"):
+                parts = []
+                # テキスト部分がある場合、"text"オブジェクトとして追加
+                if msg.get("content"):
+                    parts.append({
+                        "type": "text",
+                        "text": msg["content"]
+                    })
+                # 各画像について、"image_base64"として追加
+                for image in msg["images"]:
+                    parts.append({
+                        "type": "image_base64",
+                        "base64": image
+                    })
+                # 変換後の内容を設定し、不要な"images"フィールドは削除
+                msg["content"] = parts
+                msg.pop("images", None)
+            transformed_messages.append(msg)
+        
+        logger.info(f"変換後のmessages: {transformed_messages}")
+
         # 選択されたモデルを使用してチャット応答を生成
         logger.info(f"選択されたモデル: {model}")
-        logger.info(f"messages: {messages}")
-
+        logger.info(f"messages: {transformed_messages}")
 
         response = Response(
             common_message_function(
-                # 取得したモデルを渡す
-                model=model, stream=True, messages=messages,
+                model=model, stream=True, messages=transformed_messages,
                 api_key=model_api_key,
-                
             ),
             mimetype="text/event-stream",
             headers={"Cache-Control": "no-cache", "Transfer-Encoding": "chunked"},
@@ -183,6 +205,7 @@ def chat(decoded_token : Dict) -> Response:
         error_response = make_response(jsonify({"status": "error", "message": str(e)}))
         error_response.status_code = 500
         return error_response
+
 
 
 @app.route("/app/logout", methods=["POST"])
