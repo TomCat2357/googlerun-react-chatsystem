@@ -1,27 +1,15 @@
 import React, { useState, useRef, useEffect, ChangeEvent } from 'react';
-import { Message, ChatRequest } from '../../types/apiTypes';
+import { Message, ChatRequest, ChatHistory} from '../../types/apiTypes';
 import { useAuth } from '../../contexts/AuthContext';
 
-// 画像を複数扱えるように拡張
-interface ExtendedMessage extends Message {
-  images?: string[]; // base64エンコード済み画像の配列
-}
 
-// チャット履歴
-interface ChatHistory {
-  id: number;
-  title: string;
-  messages: ExtendedMessage[];
-  date: string;
-  lastPromptDate: string;
-}
 
 // チャットコンテナのメインコンポーネント
 const ChatContainer = () => {
   // ステート変数の定義
   const [currentChatId, setCurrentChatId] = useState<number | null>(null); // 現在のチャットID
   const { currentUser } = useAuth();
-  const [messages, setMessages] = useState<ExtendedMessage[]>([]); // チャットメッセージの配列
+  const [messages, setMessages] = useState<Message[]>([]); // チャットメッセージの配列
   const [input, setInput] = useState(''); // ユーザー入力テキスト
   const [isProcessing, setIsProcessing] = useState(false); // メッセージ処理中フラグ
   const [models, setModels] = useState<string[]>([]); // 利用可能なAIモデルリスト
@@ -135,7 +123,7 @@ const ChatContainer = () => {
   };
 
   // チャット履歴を保存する
-  const saveChatHistory = async (currentMessages: ExtendedMessage[], chatId: number | null) => {
+  const saveChatHistory = async (currentMessages: Message[], chatId: number | null) => {
     if (currentMessages.length === 0) return;
 
     const newChatId = chatId ?? Date.now();
@@ -239,14 +227,14 @@ const ChatContainer = () => {
       setIsProcessing(true);
 
       // ユーザーの新しいメッセージ
-      const newUserMessage: ExtendedMessage = {
+      const newUserMessage: Message = {
         role: 'user',
         // テキストが空で画像のみの場合はダミー文言を入れておく
         content: input.trim() || '[Images Uploaded]',
-        images: selectedImagesBase64.length > 0 ? [...selectedImagesBase64] : undefined
+        images: selectedImagesBase64.length > 0 ? [...selectedImagesBase64] : []
       };
 
-      let updatedMessages: ExtendedMessage[] = [...messages, newUserMessage];
+      let updatedMessages: Message[] = [...messages, newUserMessage];
 
       // 画面に即時反映
       setMessages(updatedMessages);
