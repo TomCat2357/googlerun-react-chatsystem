@@ -3,10 +3,11 @@ from flask_cors import CORS
 from firebase_admin import auth, credentials
 from dotenv import load_dotenv
 from functools import wraps
-import os, json, logging, firebase_admin
+import os, json, logging, firebase_admin, io, base64
 from PIL import Image
 from typing import Dict, Union, Optional, Tuple, Callable, Any, List
 from litellm import completion, token_counter
+
 
 # .envファイルを読み込み
 load_dotenv('./config/.env')
@@ -34,6 +35,72 @@ CORS(
     allow_headers=["Content-Type", "Authorization"],
 )
 
+def process_uploaded_image(image_data: str) -> str:
+    """
+    アップロードされた画像データをリサイズおよび圧縮し、
+    適切な「data:image/～;base64,」形式の文字列を返す関数。
+    """
+    try:
+        # data:～のヘッダーがある場合は除去
+        header = None
+        if image_data.startswith("data:"):
+            header, image_data = image_data.split(",", 1)
+        
+        # base64デコードして画像読み込み
+        image_bytes = base64.b64decode(image_data)
+        image = Image.open(io.BytesIO(image_bytes))
+        
+        # 画像のモードがRGBまたはRGBAでない場合は変換
+        if image.mode not in ("RGB", "RGBA"):
+            image = image.convert("RGB")
+        
+        width, height = image.size
+        logger.info("元の画像サイズ: %dx%dpx, 容量: %.1fKB", width, height, len(image_bytes) / 1024)
+        
+        # 長辺が1568ピクセルを超えている場合はリサイズ（アスペクト比維持）
+        if max(width, height) > 1568:
+            scale = 1568 / max(width, height)
+            new_width = int(width * scale)
+            new_height = int(height * scale)
+            image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+            logger.info("リサイズ後: %dx%dpx", new_width, new_height)
+        
+        # 初期の品質設定
+        quality = 85
+        output = io.BytesIO()
+        # 出力フォーマットとMIMEタイプを決定
+        output_format = "JPEG"
+        mime_type = "image/jpeg"
+        
+        if header and "png" in header.lower():
+            output_format = "PNG"
+            mime_type = "image/png"
+            image.save(output, format=output_format, optimize=True)
+        else:
+            image = image.convert("RGB")
+            image.save(output, format=output_format, quality=quality, optimize=True)
+        
+        output_data = output.getvalue()
+        logger.info("圧縮後の容量: %.1fKB (quality=%d)", len(output_data) / 1024, quality)
+        
+        # 5MBを超える場合、品質を下げて再圧縮（最小品質は30まで）
+        while len(output_data) > 5 * 1024 * 1024 and quality > 30:
+            quality -= 10
+            output = io.BytesIO()
+            image.save(output, format=output_format, quality=quality, optimize=True)
+            output_data = output.getvalue()
+            logger.info("再圧縮後の容量: %.1fKB (quality=%d)", len(output_data) / 1024, quality)
+        
+        processed_base64 = base64.b64encode(output_data).decode('utf-8')
+        # 画像の形式に合わせたMIMEタイプを設定して返却する
+        return f"data:{mime_type};base64,{processed_base64}"
+    except Exception as e:
+        logger.error("画像処理エラー: %s", str(e), exc_info=True)
+        # エラー時は元の画像データを返す
+        return image_data
+
+
+        return image_data
 def get_api_key_for_model(model: str) -> Optional[str]:
     """モデル名からソース名を抽出してAPIキーを取得"""
     source = model.split('/')[0] if '/' in model else model
@@ -161,12 +228,14 @@ def chat(decoded_token: Dict) -> Response:
         model_api_key = get_api_key_for_model(model)
 
         # ここで特定のキーワードをチェックする
-        error_keyword = "debug_trigger_error"  # 例：このキーワードが含まれるとエラー発生
+        error_keyword = "@trigger_error"  # 例：このキーワードが含まれるとエラー発生
+        error_flag  = False
         for msg in messages:
             content = msg.get("content", "")
             #logger.debug('メッセージの内容: %s', content)
             if error_keyword == content:
-                raise ValueError("不正なキーワードが含まれています")
+                error_flag = True
+                break
 
         # 送信される各メッセージをLiteLLM向けの形式に変換する
         transformed_messages = []
@@ -176,22 +245,29 @@ def chat(decoded_token: Dict) -> Response:
                 parts = []
                 if msg.get("content"):
                     parts.append({"type": "text", "text": msg["content"]})
-                for image in msg["images"]:
+                # １ターンあたり最大５毎の画像まで
+                logger.info(f"画像の数: {len(msg['images'])}")
+                images_to_process = msg["images"][:5]
+                
+                for image in images_to_process:
+                    processed_image = process_uploaded_image(image)
                     # image_base64 ではなく image_url を使い、内部に url キーを設定する
                     parts.append({
                         "type": "image_url",
-                        "image_url": {"url": image}
+                        "image_url": {"url": processed_image}
                     })
                 msg["content"] = parts
                 msg.pop("images", None)
 
             transformed_messages.append(msg)
         
-        logger.info(f"変換後のmessages: {transformed_messages}")
-
+        
         # 選択されたモデルを使用してチャット応答を生成
         logger.info(f"選択されたモデル: {model}")
-        logger.info(f"messages: {transformed_messages}")
+        logger.debug(f"messages: {transformed_messages}")
+        
+        if error_flag:
+            raise ValueError("意図的なエラーがトリガーされました")
 
         response = Response(
             common_message_function(
