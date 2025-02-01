@@ -159,7 +159,14 @@ def chat(decoded_token: Dict) -> Response:
         if model is None:
             raise ValueError("モデル情報が提供されていません")
         model_api_key = get_api_key_for_model(model)
-        
+
+        # ここで特定のキーワードをチェックする
+        error_keyword = "trigger_error"  # 例：このキーワードが含まれるとエラー発生
+        for msg in messages:
+            content = msg.get("content", "")
+            if error_keyword in content:
+                raise ValueError("不正なキーワードが含まれています")
+
         # 送信される各メッセージをLiteLLM向けの形式に変換する
         transformed_messages = []
         for msg in messages:

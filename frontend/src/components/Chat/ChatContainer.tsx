@@ -1,28 +1,35 @@
 import React, { useState, useRef, useEffect, ChangeEvent } from 'react';
-import { Message, ChatRequest, ChatHistory} from '../../types/apiTypes';
+import { Message, ChatRequest, ChatHistory } from '../../types/apiTypes';
 import { useAuth } from '../../contexts/AuthContext';
-
-
 
 // チャットコンテナのメインコンポーネント
 const ChatContainer = () => {
-  // ステート変数の定義
+  // ==========================
+  //  ステートやRefの定義
+  // ==========================
   const [currentChatId, setCurrentChatId] = useState<number | null>(null); // 現在のチャットID
   const { currentUser } = useAuth();
-  const [messages, setMessages] = useState<Message[]>([]); // チャットメッセージの配列
-  const [input, setInput] = useState(''); // ユーザー入力テキスト
+  const [messages, setMessages] = useState<Message[]>([]); // チャットメッセージ
+  const [input, setInput] = useState('');                  // テキスト入力
   const [isProcessing, setIsProcessing] = useState(false); // メッセージ処理中フラグ
-  const [models, setModels] = useState<string[]>([]); // 利用可能なAIモデルリスト
+  const [models, setModels] = useState<string[]>([]);      // 利用可能なAIモデル一覧
   const [selectedModel, setSelectedModel] = useState<string>(''); // 選択中のAIモデル
   const [chatHistories, setChatHistories] = useState<ChatHistory[]>([]); // チャット履歴
-  const messageContainerRef = useRef<HTMLDivElement>(null); // メッセージ表示エリアのref
-  const abortControllerRef = useRef<AbortController | null>(null); // API通信中断用コントローラー
-  const [token, setToken] = useState<string>(''); // 認証トークン
+  const messageContainerRef = useRef<HTMLDivElement>(null);  // メッセージ表示エリアのref
+  const abortControllerRef = useRef<AbortController | null>(null); // API通信中断用
+  const [token, setToken] = useState<string>('');           // 認証トークン
 
   // 複数画像の一時保管用: base64文字列を配列で保持
   const [selectedImagesBase64, setSelectedImagesBase64] = useState<string[]>([]);
 
-  // IndexedDBの初期化とチャット履歴の読み込みを行うEffect
+  // ==========================
+  //  追加: エラーメッセージ用
+  // ==========================
+  const [errorMessage, setErrorMessage] = useState<string>('');
+
+  // ==========================
+  //  IndexedDB初期化
+  // ==========================
   useEffect(() => {
     const initDB = async () => {
       const request = indexedDB.open('ChatHistoryDB', 1);
@@ -40,7 +47,6 @@ const ChatContainer = () => {
 
       request.onsuccess = () => {
         console.log('IndexedDB初期化成功');
-        // チャット履歴を読み込む
         loadChatHistories();
       };
     };
@@ -48,7 +54,9 @@ const ChatContainer = () => {
     initDB();
   }, []);
 
-  // 認証トークンの取得処理
+  // ==========================
+  //  認証トークンの取得
+  // ==========================
   useEffect(() => {
     const fetchToken = async () => {
       if (currentUser) {
@@ -64,14 +72,18 @@ const ChatContainer = () => {
     fetchToken();
   }, [currentUser]);
 
-  // メッセージの自動スクロール
+  // ==========================
+  //  メッセージ表示エリアの自動スクロール
+  // ==========================
   useEffect(() => {
     if (messageContainerRef.current) {
       messageContainerRef.current.scrollTop = messageContainerRef.current.scrollHeight;
     }
   }, [messages]);
 
-  // 利用可能なAIモデル一覧の取得
+  // ==========================
+  //  利用可能なAIモデル一覧の取得
+  // ==========================
   useEffect(() => {
     const fetchModels = async () => {
       if (!token) return;
@@ -100,7 +112,9 @@ const ChatContainer = () => {
     fetchModels();
   }, [token]);
 
-  // IndexedDBからチャット履歴を読み込む関数
+  // ==========================
+  //  IndexedDBから履歴を読み込み
+  // ==========================
   const loadChatHistories = async () => {
     const request = indexedDB.open('ChatHistoryDB', 1);
     request.onsuccess = (event) => {
@@ -122,12 +136,13 @@ const ChatContainer = () => {
     };
   };
 
-  // チャット履歴を保存する
+  // ==========================
+  //  IndexedDBに履歴を保存
+  // ==========================
   const saveChatHistory = async (currentMessages: Message[], chatId: number | null) => {
     if (currentMessages.length === 0) return;
 
     const newChatId = chatId ?? Date.now();
-    // 新規のチャットIDがまだ設定されていなければ、現在時刻をIDとして設定
     if (!currentChatId) {
       setCurrentChatId(newChatId);
     }
@@ -153,18 +168,18 @@ const ChatContainer = () => {
         let updatedHistories = [...histories];
 
         if (existingIndex !== -1) {
-          // 既存の履歴を更新（メッセージと最終プロンプト時間のみ更新）
+          // 既存履歴の更新
           updatedHistories[existingIndex] = {
             ...histories[existingIndex],
             messages: historyItem.messages,
             lastPromptDate: historyItem.lastPromptDate
           };
         } else {
-          // 新しい履歴を追加
+          // 新規履歴の追加
           updatedHistories.push(historyItem);
         }
 
-        // 最終プロンプト時間でソートして最新30件のみを保持
+        // 最新30件のみを保持
         updatedHistories = updatedHistories
           .sort((a, b) => new Date(b.lastPromptDate).getTime() - new Date(a.lastPromptDate).getTime())
           .slice(0, 30);
@@ -177,18 +192,30 @@ const ChatContainer = () => {
     };
   };
 
-  // 選択したチャット履歴を復元する
+  // ==========================
+  //  履歴を復元
+  // ==========================
   const restoreHistory = (history: ChatHistory) => {
     setCurrentChatId(history.id);
     setMessages(history.messages);
   };
 
-  // 画像を選択したときに呼ばれるハンドラ (複数対応)
+  // ==========================
+  //  チャットをクリア
+  // ==========================
+  const clearChat = () => {
+    setMessages([]);
+    setCurrentChatId(null);
+    setSelectedImagesBase64([]);
+  };
+
+  // ==========================
+  //  画像アップロード(複数)
+  // ==========================
   const handleImageUpload = async (e: ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files) return;
     const files = Array.from(e.target.files);
 
-    // FileReader で非同期にbase64変換し、すべてPromiseで受け取る
     const promises = files.map(file => {
       return new Promise<string>((resolve, reject) => {
         const reader = new FileReader();
@@ -212,44 +239,63 @@ const ChatContainer = () => {
     }
   };
 
-  // 選択画像の個別削除
+  // ==========================
+  //  選択画像を個別削除
+  // ==========================
   const removeImage = (index: number) => {
     setSelectedImagesBase64((prev) => prev.filter((_, i) => i !== index));
   };
 
-  // メッセージ送信処理
+  // ==========================
+  //  メッセージ送信
+  // ==========================
   const sendMessage = async () => {
-    // テキスト入力も画像も両方何もない場合は送信しない
+    // 送信前の状態をバックアップするための変数を事前に宣言
+    let backupInput = '';
+    let backupImages: string[] = [];
+    let backupMessages: Message[] = [];
+  
+    // 入力テキストも画像も両方空なら送信しない
     if (!input.trim() && selectedImagesBase64.length === 0) return;
+    // 既に処理中 or トークンなし は送信不可
     if (isProcessing || !token) return;
-
+  
+    // エラー表示をリセット
+    setErrorMessage('');
+  
     try {
       setIsProcessing(true);
-
-      // ユーザーの新しいメッセージ
+  
+      // ---- 送信前の状態をバックアップ ----
+      backupInput = input;
+      backupImages = [...selectedImagesBase64];
+      backupMessages = [...messages];
+  
+      // ユーザーの新しいメッセージを作成
       const newUserMessage: Message = {
         role: 'user',
-        // テキストが空で画像のみの場合はダミー文言を入れておく
         content: input.trim() || '[Images Uploaded]',
         images: selectedImagesBase64.length > 0 ? [...selectedImagesBase64] : []
       };
-
+  
+      // 表示更新: ユーザーメッセージを追加
       let updatedMessages: Message[] = [...messages, newUserMessage];
-
-      // 画面に即時反映
       setMessages(updatedMessages);
+  
+      // 入力欄をクリア
       setInput('');
-      setSelectedImagesBase64([]); // 送信後はリセット
-
+      setSelectedImagesBase64([]);
+  
+      // AbortControllerを用意
       abortControllerRef.current = new AbortController();
       const signal = abortControllerRef.current.signal;
-
-      // バックエンドへの送信用にまとめる
+  
+      // バックエンド送信用データ
       const chatRequest: ChatRequest = {
         messages: updatedMessages,
         model: selectedModel
       };
-
+  
       const response = await fetch('http://localhost:8080/app/chat', {
         method: 'POST',
         headers: {
@@ -260,28 +306,29 @@ const ChatContainer = () => {
         signal,
         body: JSON.stringify(chatRequest)
       });
-
+  
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
-
+  
       let assistantMessage = '';
       const reader = response.body?.getReader();
       const decoder = new TextDecoder();
-
+  
       if (reader) {
-        // アシスタントの空メッセージを追加
+        // アシスタントの空メッセージを先に追加
         updatedMessages = [...updatedMessages, { role: 'assistant', content: '' }];
         setMessages(updatedMessages);
-
+  
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
-
+  
+          // 逐次メッセージをデコード
           const text = decoder.decode(value, { stream: true });
           assistantMessage += text;
-
-          // 逐次画面更新
+  
+          // リアルタイムで画面に反映
           setMessages((msgs) => {
             const newMsgs = [...msgs];
             newMsgs[newMsgs.length - 1] = {
@@ -292,30 +339,35 @@ const ChatContainer = () => {
           });
         }
       }
-
-      // 最終的なアシスタントメッセージを反映
+  
+      // 最終的なアシスタントメッセージを更新
       updatedMessages[updatedMessages.length - 1].content = assistantMessage;
-      // 履歴を保存
+  
+      // チャット履歴を保存
       await saveChatHistory(updatedMessages, currentChatId);
-
+  
     } catch (error: any) {
       if (error.name !== 'AbortError') {
         console.error('メッセージ送信エラー:', error);
-        setMessages((prev) => [
-          ...prev,
-          {
-            role: 'assistant',
-            content: 'エラーが発生しました: ' + (error instanceof Error ? error.message : '不明なエラー')
-          }
-        ]);
+  
+        // ---- エラー時: バックアップから巻き戻す ----
+        setMessages(backupMessages);
+        setInput(backupInput);
+        setSelectedImagesBase64(backupImages);
+  
+        // 3) ポップアップ(モーダル)でエラーを表示
+        setErrorMessage(error instanceof Error ? error.message : '不明なエラー');
       }
     } finally {
       setIsProcessing(false);
       abortControllerRef.current = null;
     }
   };
+  
 
-  // キーボードイベントハンドラ（Enterキーでメッセージ送信）
+  // ==========================
+  //  キー押下時の送信トリガー
+  // ==========================
   const handleKeyPress = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -323,7 +375,9 @@ const ChatContainer = () => {
     }
   };
 
-  // メッセージ生成を停止する関数
+  // ==========================
+  //  送信停止
+  // ==========================
   const stopGeneration = () => {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
@@ -331,14 +385,9 @@ const ChatContainer = () => {
     }
   };
 
-  // チャットをクリアする関数
-  const clearChat = () => {
-    setMessages([]);
-    setCurrentChatId(null);
-    setSelectedImagesBase64([]);
-  };
-
-  // 履歴のダウンロード
+  // ==========================
+  //  履歴ダウンロード
+  // ==========================
   const downloadHistory = () => {
     const historyData = JSON.stringify(chatHistories, null, 2);
     const blob = new Blob([historyData], { type: 'application/json' });
@@ -352,7 +401,9 @@ const ChatContainer = () => {
     URL.revokeObjectURL(url);
   };
 
-  // 履歴のアップロード
+  // ==========================
+  //  履歴アップロード
+  // ==========================
   const uploadHistory = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -375,16 +426,36 @@ const ChatContainer = () => {
           };
         };
       } catch (error) {
-        console.error('履歴のアップロードエラー:', error);
+        console.error('履歴アップロードエラー:', error);
       }
     };
     reader.readAsText(file);
   };
 
+  // ==========================
+  //  JSXの描画部分
+  // ==========================
   return (
     <div className="flex flex-1 h-[calc(100vh-64px)] mt-10 overflow-hidden">
+      {/* -- エラーポップアップ（errorMessageが非空なら表示） -- */}
+      {errorMessage && (
+        <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50 z-10">
+          <div className="bg-white p-6 rounded shadow">
+            <h2 className="text-xl font-semibold mb-4">エラー</h2>
+            <p className="mb-4">{errorMessage}</p>
+            <button
+              onClick={() => setErrorMessage('')}
+              className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+            >
+              閉じる
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* サイドバー */}
       <div className="w-64 bg-white shadow-lg p-4 overflow-y-auto">
+        {/* モデル選択 */}
         <div className="mb-6">
           <h2 className="text-lg font-semibold mb-4">モデル選択</h2>
           <select
@@ -425,7 +496,7 @@ const ChatContainer = () => {
           </label>
         </div>
 
-        {/* チャット履歴 */}
+        {/* チャット履歴一覧 */}
         <div>
           <h2 className="text-lg font-semibold mb-4">最近のチャット</h2>
           <div className="space-y-2">
@@ -496,7 +567,7 @@ const ChatContainer = () => {
 
         {/* 入力エリア */}
         <div className="border-t p-4 bg-white">
-          {/* 選択画像のサムネイル表示 */}
+          {/* 選択画像プレビュー */}
           {selectedImagesBase64.length > 0 && (
             <div className="flex flex-wrap mb-4 gap-2">
               {selectedImagesBase64.map((imgBase64, i) => (
@@ -506,7 +577,6 @@ const ChatContainer = () => {
                     alt="preview"
                     className="w-16 h-16 object-cover rounded border"
                   />
-                  {/* 右上に×ボタン */}
                   <button
                     className="absolute top-0 right-0 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center"
                     onClick={() => removeImage(i)}
