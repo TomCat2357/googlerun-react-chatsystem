@@ -313,6 +313,27 @@ const ChatContainer: React.FC = () => {
   };
 
   // ==========================
+  //  ユーザー側プロンプトの編集（以前のメッセージに戻って再送信）
+  //  ※ 編集対象はユーザーメッセージのみ。編集対象以降の分岐は削除します。
+  // ==========================
+  const handleEditPrompt = (index: number) => {
+    if (isProcessing) return; // 生成中は編集不可とする
+    const messageToEdit = messages[index];
+    if (messageToEdit.role !== 'user') return; // ユーザーメッセージでなければ何もしない
+
+    // 入力エリアに既存のプロンプト内容をロード
+    setInput(messageToEdit.content);
+    // 画像があれば再利用（なければクリア）
+    if (messageToEdit.images && messageToEdit.images.length > 0) {
+      setSelectedImagesBase64([...messageToEdit.images]);
+    } else {
+      setSelectedImagesBase64([]);
+    }
+    // 編集対象以降のメッセージ（＝分岐）を削除
+    setMessages(messages.slice(0, index));
+  };
+
+  // ==========================
   //  メッセージ送信
   // ==========================
   const sendMessage = async () => {
@@ -574,7 +595,21 @@ const ChatContainer: React.FC = () => {
                     : 'bg-gray-800 border border-gray-700 text-gray-100'
                   }`}
               >
-                <div>{message.content}</div>
+                {/* ユーザー側メッセージの場合、編集ボタンを表示 */}
+                {message.role === 'user' ? (
+                  <div className="flex justify-between items-center">
+                    <div>{message.content}</div>
+                    <button
+                      onClick={() => handleEditPrompt(index)}
+                      className="ml-2 text-sm text-gray-300 hover:text-gray-100"
+                      title="このプロンプトを編集して再送信"
+                    >
+                      編集
+                    </button>
+                  </div>
+                ) : (
+                  <div>{message.content}</div>
+                )}
                 {message.images && message.images.length > 0 && (
                   <div className="mt-2 flex flex-wrap gap-2">
                     {message.images.map((img, i) => (
