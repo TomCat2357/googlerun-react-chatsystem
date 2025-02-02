@@ -2,108 +2,6 @@ import React, { useState, useRef, useEffect, ChangeEvent } from 'react';
 import { Message, ChatRequest, ChatHistory } from '../../types/apiTypes';
 import { useAuth } from '../../contexts/AuthContext';
 
-// 環境変数から定数を取得（Vite の場合、import.meta.env を利用）
-const MAX_IMAGES = Number(import.meta.env.VITE_MAX_IMAGES) || 5; // 例：最大5枚
-const MAX_LONG_EDGE = Number(import.meta.env.VITE_MAX_LONG_EDGE) || 1568; // 例：最大1568px
-const MAX_IMAGE_SIZE = Number(import.meta.env.VITE_MAX_IMAGE_SIZE) || (5 * 1024 * 1024); // 例：最大5MB（バイト）
-
-/**
- * processImageFile
- *
- * 画像ファイルを読み込み、FileReader で base64 文字列を取得し、
- * その後、長辺制限と容量制限を適用した dataURL を返す関数です。
- *
- * ※ この関数内で、まず以下のコードが実行されます。
- * 
- * const reader = new FileReader();
- * reader.onload = (event) => {
- *   if (event.target?.result) {
- *     resolve(event.target.result as string);
- *   } else {
- *     reject(new Error('Failed to read file'));
- *   }
- * };
- *
- * この部分がファイル読み込み処理として必要となります。
- */
-const processImageFile = (file: File): Promise<string> => {
-  return new Promise((resolve, reject) => {
-    console.log('[processImageFile] 処理開始：', file.name);
-    // --- FileReader によるファイル読み込み（base64 変換） ---
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      if (event.target?.result) {
-        const dataUrl = event.target.result as string;
-        // 読み込んだ dataURL を元に画像オブジェクトを生成
-        const image = new Image();
-        image.onload = () => {
-          console.log('[processImageFile] 画像読み込み完了：', file.name);
-          let { naturalWidth: width, naturalHeight: height } = image;
-          console.log(`[processImageFile] 元サイズ: ${width}x${height}`);
-          // 長辺判定とリサイズ（必要な場合）
-          const longEdge = Math.max(width, height);
-          let scale = 1;
-          if (longEdge > MAX_LONG_EDGE) {
-            scale = MAX_LONG_EDGE / longEdge;
-            width = Math.floor(width * scale);
-            height = Math.floor(height * scale);
-            console.log(`[processImageFile] リサイズ実施：新サイズ ${width}x${height}`);
-          } else {
-            console.log('[processImageFile] リサイズ不要');
-          }
-          // キャンバスに描画
-          const canvas = document.createElement('canvas');
-          canvas.width = width;
-          canvas.height = height;
-          const ctx = canvas.getContext('2d');
-          if (!ctx) {
-            reject(new Error('キャンバスの取得に失敗しました'));
-            return;
-          }
-          ctx.drawImage(image, 0, 0, width, height);
-  
-          // JPEG形式で出力（初期品質 0.85）
-          let quality = 0.85;
-          const minQuality = 0.3;
-          const processCanvas = () => {
-            const newDataUrl = canvas.toDataURL('image/jpeg', quality);
-            // dataURL を Blob に変換してサイズチェック
-            const arr = newDataUrl.split(',');
-            const byteString = atob(arr[1]);
-            const buffer = new ArrayBuffer(byteString.length);
-            const intArray = new Uint8Array(buffer);
-            for (let i = 0; i < byteString.length; i++) {
-              intArray[i] = byteString.charCodeAt(i);
-            }
-            const blob = new Blob([buffer], { type: 'image/jpeg' });
-            console.log(`[processImageFile] 現在の品質 ${quality}, Blobサイズ: ${blob.size} bytes`);
-            if (blob.size > MAX_IMAGE_SIZE && quality > minQuality) {
-              quality -= 0.1;
-              console.log(`[processImageFile] サイズ超過のため再圧縮：新品質 ${quality}`);
-              processCanvas();
-            } else {
-              console.log('[processImageFile] 画像処理完了');
-              resolve(newDataUrl);
-            }
-          };
-          processCanvas();
-        };
-        image.onerror = () => {
-          console.error('[processImageFile] 画像読み込みエラー', file.name);
-          reject(new Error('画像読み込みエラー'));
-        };
-        image.src = dataUrl;
-      } else {
-        reject(new Error('Failed to read file'));
-      }
-    };
-    reader.onerror = () => {
-      console.error('[processImageFile] ファイル読み込みエラー', file.name);
-      reject(new Error('ファイル読み込みエラー'));
-    };
-    reader.readAsDataURL(file);
-  });
-};
 
 const ChatContainer: React.FC = () => {
   // ==========================
@@ -207,7 +105,110 @@ const ChatContainer: React.FC = () => {
     };
     fetchModels();
   }, [token]);
-  
+
+  // 環境変数から定数を取得（Vite の場合、import.meta.env を利用）
+  const MAX_IMAGES = Number(import.meta.env.VITE_MAX_IMAGES) || 5; // 例：最大5枚
+  const MAX_LONG_EDGE = Number(import.meta.env.VITE_MAX_LONG_EDGE) || 1568; // 例：最大1568px
+  const MAX_IMAGE_SIZE = Number(import.meta.env.VITE_MAX_IMAGE_SIZE) || (5 * 1024 * 1024); // 例：最大5MB（バイト）
+
+  /**
+   * processImageFile
+   *
+   * 画像ファイルを読み込み、FileReader で base64 文字列を取得し、
+   * その後、長辺制限と容量制限を適用した dataURL を返す関数です。
+   *
+   * ※ この関数内で、まず以下のコードが実行されます。
+   * 
+   * const reader = new FileReader();
+   * reader.onload = (event) => {
+   *   if (event.target?.result) {
+   *     resolve(event.target.result as string);
+   *   } else {
+   *     reject(new Error('Failed to read file'));
+   *   }
+   * };
+   *
+   * この部分がファイル読み込み処理として必要となります。
+   */
+  const processImageFile = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      console.log('[processImageFile] 処理開始：', file.name);
+      // --- FileReader によるファイル読み込み（base64 変換） ---
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        if (event.target?.result) {
+          const dataUrl = event.target.result as string;
+          // 読み込んだ dataURL を元に画像オブジェクトを生成
+          const image = new Image();
+          image.onload = () => {
+            console.log('[processImageFile] 画像読み込み完了：', file.name);
+            let { naturalWidth: width, naturalHeight: height } = image;
+            console.log(`[processImageFile] 元サイズ: ${width}x${height}`);
+            // 長辺判定とリサイズ（必要な場合）
+            const longEdge = Math.max(width, height);
+            let scale = 1;
+            if (longEdge > MAX_LONG_EDGE) {
+              scale = MAX_LONG_EDGE / longEdge;
+              width = Math.floor(width * scale);
+              height = Math.floor(height * scale);
+              console.log(`[processImageFile] リサイズ実施：新サイズ ${width}x${height}`);
+            } else {
+              console.log('[processImageFile] リサイズ不要');
+            }
+            // キャンバスに描画
+            const canvas = document.createElement('canvas');
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) {
+              reject(new Error('キャンバスの取得に失敗しました'));
+              return;
+            }
+            ctx.drawImage(image, 0, 0, width, height);
+    
+            // JPEG形式で出力（初期品質 0.85）
+            let quality = 0.85;
+            const minQuality = 0.3;
+            const processCanvas = () => {
+              const newDataUrl = canvas.toDataURL('image/jpeg', quality);
+              // dataURL を Blob に変換してサイズチェック
+              const arr = newDataUrl.split(',');
+              const byteString = atob(arr[1]);
+              const buffer = new ArrayBuffer(byteString.length);
+              const intArray = new Uint8Array(buffer);
+              for (let i = 0; i < byteString.length; i++) {
+                intArray[i] = byteString.charCodeAt(i);
+              }
+              const blob = new Blob([buffer], { type: 'image/jpeg' });
+              console.log(`[processImageFile] 現在の品質 ${quality}, Blobサイズ: ${blob.size} bytes`);
+              if (blob.size > MAX_IMAGE_SIZE && quality > minQuality) {
+                quality -= 0.1;
+                console.log(`[processImageFile] サイズ超過のため再圧縮：新品質 ${quality}`);
+                processCanvas();
+              } else {
+                console.log('[processImageFile] 画像処理完了');
+                resolve(newDataUrl);
+              }
+            };
+            processCanvas();
+          };
+          image.onerror = () => {
+            console.error('[processImageFile] 画像読み込みエラー', file.name);
+            reject(new Error('画像読み込みエラー'));
+          };
+          image.src = dataUrl;
+        } else {
+          reject(new Error('Failed to read file'));
+        }
+      };
+      reader.onerror = () => {
+        console.error('[processImageFile] ファイル読み込みエラー', file.name);
+        reject(new Error('ファイル読み込みエラー'));
+      };
+      reader.readAsDataURL(file);
+    });
+  };
+
   // ==========================
   //  IndexedDB から履歴を読み込み
   // ==========================
