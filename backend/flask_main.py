@@ -1,3 +1,4 @@
+#%%
 from flask import Flask, request, Response, jsonify, make_response
 from flask_cors import CORS
 from firebase_admin import auth, credentials
@@ -9,15 +10,6 @@ from typing import Dict, Union, Optional, Tuple, Callable, Any, List
 from litellm import completion, token_counter
 
 
-# .envファイルを読み込み
-load_dotenv("./config/.env")
-
-# 環境変数から画像処理設定を読み込む
-MAX_IMAGES = int(os.getenv("MAX_IMAGES", "5"))
-MAX_LONG_EDGE = int(os.getenv("MAX_LONG_EDGE", "1568"))
-MAX_IMAGE_SIZE = int(os.getenv("MAX_IMAGE_SIZE", "5242880"))  # デフォルト5MB
-
-
 # ロギング設定
 logging.basicConfig(
     level=logging.INFO,
@@ -26,11 +18,18 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# .envファイルを読み込み
+load_dotenv("./config/.env")
+
+# 環境変数から画像処理設定を読み込む
+MAX_IMAGES = int(os.getenv("MAX_IMAGES", "5"))
+MAX_LONG_EDGE = int(os.getenv("MAX_LONG_EDGE", "1568"))
+MAX_IMAGE_SIZE = int(os.getenv("MAX_IMAGE_SIZE", "5242880"))  # デフォルト5MB
+
 # Firebase Admin SDKの初期化
 # ここで環境変数から認証ファイルパスを取得し、Firebaseアプリを初期化しています
 cred = credentials.Certificate(os.getenv("GOOGLE_APPLICATION_CREDENTIALS"))
 firebase_admin.initialize_app(cred)
-
 
 
 app = Flask(__name__)
@@ -49,7 +48,6 @@ def process_uploaded_image(image_data: str) -> str:
     アップロードされた画像データをリサイズおよび圧縮し、
     適切な「data:image/～;base64,」形式の文字列を返す関数。
     """
-    
 
     try:
         # data:～のヘッダーがある場合は除去
@@ -118,7 +116,6 @@ def process_uploaded_image(image_data: str) -> str:
         logger.error("画像処理エラー: %s", str(e), exc_info=True)
         # エラー時は元の画像データを返す
         return image_data
-
 
 
 def get_api_key_for_model(model: str) -> Optional[str]:
@@ -223,6 +220,7 @@ def verify_auth(decoded_token: Dict) -> Tuple[Response, int]:
                 "email": decoded_token.get("email"),
                 "uid": decoded_token.get("uid"),
             },
+            "expire_time": decoded_token.get("exp"),
         }
         logger.info("認証検証完了")
         renponse: Response = make_response(jsonify(response_data))
@@ -267,7 +265,7 @@ def chat(decoded_token: Dict) -> Response:
                 parts = []
                 if msg.get("content"):
                     parts.append({"type": "text", "text": msg["content"]})
-                # １ターンあたり最大５毎の画像まで
+                # １ターンあたり最大MAX_IMAGES（５ぐらい？）枚の画像まで
                 logger.info(f"画像の数: {len(msg['images'])}")
                 images_to_process = msg["images"][:MAX_IMAGES]
 
@@ -327,10 +325,10 @@ def logout() -> Response:
         logger.error("ログアウト処理中にエラーが発生: %s", str(e), exc_info=True)
         return jsonify({"error": str(e)}), 401
 
-
+#%%
 if __name__ == "__main__":
     # Flaskアプリ起動時のログを出力
     logger.info("Flaskアプリを起動します")
     app.run(
-        port=int(os.getenv("PORT", "8080")), debug=bool(os.getenv("DEBUG", "False"))
+        port=int(os.getenv("PORT", "8080")), debug=bool(os.getenv("DEBUG", 0))
     )
