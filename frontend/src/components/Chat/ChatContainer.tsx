@@ -21,6 +21,8 @@ const ChatContainer: React.FC = () => {
   const [errorMessage, setErrorMessage] = useState<string>('');
   // --- 追加: 拡大表示用の画像 URL を保持する state ---
   const [enlargedImage, setEnlargedImage] = useState<string | null>(null);
+  // --- 追加: 現在、プロンプトの編集（やり直し）モードかを示す ---
+  const [isEditMode, setIsEditMode] = useState<boolean>(false);
 
   // ==========================
   //  IndexedDB 初期化とチャット履歴の読み込み
@@ -272,6 +274,12 @@ const ChatContainer: React.FC = () => {
   //  履歴を復元
   // ==========================
   const restoreHistory = (history: ChatHistory) => {
+    // 履歴から復元する際、もし編集中の場合は入力内容をクリアして編集中状態を解除
+    if (isEditMode) {
+      setInput('');
+      setSelectedImagesBase64([]);
+      setIsEditMode(false);
+    }
     setCurrentChatId(history.id);
     setMessages(history.messages);
   };
@@ -283,6 +291,8 @@ const ChatContainer: React.FC = () => {
     setMessages([]);
     setCurrentChatId(null);
     setSelectedImagesBase64([]);
+    setInput('');
+    setIsEditMode(false);
   };
 
   // ==========================
@@ -331,6 +341,8 @@ const ChatContainer: React.FC = () => {
     }
     // 編集対象以降のメッセージ（＝分岐）を削除
     setMessages(messages.slice(0, index));
+    // 編集モードに入る
+    setIsEditMode(true);
   };
 
   // ==========================
@@ -363,8 +375,10 @@ const ChatContainer: React.FC = () => {
       let updatedMessages: Message[] = [...messages, newUserMessage];
       setMessages(updatedMessages);
 
+      // 入力欄と画像選択状態をリセットし、編集モードも解除
       setInput('');
       setSelectedImagesBase64([]);
+      setIsEditMode(false);
 
       abortControllerRef.current = new AbortController();
       const signal = abortControllerRef.current.signal;
@@ -633,6 +647,12 @@ const ChatContainer: React.FC = () => {
 
         {/* 入力エリア */}
         <div className="border-t border-gray-700 p-4 bg-gray-800">
+          {/* 編集中の場合、バナー表示 */}
+          {isEditMode && (
+            <div className="mb-2 p-2 bg-yellow-200 text-yellow-800 rounded">
+              ※ 現在、プロンプトのやり直しモードです
+            </div>
+          )}
           {/* 選択された画像プレビュー */}
           {selectedImagesBase64.length > 0 && (
             <div className="flex flex-wrap mb-4 gap-2">
