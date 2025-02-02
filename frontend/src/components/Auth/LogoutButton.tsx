@@ -9,7 +9,7 @@ export default function LogoutButton() {
         const auth = getAuth();
         try {
             await auth.signOut();
-            await axios.post('http://localhost:8080/app/logout', null, {
+            await axios.post(`${import.meta.env.VITE_API_BASE_URL}/backend/logout`, null, {
                 withCredentials: true
             });
             navigate('/');

@@ -19,6 +19,8 @@ const ChatContainer: React.FC = () => {
   const [token, setToken] = useState<string>("");
   const [selectedImagesBase64, setSelectedImagesBase64] = useState<string[]>([]);
   const [errorMessage, setErrorMessage] = useState<string>("");
+  const API_BASE_URL : string = import.meta.env.VITE_API_BASE_URL;
+  console.log("API_BASE_URL:", API_BASE_URL);
 
   // --- 編集モード用の状態 ---
   const [isEditMode, setIsEditMode] = useState<boolean>(false);
@@ -93,7 +95,7 @@ const ChatContainer: React.FC = () => {
     const fetchModels = async () => {
       if (!token) return;
       try {
-        const response = await fetch("http://localhost:8080/app/models", {
+        const response = await fetch(`${API_BASE_URL}/backend/models`, {
           method: "GET",
           headers: {
             Authorization: `Bearer ${token}`,
@@ -432,7 +434,7 @@ const ChatContainer: React.FC = () => {
         model: selectedModel,
       };
 
-      const response = await fetch("http://localhost:8080/app/chat", {
+      const response = await fetch(`${API_BASE_URL}/backend/chat`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

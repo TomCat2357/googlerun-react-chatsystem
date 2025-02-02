@@ -140,7 +140,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       
       // バックエンドへ認証確認リクエスト
       console.log('バックエンドへ認証確認のリクエストを送信します...');
-      const response = await axios.get('http://localhost:8080/app/verify-auth', {
+      const response = await axios.get(`${import.meta.env.VITE_API_BASE_URL}/backend/verify-auth`, {
         headers: {
           Authorization: `Bearer ${token}`,
         },

@@ -188,7 +188,7 @@ def require_auth(function: Callable) -> Callable:
     return decorated_function
 
 
-@app.route("/app/models", methods=["GET"])
+@app.route("/backend/models", methods=["GET"])
 @require_auth
 def get_models(decoded_token: Dict) -> Response:
     """
@@ -213,7 +213,7 @@ def get_models(decoded_token: Dict) -> Response:
         return error_response
 
 
-@app.route("/app/verify-auth", methods=["GET"])
+@app.route("/backend/verify-auth", methods=["GET"])
 @require_auth
 def verify_auth(decoded_token: Dict) -> Tuple[Response, int]:
     """
@@ -245,7 +245,7 @@ def verify_auth(decoded_token: Dict) -> Tuple[Response, int]:
         return response
 
 
-@app.route("/app/chat", methods=["POST"])
+@app.route("/backend/chat", methods=["POST"])
 @require_auth
 def chat(decoded_token: Dict) -> Response:
     """チャットエンドポイント"""
@@ -319,7 +319,7 @@ def chat(decoded_token: Dict) -> Response:
         return error_response
 
 
-@app.route("/app/logout", methods=["POST"])
+@app.route("/backend/logout", methods=["POST"])
 def logout() -> Response:
     """
     ログアウト処理を行うエンドポイント
