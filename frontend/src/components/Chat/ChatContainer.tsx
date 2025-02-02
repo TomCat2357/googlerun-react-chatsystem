@@ -646,8 +646,8 @@ const ChatContainer: React.FC = () => {
               rows={2}
               disabled={isProcessing}
             />
-            <label className="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-800 rounded-lg cursor-pointer">
-              画像選択
+            <label className="flex items-center justify-center px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-800 rounded-lg cursor-pointer">
+            画像選択
               <input
                 type="file"
                 accept="image/*"
