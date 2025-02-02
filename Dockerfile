@@ -4,8 +4,7 @@ WORKDIR /app
 
 # 必要なファイルをコピー
 COPY ./backend/flask_main.py .
-COPY ./backend/config/requirements.txt ./config/
-COPY ./backend/config/.env ./config/
+COPY ./backend/config/ ./config/
 
 # 依存関係のインストール
 RUN pip install --no-cache-dir -r ./config/requirements.txt
