@@ -499,13 +499,13 @@ const ChatContainer: React.FC = () => {
       )}
 
       {/* サイドバー */}
-      <div className="w-64 bg-white shadow-lg p-4 overflow-y-auto">
+      <div className="w-64 bg-gray-800 shadow-lg p-4 overflow-y-auto">
         <div className="mb-6">
-          <h2 className="text-lg font-semibold mb-4">モデル選択</h2>
+          <h2 className="text-lg font-semibold mb-4 text-gray-100">モデル選択</h2>
           <select
             value={selectedModel}
             onChange={(e) => setSelectedModel(e.target.value)}
-            className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
+            className="w-full p-2 bg-gray-700 border-gray-600 text-gray-100 rounded-lg focus:ring-2 focus:ring-blue-500"
           >
             {models.map((m) => (
               <option key={m} value={m}>{m}</option>
@@ -514,7 +514,7 @@ const ChatContainer: React.FC = () => {
         </div>
         <button
           onClick={clearChat}
-          className="w-full mb-6 p-2 bg-gray-200 hover:bg-gray-300 rounded-lg transition-colors"
+          className="w-full mb-6 p-2 bg-gray-700 hover:bg-gray-600 text-gray-100 rounded-lg transition-colors"
         >
           新規チャット
         </button>
@@ -538,16 +538,16 @@ const ChatContainer: React.FC = () => {
           </label>
         </div>
         <div>
-          <h2 className="text-lg font-semibold mb-4">最近のチャット</h2>
+          <h2 className="text-lg font-semibold mb-4 text-gray-100">最近のチャット</h2>
           <div className="space-y-2">
             {chatHistories.map((history) => (
               <div
                 key={history.id}
                 onClick={() => restoreHistory(history)}
-                className="p-2 hover:bg-gray-100 rounded cursor-pointer transition-colors"
+                className="p-2 hover:bg-gray-700 text-gray-100 rounded cursor-pointer transition-colors"
               >
                 <div className="font-medium">{history.title}</div>
-                <div className="text-sm text-gray-500">
+                <div className="text-sm text-gray-400">
                   {new Date(history.lastPromptDate).toLocaleString()}
                 </div>
               </div>
@@ -561,7 +561,7 @@ const ChatContainer: React.FC = () => {
         {/* メッセージ表示エリア */}
         <div
           ref={messageContainerRef}
-          className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50"
+          className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-900"
         >
           {messages.map((message, index) => (
             <div
@@ -570,8 +570,8 @@ const ChatContainer: React.FC = () => {
             >
               <div
                 className={`p-4 rounded-lg ${message.role === 'user'
-                    ? 'bg-blue-100 text-gray-900'
-                    : 'bg-white border-2 border-gray-200 shadow-sm text-gray-800'
+                    ? 'bg-blue-900 text-gray-100'
+                    : 'bg-gray-800 border border-gray-700 text-gray-100'
                   }`}
               >
                 <div>{message.content}</div>
@@ -582,7 +582,6 @@ const ChatContainer: React.FC = () => {
                         key={i}
                         src={img}
                         alt="Uploaded"
-                        // --- 追加: クリックで拡大表示 ---
                         onClick={() => setEnlargedImage(img)}
                         className="max-w-xs rounded border cursor-pointer"
                       />
@@ -590,7 +589,7 @@ const ChatContainer: React.FC = () => {
                   </div>
                 )}
               </div>
-              <div className={`text-xs text-gray-500 mt-1 ${message.role === 'user' ? 'text-right' : 'text-left'}`}>
+              <div className={`text-xs text-gray-400 mt-1 ${message.role === 'user' ? 'text-right' : 'text-left'}`}>
                 {message.role === 'user' ? 'あなた' : 'アシスタント'}
               </div>
             </div>
@@ -598,7 +597,7 @@ const ChatContainer: React.FC = () => {
         </div>
 
         {/* 入力エリア */}
-        <div className="border-t p-4 bg-white">
+        <div className="border-t border-gray-700 p-4 bg-gray-800">
           {/* 選択された画像プレビュー */}
           {selectedImagesBase64.length > 0 && (
             <div className="flex flex-wrap mb-4 gap-2">
@@ -607,7 +606,6 @@ const ChatContainer: React.FC = () => {
                   <img
                     src={imgBase64}
                     alt="preview"
-                    // --- 追加: クリックで拡大表示 ---
                     onClick={() => setEnlargedImage(imgBase64)}
                     className="w-16 h-16 object-cover rounded border cursor-pointer"
                   />
@@ -626,12 +624,12 @@ const ChatContainer: React.FC = () => {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyPress={handleKeyPress}
-              className="flex-1 p-2 border rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="flex-1 p-2 bg-gray-900 border border-gray-700 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-100"
               placeholder="メッセージを入力..."
               rows={2}
               disabled={isProcessing}
             />
-            <label className="flex items-center justify-center px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-800 rounded-lg cursor-pointer">
+            <label className="flex items-center justify-center px-4 py-2 bg-gray-700 hover:bg-gray-600 text-gray-100 rounded-lg cursor-pointer">
               画像選択
               <input
                 type="file"
@@ -644,7 +642,7 @@ const ChatContainer: React.FC = () => {
             </label>
             <button
               onClick={isProcessing ? stopGeneration : sendMessage}
-              className={`px-4 py-2 rounded-lg ${isProcessing ? 'bg-red-500 hover:bg-red-600' : 'bg-blue-500 hover:bg-blue-600'} text-white transition-colors`}
+              className={`px-4 py-2 rounded-lg ${isProcessing ? 'bg-red-900 hover:bg-red-800' : 'bg-blue-900 hover:bg-blue-800'} text-gray-100 transition-colors`}
             >
               {isProcessing ? '停止' : '送信'}
             </button>
