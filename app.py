@@ -34,10 +34,21 @@ firebase_admin.initialize_app(cred)
 
 app = Flask(__name__)
 # CORSの設定 - 開発環境用
+
+origins = [
+    f"http://localhost:{os.getenv('PORT', 8080)}",
+]
+if int(os.getenv("DEBUG", 0)):
+    origins.append("http://localhost:5173")  #　DEBUGモードの場合
+
+
 CORS(
     app,
-    origins=["http://localhost:5173", "http://localhost:5000"],
-    supports_credentials=True,
+    #同一オリジンのためoriginsの設定不要。ただしネットワークに置いたときは必要かもしれない。
+    origins = origins,
+    #クッキーを使わないのでFalseにした
+    #supports_credentials=True,
+    supports_credentials=False,
     expose_headers=["Authorization"],
     allow_headers=["Content-Type", "Authorization"],
 )
@@ -325,24 +336,25 @@ def logout() -> Response:
     except Exception as e:
         logger.error("ログアウト処理中にエラーが発生: %s", str(e), exc_info=True)
         return jsonify({"error": str(e)}), 401
-    
 
 # フロントエンドのルーティング
 FRONTEND_PATH = './frontend/dist'
 
-@app.route('/')
-def index():
-    return send_from_directory(FRONTEND_PATH, 'index.html')
+# デバッグモードの時は動かない
+if not int(os.getenv("DEBUG", 0)):
+    @app.route('/')
+    def index():
+        return send_from_directory(FRONTEND_PATH, 'index.html')
 
-@app.route('/<path:path>')
-def static_file(path):
-    return send_from_directory(FRONTEND_PATH, path)
+    @app.route('/<path:path>')
+    def static_file(path):
+        return send_from_directory(FRONTEND_PATH, path)
 
 
 #%%
 if __name__ == "__main__":
     # Flaskアプリ起動時のログを出力
-    logger.info("Flaskアプリを起動します")
+    logger.info("Flaskアプリを起動します DEBUG: %s", bool(int(os.getenv("DEBUG", 0))))
     app.run(
-        port=int(os.getenv("PORT", "8080")), debug=bool(os.getenv("DEBUG", 0))
+        port=int(os.getenv("PORT", "8080")), debug=bool(int(os.getenv("DEBUG", 0)))
     )
