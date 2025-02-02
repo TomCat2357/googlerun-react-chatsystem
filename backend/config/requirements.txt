@@ -6,4 +6,5 @@ ollama==0.4.6
 gunicorn==23.0.0
 waitress==3.0.2
 litellm==1.59.0
-ipaddress==1.0.23
+Pillow==11.0.0
+#ipaddress==1.0.23

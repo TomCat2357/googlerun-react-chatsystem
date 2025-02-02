@@ -1,7 +1,14 @@
 FROM python:3.11-slim
 
 WORKDIR /app
-COPY ./app .
+
+# 必要なファイルをコピー
+COPY ./backend/flask_main.py .
+COPY ./backend/config/requirements.txt ./config/
+COPY ./backend/config/.env ./config/
+
+# 依存関係のインストール
 RUN pip install --no-cache-dir -r ./config/requirements.txt
 
-CMD ["sh", "-c", "exec gunicorn --bind :$PORT --workers 1 --timeout 0 flask_main:app"]
+# サーバー起動
+CMD ["gunicorn", "--bind", "0.0.0.0:8080", "--workers", "1", "--timeout", "0", "flask_main:app"]
