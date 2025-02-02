@@ -1,5 +1,5 @@
 #%%
-from flask import Flask, request, Response, jsonify, make_response
+from flask import Flask, request, Response, jsonify, make_response, send_from_directory
 from flask_cors import CORS
 from firebase_admin import auth, credentials
 from dotenv import load_dotenv
@@ -41,6 +41,7 @@ CORS(
     expose_headers=["Authorization"],
     allow_headers=["Content-Type", "Authorization"],
 )
+
 
 
 def process_uploaded_image(image_data: str) -> str:
@@ -324,6 +325,18 @@ def logout() -> Response:
     except Exception as e:
         logger.error("ログアウト処理中にエラーが発生: %s", str(e), exc_info=True)
         return jsonify({"error": str(e)}), 401
+    
+
+BASE_PATH = '../frontend/dist'
+
+@app.route('/')
+def index():
+    return send_from_directory(BASE_PATH, 'index.html')
+
+@app.route('/<path:path>')
+def static_file(path):
+    return send_from_directory(BASE_PATH, path)
+
 
 #%%
 if __name__ == "__main__":
