@@ -569,11 +569,10 @@ const ChatContainer: React.FC = () => {
               className={`max-w-[80%] ${message.role === 'user' ? 'ml-auto' : 'mr-auto'}`}
             >
               <div
-                className={`p-4 rounded-lg ${
-                  message.role === 'user'
+                className={`p-4 rounded-lg ${message.role === 'user'
                     ? 'bg-blue-100 text-gray-900'
                     : 'bg-white border-2 border-gray-200 shadow-sm text-gray-800'
-                }`}
+                  }`}
               >
                 <div>{message.content}</div>
                 {message.images && message.images.length > 0 && (
