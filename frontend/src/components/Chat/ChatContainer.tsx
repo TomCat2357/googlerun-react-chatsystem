@@ -17,14 +17,16 @@ const ChatContainer: React.FC = () => {
   const messageContainerRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const [token, setToken] = useState<string>("");
-  const [selectedImagesBase64, setSelectedImagesBase64] = useState<string[]>(
-    []
-  );
+  const [selectedImagesBase64, setSelectedImagesBase64] = useState<string[]>([]);
   const [errorMessage, setErrorMessage] = useState<string>("");
+
+  // --- 編集モード用の状態 ---
+  const [isEditMode, setIsEditMode] = useState<boolean>(false);
+  // 編集モードに入る前の全メッセージを保持（キャンセル時に元に戻すため）
+  const [backupMessages, setBackupMessages] = useState<Message[]>([]);
+
   // --- 追加: 拡大表示用の画像 URL を保持する state ---
   const [enlargedImage, setEnlargedImage] = useState<string | null>(null);
-  // --- 追加: 現在、プロンプトの編集（やり直し）モードかを示す ---
-  const [isEditMode, setIsEditMode] = useState<boolean>(false);
 
   // ==========================
   //  IndexedDB 初期化とチャット履歴の読み込み
@@ -355,6 +357,9 @@ const ChatContainer: React.FC = () => {
     const messageToEdit = messages[index];
     if (messageToEdit.role !== "user") return; // ユーザーメッセージでなければ何もしない
 
+    // 現在のメッセージをバックアップ（キャンセル時に元に戻すため）
+    setBackupMessages(messages);
+
     // 入力エリアに既存のプロンプト内容をロード
     setInput(messageToEdit.content);
     // 画像があれば再利用（なければクリア）
@@ -370,12 +375,26 @@ const ChatContainer: React.FC = () => {
   };
 
   // ==========================
+  //  編集モードのキャンセル（追加）
+  // ==========================
+  const cancelEditMode = () => {
+    // バックアップから元のメッセージを復元
+    if (backupMessages.length > 0) {
+      setMessages(backupMessages);
+      setBackupMessages([]);
+    }
+    setInput("");
+    setSelectedImagesBase64([]);
+    setIsEditMode(false);
+  };
+
+  // ==========================
   //  メッセージ送信
   // ==========================
   const sendMessage = async () => {
     let backupInput = "";
     let backupImages: string[] = [];
-    let backupMessages: Message[] = [];
+    let backupMsgs: Message[] = [];
 
     if (!input.trim() && selectedImagesBase64.length === 0) return;
     if (isProcessing || !token) return;
@@ -388,7 +407,7 @@ const ChatContainer: React.FC = () => {
       // 送信前の状態をバックアップ
       backupInput = input;
       backupImages = [...selectedImagesBase64];
-      backupMessages = [...messages];
+      backupMsgs = [...messages];
 
       const newUserMessage: Message = {
         role: "user",
@@ -462,7 +481,7 @@ const ChatContainer: React.FC = () => {
     } catch (error: any) {
       if (error.name !== "AbortError") {
         console.error("メッセージ送信エラー:", error);
-        setMessages(backupMessages);
+        setMessages(backupMsgs);
         setInput(backupInput);
         setSelectedImagesBase64(backupImages);
         setErrorMessage(
@@ -690,10 +709,16 @@ const ChatContainer: React.FC = () => {
 
         {/* 入力エリア */}
         <div className="border-t border-gray-700 p-4 bg-gray-800">
-          {/* 編集中の場合、バナー表示 */}
+          {/* 編集中の場合、バナー表示（キャンセルボタン付き） */}
           {isEditMode && (
-            <div className="mb-2 p-2 bg-yellow-200 text-yellow-800 rounded">
-              ※ 現在、プロンプトのやり直しモードです
+            <div className="mb-2 p-2 bg-yellow-200 text-yellow-800 rounded flex justify-between items-center">
+              <span>※ 現在、プロンプトのやり直しモードです</span>
+              <button
+                onClick={cancelEditMode}
+                className="text-sm text-red-600 hover:underline"
+              >
+                キャンセル
+              </button>
             </div>
           )}
           {/* 選択された画像プレビュー */}
@@ -773,7 +798,6 @@ const ChatContainer: React.FC = () => {
               src={enlargedImage}
               alt="Enlarged"
               className="max-h-screen max-w-full"
-              // 画像自体のクリック時は、オーバーレイの onClick を伝播させない
               onClick={(e) => e.stopPropagation()}
             />
           </div>
