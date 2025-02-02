@@ -5,4 +5,4 @@
 *.log
 !.env.example
 *.pyc
-*serviceaccount*.json
+*firebase*.json

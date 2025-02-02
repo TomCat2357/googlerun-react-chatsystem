@@ -36,7 +36,7 @@ app = Flask(__name__)
 # CORSの設定 - 開発環境用
 CORS(
     app,
-    origins=["http://localhost:5173"],
+    origins=["http://localhost:5173", "http://localhost:5000"],
     supports_credentials=True,
     expose_headers=["Authorization"],
     allow_headers=["Content-Type", "Authorization"],
