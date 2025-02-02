@@ -1,6 +1,6 @@
-import React, { useState, useRef, useEffect, ChangeEvent } from 'react';
-import { Message, ChatRequest, ChatHistory } from '../../types/apiTypes';
-import { useAuth } from '../../contexts/AuthContext';
+import React, { useState, useRef, useEffect, ChangeEvent } from "react";
+import { Message, ChatRequest, ChatHistory } from "../../types/apiTypes";
+import { useAuth } from "../../contexts/AuthContext";
 
 const ChatContainer: React.FC = () => {
   // ==========================
@@ -9,16 +9,18 @@ const ChatContainer: React.FC = () => {
   const [currentChatId, setCurrentChatId] = useState<number | null>(null);
   const { currentUser } = useAuth();
   const [messages, setMessages] = useState<Message[]>([]);
-  const [input, setInput] = useState('');
+  const [input, setInput] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
   const [models, setModels] = useState<string[]>([]);
-  const [selectedModel, setSelectedModel] = useState<string>('');
+  const [selectedModel, setSelectedModel] = useState<string>("");
   const [chatHistories, setChatHistories] = useState<ChatHistory[]>([]);
   const messageContainerRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
-  const [token, setToken] = useState<string>('');
-  const [selectedImagesBase64, setSelectedImagesBase64] = useState<string[]>([]);
-  const [errorMessage, setErrorMessage] = useState<string>('');
+  const [token, setToken] = useState<string>("");
+  const [selectedImagesBase64, setSelectedImagesBase64] = useState<string[]>(
+    []
+  );
+  const [errorMessage, setErrorMessage] = useState<string>("");
   // --- 追加: 拡大表示用の画像 URL を保持する state ---
   const [enlargedImage, setEnlargedImage] = useState<string | null>(null);
   // --- 追加: 現在、プロンプトの編集（やり直し）モードかを示す ---
@@ -29,21 +31,24 @@ const ChatContainer: React.FC = () => {
   // ==========================
   useEffect(() => {
     const initDB = async () => {
-      const request = indexedDB.open('ChatHistoryDB', 1);
+      const request = indexedDB.open("ChatHistoryDB", 1);
 
       request.onerror = (event) => {
-        console.error('IndexedDB初期化エラー:', (event.target as IDBRequest).error);
+        console.error(
+          "IndexedDB初期化エラー:",
+          (event.target as IDBRequest).error
+        );
       };
 
       request.onupgradeneeded = (event) => {
         const db = (event.target as IDBOpenDBRequest).result;
-        if (!db.objectStoreNames.contains('chatHistory')) {
-          db.createObjectStore('chatHistory', { keyPath: 'id' });
+        if (!db.objectStoreNames.contains("chatHistory")) {
+          db.createObjectStore("chatHistory", { keyPath: "id" });
         }
       };
 
       request.onsuccess = () => {
-        console.log('IndexedDB初期化成功');
+        console.log("IndexedDB初期化成功");
         loadChatHistories();
       };
     };
@@ -60,9 +65,9 @@ const ChatContainer: React.FC = () => {
         try {
           const t = await currentUser.getIdToken();
           setToken(t);
-          console.log('トークン取得成功');
+          console.log("トークン取得成功");
         } catch (error) {
-          console.error('トークン取得エラー:', error);
+          console.error("トークン取得エラー:", error);
         }
       }
     };
@@ -74,7 +79,8 @@ const ChatContainer: React.FC = () => {
   // ==========================
   useEffect(() => {
     if (messageContainerRef.current) {
-      messageContainerRef.current.scrollTop = messageContainerRef.current.scrollHeight;
+      messageContainerRef.current.scrollTop =
+        messageContainerRef.current.scrollHeight;
     }
   }, [messages]);
 
@@ -85,12 +91,12 @@ const ChatContainer: React.FC = () => {
     const fetchModels = async () => {
       if (!token) return;
       try {
-        const response = await fetch('http://localhost:8080/app/models', {
-          method: 'GET',
+        const response = await fetch("http://localhost:8080/app/models", {
+          method: "GET",
           headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          }
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
         });
 
         if (!response.ok) {
@@ -103,7 +109,7 @@ const ChatContainer: React.FC = () => {
           setSelectedModel(data.models[0]);
         }
       } catch (error) {
-        console.error('モデル一覧取得エラー:', error);
+        console.error("モデル一覧取得エラー:", error);
       }
     };
     fetchModels();
@@ -112,7 +118,8 @@ const ChatContainer: React.FC = () => {
   // 環境変数から定数を取得（Vite の場合、import.meta.env を利用）
   const MAX_IMAGES = Number(import.meta.env.VITE_MAX_IMAGES) || 5; // 例：最大5枚
   const MAX_LONG_EDGE = Number(import.meta.env.VITE_MAX_LONG_EDGE) || 1568; // 例：最大1568px
-  const MAX_IMAGE_SIZE = Number(import.meta.env.VITE_MAX_IMAGE_SIZE) || (5 * 1024 * 1024); // 例：最大5MB（バイト）
+  const MAX_IMAGE_SIZE =
+    Number(import.meta.env.VITE_MAX_IMAGE_SIZE) || 5 * 1024 * 1024; // 例：最大5MB（バイト）
 
   /**
    * processImageFile
@@ -122,14 +129,14 @@ const ChatContainer: React.FC = () => {
    */
   const processImageFile = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
-      console.log('[processImageFile] 処理開始：', file.name);
+      console.log("[processImageFile] 処理開始：", file.name);
       const reader = new FileReader();
       reader.onload = (event) => {
         if (event.target?.result) {
           const dataUrl = event.target.result as string;
           const image = new Image();
           image.onload = () => {
-            console.log('[processImageFile] 画像読み込み完了：', file.name);
+            console.log("[processImageFile] 画像読み込み完了：", file.name);
             let { naturalWidth: width, naturalHeight: height } = image;
             console.log(`[processImageFile] 元サイズ: ${width}x${height}`);
             const longEdge = Math.max(width, height);
@@ -138,16 +145,18 @@ const ChatContainer: React.FC = () => {
               scale = MAX_LONG_EDGE / longEdge;
               width = Math.floor(width * scale);
               height = Math.floor(height * scale);
-              console.log(`[processImageFile] リサイズ実施：新サイズ ${width}x${height}`);
+              console.log(
+                `[processImageFile] リサイズ実施：新サイズ ${width}x${height}`
+              );
             } else {
-              console.log('[processImageFile] リサイズ不要');
+              console.log("[processImageFile] リサイズ不要");
             }
-            const canvas = document.createElement('canvas');
+            const canvas = document.createElement("canvas");
             canvas.width = width;
             canvas.height = height;
-            const ctx = canvas.getContext('2d');
+            const ctx = canvas.getContext("2d");
             if (!ctx) {
-              reject(new Error('キャンバスの取得に失敗しました'));
+              reject(new Error("キャンバスの取得に失敗しました"));
               return;
             }
             ctx.drawImage(image, 0, 0, width, height);
@@ -155,39 +164,43 @@ const ChatContainer: React.FC = () => {
             let quality = 0.85;
             const minQuality = 0.3;
             const processCanvas = () => {
-              const newDataUrl = canvas.toDataURL('image/jpeg', quality);
-              const arr = newDataUrl.split(',');
+              const newDataUrl = canvas.toDataURL("image/jpeg", quality);
+              const arr = newDataUrl.split(",");
               const byteString = atob(arr[1]);
               const buffer = new ArrayBuffer(byteString.length);
               const intArray = new Uint8Array(buffer);
               for (let i = 0; i < byteString.length; i++) {
                 intArray[i] = byteString.charCodeAt(i);
               }
-              const blob = new Blob([buffer], { type: 'image/jpeg' });
-              console.log(`[processImageFile] 現在の品質 ${quality}, Blobサイズ: ${blob.size} bytes`);
+              const blob = new Blob([buffer], { type: "image/jpeg" });
+              console.log(
+                `[processImageFile] 現在の品質 ${quality}, Blobサイズ: ${blob.size} bytes`
+              );
               if (blob.size > MAX_IMAGE_SIZE && quality > minQuality) {
                 quality -= 0.1;
-                console.log(`[processImageFile] サイズ超過のため再圧縮：新品質 ${quality}`);
+                console.log(
+                  `[processImageFile] サイズ超過のため再圧縮：新品質 ${quality}`
+                );
                 processCanvas();
               } else {
-                console.log('[processImageFile] 画像処理完了');
+                console.log("[processImageFile] 画像処理完了");
                 resolve(newDataUrl);
               }
             };
             processCanvas();
           };
           image.onerror = () => {
-            console.error('[processImageFile] 画像読み込みエラー', file.name);
-            reject(new Error('画像読み込みエラー'));
+            console.error("[processImageFile] 画像読み込みエラー", file.name);
+            reject(new Error("画像読み込みエラー"));
           };
           image.src = dataUrl;
         } else {
-          reject(new Error('Failed to read file'));
+          reject(new Error("Failed to read file"));
         }
       };
       reader.onerror = () => {
-        console.error('[processImageFile] ファイル読み込みエラー', file.name);
-        reject(new Error('ファイル読み込みエラー'));
+        console.error("[processImageFile] ファイル読み込みエラー", file.name);
+        reject(new Error("ファイル読み込みエラー"));
       };
       reader.readAsDataURL(file);
     });
@@ -197,30 +210,35 @@ const ChatContainer: React.FC = () => {
   //  IndexedDB から履歴を読み込み
   // ==========================
   const loadChatHistories = async () => {
-    const request = indexedDB.open('ChatHistoryDB', 1);
+    const request = indexedDB.open("ChatHistoryDB", 1);
     request.onsuccess = (event) => {
       const db = (event.target as IDBOpenDBRequest).result;
-      const transaction = db.transaction(['chatHistory'], 'readonly');
-      const store = transaction.objectStore('chatHistory');
+      const transaction = db.transaction(["chatHistory"], "readonly");
+      const store = transaction.objectStore("chatHistory");
 
       store.getAll().onsuccess = (e) => {
         const histories = (e.target as IDBRequest).result as ChatHistory[];
         const sortedHistories = histories
-          .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+          .sort(
+            (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
+          )
           .slice(0, 30);
         setChatHistories(sortedHistories);
       };
     };
 
     request.onerror = (event) => {
-      console.error('履歴読み込みエラー:', (event.target as IDBRequest).error);
+      console.error("履歴読み込みエラー:", (event.target as IDBRequest).error);
     };
   };
 
   // ==========================
   //  IndexedDB に履歴を保存
   // ==========================
-  const saveChatHistory = async (currentMessages: Message[], chatId: number | null) => {
+  const saveChatHistory = async (
+    currentMessages: Message[],
+    chatId: number | null
+  ) => {
     if (currentMessages.length === 0) return;
 
     const newChatId = chatId ?? Date.now();
@@ -230,17 +248,17 @@ const ChatContainer: React.FC = () => {
 
     const historyItem: ChatHistory = {
       id: newChatId,
-      title: currentMessages[0].content.slice(0, 10) + '...',
+      title: currentMessages[0].content.slice(0, 10) + "...",
       messages: [...currentMessages],
       date: new Date().toISOString(),
-      lastPromptDate: new Date().toISOString()
+      lastPromptDate: new Date().toISOString(),
     };
 
-    const request = indexedDB.open('ChatHistoryDB', 1);
+    const request = indexedDB.open("ChatHistoryDB", 1);
     request.onsuccess = (event) => {
       const db = (event.target as IDBOpenDBRequest).result;
-      const transaction = db.transaction(['chatHistory'], 'readwrite');
-      const store = transaction.objectStore('chatHistory');
+      const transaction = db.transaction(["chatHistory"], "readwrite");
+      const store = transaction.objectStore("chatHistory");
 
       store.getAll().onsuccess = (e) => {
         const histories = (e.target as IDBRequest).result as ChatHistory[];
@@ -252,18 +270,22 @@ const ChatContainer: React.FC = () => {
           updatedHistories[existingIndex] = {
             ...histories[existingIndex],
             messages: historyItem.messages,
-            lastPromptDate: historyItem.lastPromptDate
+            lastPromptDate: historyItem.lastPromptDate,
           };
         } else {
           updatedHistories.push(historyItem);
         }
 
         updatedHistories = updatedHistories
-          .sort((a, b) => new Date(b.lastPromptDate).getTime() - new Date(a.lastPromptDate).getTime())
+          .sort(
+            (a, b) =>
+              new Date(b.lastPromptDate).getTime() -
+              new Date(a.lastPromptDate).getTime()
+          )
           .slice(0, 30);
 
         store.clear().onsuccess = () => {
-          updatedHistories.forEach(history => store.add(history));
+          updatedHistories.forEach((history) => store.add(history));
           setChatHistories(updatedHistories);
         };
       };
@@ -276,7 +298,7 @@ const ChatContainer: React.FC = () => {
   const restoreHistory = (history: ChatHistory) => {
     // 履歴から復元する際、もし編集中の場合は入力内容をクリアして編集中状態を解除
     if (isEditMode) {
-      setInput('');
+      setInput("");
       setSelectedImagesBase64([]);
       setIsEditMode(false);
     }
@@ -291,7 +313,7 @@ const ChatContainer: React.FC = () => {
     setMessages([]);
     setCurrentChatId(null);
     setSelectedImagesBase64([]);
-    setInput('');
+    setInput("");
     setIsEditMode(false);
   };
 
@@ -299,26 +321,28 @@ const ChatContainer: React.FC = () => {
   //  画像アップロードハンドラー（枚数・長辺・容量制限付き）
   // ==========================
   const handleImageUpload = async (e: ChangeEvent<HTMLInputElement>) => {
-    console.log('[handleImageUpload] ファイル選択イベント発生');
+    console.log("[handleImageUpload] ファイル選択イベント発生");
     if (!e.target.files) return;
     const files = Array.from(e.target.files);
 
     // 既に選択されている画像枚数と合わせ、最大枚数を超えないようにする
     const allowedCount = MAX_IMAGES - selectedImagesBase64.length;
     if (files.length > allowedCount) {
-      setErrorMessage(`一度にアップロードできる画像は最大 ${MAX_IMAGES} 枚です`);
+      setErrorMessage(
+        `一度にアップロードできる画像は最大 ${MAX_IMAGES} 枚です`
+      );
       files.splice(allowedCount);
     }
 
-    const promises = files.map(file => processImageFile(file));
+    const promises = files.map((file) => processImageFile(file));
 
     try {
       const newBase64s = await Promise.all(promises);
-      console.log('[handleImageUpload] 画像処理完了:', newBase64s);
-      setSelectedImagesBase64(prev => [...prev, ...newBase64s]);
+      console.log("[handleImageUpload] 画像処理完了:", newBase64s);
+      setSelectedImagesBase64((prev) => [...prev, ...newBase64s]);
     } catch (error) {
-      console.error('[handleImageUpload] 画像アップロードエラー:', error);
-      setErrorMessage('画像の処理中にエラーが発生しました');
+      console.error("[handleImageUpload] 画像アップロードエラー:", error);
+      setErrorMessage("画像の処理中にエラーが発生しました");
     }
   };
 
@@ -329,7 +353,7 @@ const ChatContainer: React.FC = () => {
   const handleEditPrompt = (index: number) => {
     if (isProcessing) return; // 生成中は編集不可とする
     const messageToEdit = messages[index];
-    if (messageToEdit.role !== 'user') return; // ユーザーメッセージでなければ何もしない
+    if (messageToEdit.role !== "user") return; // ユーザーメッセージでなければ何もしない
 
     // 入力エリアに既存のプロンプト内容をロード
     setInput(messageToEdit.content);
@@ -349,14 +373,14 @@ const ChatContainer: React.FC = () => {
   //  メッセージ送信
   // ==========================
   const sendMessage = async () => {
-    let backupInput = '';
+    let backupInput = "";
     let backupImages: string[] = [];
     let backupMessages: Message[] = [];
 
     if (!input.trim() && selectedImagesBase64.length === 0) return;
     if (isProcessing || !token) return;
 
-    setErrorMessage('');
+    setErrorMessage("");
 
     try {
       setIsProcessing(true);
@@ -367,16 +391,17 @@ const ChatContainer: React.FC = () => {
       backupMessages = [...messages];
 
       const newUserMessage: Message = {
-        role: 'user',
-        content: input.trim() || '[Images Uploaded]',
-        images: selectedImagesBase64.length > 0 ? [...selectedImagesBase64] : []
+        role: "user",
+        content: input.trim() || "[Images Uploaded]",
+        images:
+          selectedImagesBase64.length > 0 ? [...selectedImagesBase64] : [],
       };
 
       let updatedMessages: Message[] = [...messages, newUserMessage];
       setMessages(updatedMessages);
 
       // 入力欄と画像選択状態をリセットし、編集モードも解除
-      setInput('');
+      setInput("");
       setSelectedImagesBase64([]);
       setIsEditMode(false);
 
@@ -385,30 +410,33 @@ const ChatContainer: React.FC = () => {
 
       const chatRequest: ChatRequest = {
         messages: updatedMessages,
-        model: selectedModel
+        model: selectedModel,
       };
 
-      const response = await fetch('http://localhost:8080/app/chat', {
-        method: 'POST',
+      const response = await fetch("http://localhost:8080/app/chat", {
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'text/event-stream',
-          'Authorization': `Bearer ${token}`
+          "Content-Type": "application/json",
+          Accept: "text/event-stream",
+          Authorization: `Bearer ${token}`,
         },
         signal,
-        body: JSON.stringify(chatRequest)
+        body: JSON.stringify(chatRequest),
       });
 
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
-      let assistantMessage = '';
+      let assistantMessage = "";
       const reader = response.body?.getReader();
       const decoder = new TextDecoder();
 
       if (reader) {
-        updatedMessages = [...updatedMessages, { role: 'assistant', content: '' }];
+        updatedMessages = [
+          ...updatedMessages,
+          { role: "assistant", content: "" },
+        ];
         setMessages(updatedMessages);
 
         while (true) {
@@ -421,8 +449,8 @@ const ChatContainer: React.FC = () => {
           setMessages((msgs) => {
             const newMsgs = [...msgs];
             newMsgs[newMsgs.length - 1] = {
-              role: 'assistant',
-              content: assistantMessage
+              role: "assistant",
+              content: assistantMessage,
             };
             return newMsgs;
           });
@@ -432,12 +460,14 @@ const ChatContainer: React.FC = () => {
       updatedMessages[updatedMessages.length - 1].content = assistantMessage;
       await saveChatHistory(updatedMessages, currentChatId);
     } catch (error: any) {
-      if (error.name !== 'AbortError') {
-        console.error('メッセージ送信エラー:', error);
+      if (error.name !== "AbortError") {
+        console.error("メッセージ送信エラー:", error);
         setMessages(backupMessages);
         setInput(backupInput);
         setSelectedImagesBase64(backupImages);
-        setErrorMessage(error instanceof Error ? error.message : '不明なエラー');
+        setErrorMessage(
+          error instanceof Error ? error.message : "不明なエラー"
+        );
       }
     } finally {
       setIsProcessing(false);
@@ -449,7 +479,7 @@ const ChatContainer: React.FC = () => {
   //  キー押下時の送信トリガー
   // ==========================
   const handleKeyPress = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       sendMessage();
     }
@@ -470,9 +500,9 @@ const ChatContainer: React.FC = () => {
   // ==========================
   const downloadHistory = () => {
     const historyData = JSON.stringify(chatHistories, null, 2);
-    const blob = new Blob([historyData], { type: 'application/json' });
+    const blob = new Blob([historyData], { type: "application/json" });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
+    const a = document.createElement("a");
     a.href = url;
     a.download = `chat-history-${new Date().toISOString()}.json`;
     document.body.appendChild(a);
@@ -494,19 +524,19 @@ const ChatContainer: React.FC = () => {
         const content = e.target?.result as string;
         const uploadedHistories = JSON.parse(content) as ChatHistory[];
 
-        const request = indexedDB.open('ChatHistoryDB', 1);
+        const request = indexedDB.open("ChatHistoryDB", 1);
         request.onsuccess = (event) => {
           const db = (event.target as IDBOpenDBRequest).result;
-          const transaction = db.transaction(['chatHistory'], 'readwrite');
-          const store = transaction.objectStore('chatHistory');
+          const transaction = db.transaction(["chatHistory"], "readwrite");
+          const store = transaction.objectStore("chatHistory");
 
           store.clear().onsuccess = () => {
-            uploadedHistories.forEach(history => store.add(history));
+            uploadedHistories.forEach((history) => store.add(history));
             setChatHistories(uploadedHistories);
           };
         };
       } catch (error) {
-        console.error('履歴アップロードエラー:', error);
+        console.error("履歴アップロードエラー:", error);
       }
     };
     reader.readAsText(file);
@@ -524,7 +554,7 @@ const ChatContainer: React.FC = () => {
             <h2 className="text-xl font-semibold mb-4">エラー</h2>
             <p className="mb-4">{errorMessage}</p>
             <button
-              onClick={() => setErrorMessage('')}
+              onClick={() => setErrorMessage("")}
               className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
             >
               閉じる
@@ -536,14 +566,18 @@ const ChatContainer: React.FC = () => {
       {/* サイドバー */}
       <div className="w-64 bg-gray-800 shadow-lg p-4 overflow-y-auto">
         <div className="mb-6">
-          <h2 className="text-lg font-semibold mb-4 text-gray-100">モデル選択</h2>
+          <h2 className="text-lg font-semibold mb-4 text-gray-100">
+            モデル選択
+          </h2>
           <select
             value={selectedModel}
             onChange={(e) => setSelectedModel(e.target.value)}
             className="w-full p-2 bg-gray-700 border-gray-600 text-gray-100 rounded-lg focus:ring-2 focus:ring-blue-500"
           >
             {models.map((m) => (
-              <option key={m} value={m}>{m}</option>
+              <option key={m} value={m}>
+                {m}
+              </option>
             ))}
           </select>
         </div>
@@ -573,7 +607,9 @@ const ChatContainer: React.FC = () => {
           </label>
         </div>
         <div>
-          <h2 className="text-lg font-semibold mb-4 text-gray-100">最近のチャット</h2>
+          <h2 className="text-lg font-semibold mb-4 text-gray-100">
+            最近のチャット
+          </h2>
           <div className="space-y-2">
             {chatHistories.map((history) => (
               <div
@@ -601,16 +637,19 @@ const ChatContainer: React.FC = () => {
           {messages.map((message, index) => (
             <div
               key={index}
-              className={`max-w-[80%] ${message.role === 'user' ? 'ml-auto' : 'mr-auto'}`}
+              className={`max-w-[80%] ${
+                message.role === "user" ? "ml-auto" : "mr-auto"
+              }`}
             >
               <div
-                className={`p-4 rounded-lg ${message.role === 'user'
-                    ? 'bg-blue-900 text-gray-100'
-                    : 'bg-gray-800 border border-gray-700 text-gray-100'
-                  }`}
+                className={`p-4 rounded-lg ${
+                  message.role === "user"
+                    ? "bg-blue-900 text-gray-100"
+                    : "bg-gray-800 border border-gray-700 text-gray-100"
+                }`}
               >
                 {/* ユーザー側メッセージの場合、編集ボタンを表示 */}
-                {message.role === 'user' ? (
+                {message.role === "user" ? (
                   <div className="flex justify-between items-center">
                     <div>{message.content}</div>
                     <button
@@ -638,8 +677,12 @@ const ChatContainer: React.FC = () => {
                   </div>
                 )}
               </div>
-              <div className={`text-xs text-gray-400 mt-1 ${message.role === 'user' ? 'text-right' : 'text-left'}`}>
-                {message.role === 'user' ? 'あなた' : 'アシスタント'}
+              <div
+                className={`text-xs text-gray-400 mt-1 ${
+                  message.role === "user" ? "text-right" : "text-left"
+                }`}
+              >
+                {message.role === "user" ? "あなた" : "アシスタント"}
               </div>
             </div>
           ))}
@@ -666,7 +709,11 @@ const ChatContainer: React.FC = () => {
                   />
                   <button
                     className="absolute top-0 right-0 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center"
-                    onClick={() => setSelectedImagesBase64(prev => prev.filter((_, index) => index !== i))}
+                    onClick={() =>
+                      setSelectedImagesBase64((prev) =>
+                        prev.filter((_, index) => index !== i)
+                      )
+                    }
                   >
                     ×
                   </button>
@@ -697,9 +744,13 @@ const ChatContainer: React.FC = () => {
             </label>
             <button
               onClick={isProcessing ? stopGeneration : sendMessage}
-              className={`px-4 py-2 rounded-lg ${isProcessing ? 'bg-red-900 hover:bg-red-800' : 'bg-blue-900 hover:bg-blue-800'} text-gray-100 transition-colors`}
+              className={`px-4 py-2 rounded-lg ${
+                isProcessing
+                  ? "bg-red-900 hover:bg-red-800"
+                  : "bg-blue-900 hover:bg-blue-800"
+              } text-gray-100 transition-colors`}
             >
-              {isProcessing ? '停止' : '送信'}
+              {isProcessing ? "停止" : "送信"}
             </button>
           </div>
         </div>

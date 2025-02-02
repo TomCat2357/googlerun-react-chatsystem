@@ -12,6 +12,12 @@ from litellm import completion, token_counter
 # .envファイルを読み込み
 load_dotenv("./config/.env")
 
+# 環境変数から画像処理設定を読み込む
+MAX_IMAGES = int(os.getenv("MAX_IMAGES", "5"))
+MAX_LONG_EDGE = int(os.getenv("MAX_LONG_EDGE", "1568"))
+MAX_IMAGE_SIZE = int(os.getenv("MAX_IMAGE_SIZE", "5242880"))  # デフォルト5MB
+
+
 # ロギング設定
 logging.basicConfig(
     level=logging.INFO,
@@ -24,6 +30,8 @@ logger = logging.getLogger(__name__)
 # ここで環境変数から認証ファイルパスを取得し、Firebaseアプリを初期化しています
 cred = credentials.Certificate(os.getenv("GOOGLE_APPLICATION_CREDENTIALS"))
 firebase_admin.initialize_app(cred)
+
+
 
 app = Flask(__name__)
 # CORSの設定 - 開発環境用
@@ -41,6 +49,8 @@ def process_uploaded_image(image_data: str) -> str:
     アップロードされた画像データをリサイズおよび圧縮し、
     適切な「data:image/～;base64,」形式の文字列を返す関数。
     """
+    
+
     try:
         # data:～のヘッダーがある場合は除去
         header = None
@@ -64,8 +74,8 @@ def process_uploaded_image(image_data: str) -> str:
         )
 
         # 長辺が1568ピクセルを超えている場合はリサイズ（アスペクト比維持）
-        if max(width, height) > 1568:
-            scale = 1568 / max(width, height)
+        if max(width, height) > MAX_LONG_EDGE:
+            scale = MAX_LONG_EDGE / max(width, height)
             new_width = int(width * scale)
             new_height = int(height * scale)
             image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
@@ -92,7 +102,7 @@ def process_uploaded_image(image_data: str) -> str:
         )
 
         # 5MBを超える場合、品質を下げて再圧縮（最小品質は30まで）
-        while len(output_data) > 5 * 1024 * 1024 and quality > 30:
+        while len(output_data) > MAX_IMAGE_SIZE and quality > 30:
             quality -= 10
             output = io.BytesIO()
             image.save(output, format=output_format, quality=quality, optimize=True)
@@ -109,7 +119,6 @@ def process_uploaded_image(image_data: str) -> str:
         # エラー時は元の画像データを返す
         return image_data
 
-        return image_data
 
 
 def get_api_key_for_model(model: str) -> Optional[str]:
@@ -260,7 +269,7 @@ def chat(decoded_token: Dict) -> Response:
                     parts.append({"type": "text", "text": msg["content"]})
                 # １ターンあたり最大５毎の画像まで
                 logger.info(f"画像の数: {len(msg['images'])}")
-                images_to_process = msg["images"][:5]
+                images_to_process = msg["images"][:MAX_IMAGES]
 
                 for image in images_to_process:
                     processed_image = process_uploaded_image(image)
