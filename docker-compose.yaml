@@ -7,7 +7,7 @@ services:
       dockerfile: Dockerfile
     ports:
       - "8080:8080"
-    environment:
-      - PORT=8080
-    volumes:
-      - ./backend/config/.env:/app/config/.env:ro
+    #environment:
+    #  - PORT=8080
+    #volumes:
+    #  - ./backend/config/.env:/app/config/.env:ro

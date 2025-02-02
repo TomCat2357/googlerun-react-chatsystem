@@ -19,7 +19,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # .envファイルを読み込み
-load_dotenv("./config/.env")
+load_dotenv("./backend/config/.env")
 
 # 環境変数から画像処理設定を読み込む
 MAX_IMAGES = int(os.getenv("MAX_IMAGES", "5"))
@@ -327,15 +327,16 @@ def logout() -> Response:
         return jsonify({"error": str(e)}), 401
     
 
-BASE_PATH = '../frontend/dist'
+# フロントエンドのルーティング
+FRONTEND_PATH = './frontend/dist'
 
 @app.route('/')
 def index():
-    return send_from_directory(BASE_PATH, 'index.html')
+    return send_from_directory(FRONTEND_PATH, 'index.html')
 
 @app.route('/<path:path>')
 def static_file(path):
-    return send_from_directory(BASE_PATH, path)
+    return send_from_directory(FRONTEND_PATH, path)
 
 
 #%%
