@@ -20,7 +20,7 @@ const ChatContainer: React.FC = () => {
   const [selectedImagesBase64, setSelectedImagesBase64] = useState<string[]>([]);
   const [errorMessage, setErrorMessage] = useState<string>("");
   const API_BASE_URL : string = import.meta.env.VITE_API_BASE_URL;
-  console.log("API_BASE_URL:", API_BASE_URL);
+  
 
   // --- 編集モード用の状態 ---
   const [isEditMode, setIsEditMode] = useState<boolean>(false);

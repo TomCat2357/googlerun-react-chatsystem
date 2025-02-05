@@ -28,9 +28,7 @@ MAX_IMAGE_SIZE = int(os.getenv("MAX_IMAGE_SIZE", "5242880"))  # デフォルト5
 
 # Firebase Admin SDKの初期化
 # ここで環境変数から認証ファイルパスを取得し、Firebaseアプリを初期化しています
-cred = credentials.Certificate(os.getenv("GOOGLE_APPLICATION_CREDENTIALS"))
-firebase_admin.initialize_app(cred)
-
+firebase_admin.initialize_app(credentials.Certificate('./backend/config/firebase_credential.json'))
 
 app = Flask(__name__)
 # CORSの設定 - 開発環境用
@@ -358,3 +356,4 @@ if __name__ == "__main__":
     app.run(
         port=int(os.getenv("PORT", "8080")), debug=bool(int(os.getenv("DEBUG", 0)))
     )
+#%%

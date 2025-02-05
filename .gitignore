@@ -6,3 +6,4 @@
 !.env.example
 *.pyc
 *firebase*.json
+*service_account*.json
