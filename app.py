@@ -1,4 +1,4 @@
-#%%
+# %%
 from flask import Flask, request, Response, jsonify, make_response, send_from_directory
 from flask_cors import CORS
 from firebase_admin import auth, credentials
@@ -22,13 +22,15 @@ logger = logging.getLogger(__name__)
 load_dotenv("./backend/config/.env")
 
 # 環境変数から画像処理設定を読み込む
-MAX_IMAGES = int(os.getenv("MAX_IMAGES", "5"))
-MAX_LONG_EDGE = int(os.getenv("MAX_LONG_EDGE", "1568"))
-MAX_IMAGE_SIZE = int(os.getenv("MAX_IMAGE_SIZE", "5242880"))  # デフォルト5MB
+MAX_IMAGES = int(os.getenv("MAX_IMAGES"))
+MAX_LONG_EDGE = int(os.getenv("MAX_LONG_EDGE"))
+MAX_IMAGE_SIZE = int(os.getenv("MAX_IMAGE_SIZE"))  # デフォルト5MB
 
 # Firebase Admin SDKの初期化
 # ここで環境変数から認証ファイルパスを取得し、Firebaseアプリを初期化しています
-firebase_admin.initialize_app(credentials.Certificate('./backend/config/firebase_credential.json'))
+firebase_admin.initialize_app(
+    credentials.Certificate(os.getenv("GOOGLE_APPLICATION_CREDENTIALS"))
+)
 
 app = Flask(__name__)
 # CORSの設定 - 開発環境用
@@ -42,15 +44,15 @@ if int(os.getenv("DEBUG", 0)):
 
 CORS(
     app,
-    #同一オリジンのためoriginsの設定不要。ただしネットワークに置いたときは必要かもしれない。
-    origins = origins,
-    #クッキーを使わないのでFalseにした
-    #supports_credentials=True,
+    # DEBUGモードでなければ同一オリジンのためoriginsの設定不要なのかもしれない。
+    # ただしネットワークに置いたときは必要かもしれない。
+    origins=origins,
+    # クッキーを使わないのでFalseにした
     supports_credentials=False,
     expose_headers=["Authorization"],
-    allow_headers=["Content-Type", "Authorization"],
+    allow_headers=["Content-Type", "Authorization", "X-API-Key"],
+    methods=["GET", "POST", "OPTIONS"],
 )
-
 
 
 def process_uploaded_image(image_data: str) -> str:
@@ -335,25 +337,25 @@ def logout() -> Response:
         logger.error("ログアウト処理中にエラーが発生: %s", str(e), exc_info=True)
         return jsonify({"error": str(e)}), 401
 
-# フロントエンドのルーティング
-FRONTEND_PATH = './frontend/dist'
 
 # デバッグモードの時は動かない
+# デバッグモードではnode.jsでフロントエンドは動く
 if not int(os.getenv("DEBUG", 0)):
-    @app.route('/')
-    def index():
-        return send_from_directory(FRONTEND_PATH, 'index.html')
+    # フロントエンドのルーティング
+    FRONTEND_PATH = "./frontend/dist"
 
-    @app.route('/<path:path>')
+    @app.route("/")
+    def index():
+        return send_from_directory(FRONTEND_PATH, "index.html")
+
+    @app.route("/<path:path>")
     def static_file(path):
         return send_from_directory(FRONTEND_PATH, path)
 
 
-#%%
+# %%
 if __name__ == "__main__":
     # Flaskアプリ起動時のログを出力
     logger.info("Flaskアプリを起動します DEBUG: %s", bool(int(os.getenv("DEBUG", 0))))
-    app.run(
-        port=int(os.getenv("PORT", "8080")), debug=bool(int(os.getenv("DEBUG", 0)))
-    )
-#%%
+    app.run(port=int(os.getenv("PORT", "8080")), debug=bool(int(os.getenv("DEBUG", 0))))
+# %%
