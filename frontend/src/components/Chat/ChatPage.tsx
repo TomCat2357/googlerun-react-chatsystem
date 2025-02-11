@@ -567,8 +567,7 @@ const ChatContainer: React.FC = () => {
   //  JSX の描画
   // ==========================
   return (
-    <div className="flex flex-1 h-[calc(100vh-64px)] mt-10 overflow-hidden">
-      {/* エラーポップアップ */}
+    <div className="flex flex-1 h-[calc(100vh-64px)] mt-2 overflow-hidden">      {/* エラーポップアップ */}
       {errorMessage && (
         <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50 z-10">
           <div className="bg-white p-6 rounded shadow">

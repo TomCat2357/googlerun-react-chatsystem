@@ -17,7 +17,7 @@ const Header = () => {
   };
 
   return (
-    <header className="bg-dark-primary p-4 shadow-md">
+    <header className="bg-dark-primary p-2 mb-2">
       <div className="container mx-auto flex justify-between items-center">
         <button
           onClick={() => navigate("/app/main")}
@@ -29,7 +29,7 @@ const Header = () => {
           <span className="text-white">{currentUser?.email}</span>
           <button
             onClick={handleLogout}
-            className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 transition-colors"
+            className="px-3 py-1 bg-red-600 text-white rounded hover:bg-red-700 transition-colors"
           >
             ログアウト
           </button>
