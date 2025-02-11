@@ -1,10 +1,18 @@
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import { AuthProvider } from './contexts/AuthContext';
-import ProtectedRoute from './routing/ProtectedRoute';
-import LoginPage from './components/Login/LoginPage';
-import MainPage from './components/Main/MainPage';
-import ChatPage from './components/Chat/ChatPage';
-import Header from './components/Header/Header';
+import { StrictMode } from "react";
+import { createRoot } from "react-dom/client";
+import {
+  BrowserRouter as Router,
+  Routes,
+  Route,
+  Navigate,
+} from "react-router-dom";
+import { AuthProvider } from "./contexts/AuthContext";
+import ProtectedRoute from "./routing/ProtectedRoute";
+import LoginPage from "./components/Login/LoginPage";
+import MainPage from "./components/Main/MainPage";
+import ChatPage from "./components/Chat/ChatPage";
+import Header from "./components/Header/Header";
+import "./index.css";
 
 function App() {
   return (
@@ -28,7 +36,7 @@ function App() {
                     </Routes>
                   </>
                 </ProtectedRoute>
-              } 
+              }
             />
 
             {/* 無効なパスのリダイレクト */}
@@ -40,4 +48,8 @@ function App() {
   );
 }
 
-export default App;
+createRoot(document.getElementById("root")!).render(
+  <StrictMode>
+    <App />
+  </StrictMode>
+);

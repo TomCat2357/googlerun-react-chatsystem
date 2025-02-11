@@ -1,0 +1,30 @@
+frontend/
+├── src/
+│   ├── main.tsx
+│   ├── components/
+│   │   ├── Login/
+│   │   │   └── LoginPage.tsx
+│   │   ├── Main/
+│   │   │   └── MainPage.tsx
+│   │   ├── Chat/
+│   │   │   └── ChatPage.tsx
+│   │   ├── Header/
+│   │   │   └── Header.tsx
+│   │   └── Auth/
+│   │       ├── LoginButton.tsx
+│   │       └── LogoutButton.tsx
+│   ├── contexts/
+│   │   └── AuthContext.tsx
+│   ├── routing/
+│   │   ├── index.tsx
+│   │   └── ProtectedRoute.tsx
+│   ├── firebase/
+│   │   └── firebase.ts
+│   └── index.css
+├── vite.config.ts
+├── postcss.config.js
+├── tailwind.config.js
+├── tsconfig.app.json
+├── tsconfig.node.json
+├── package.json
+└── README.md
