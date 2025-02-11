@@ -21,9 +21,9 @@ const Header = () => {
       <div className="container mx-auto flex justify-between items-center">
         <button
           onClick={() => navigate("/app/main")}
-          className="text-white text-xl font-bold hover:text-gray-300"
+          className="px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
         >
-          Home
+          ホーム
         </button>
         <div className="flex items-center gap-4">
           <span className="text-white">{currentUser?.email}</span>
