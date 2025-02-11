@@ -1,5 +1,4 @@
 import { useNavigate } from 'react-router-dom';
-import Header from '../Header/Header';
 
 const MainPage = () => {
   const navigate = useNavigate();
@@ -24,6 +23,15 @@ const MainPage = () => {
           <div className="bg-dark-secondary p-6 rounded-lg shadow-lg opacity-50">
             <h2 className="text-xl font-bold text-white mb-2">履歴</h2>
             <p className="text-gray-300">過去の会話履歴を確認（開発中）</p>
+          </div>
+
+          {/* Geocodingへのリンクカード（仮実装） */}
+          <div 
+            onClick={() => navigate('/app/geocoding')}
+            className="bg-dark-secondary p-6 rounded-lg shadow-lg cursor-pointer hover:bg-dark-accent transition-colors"
+          >
+            <h2 className="text-xl font-bold text-white mb-2">Geocoding</h2>
+            <p className="text-gray-300">位置情報の変換機能（開発中）</p>
           </div>
           
           {/* 必要に応じて他の機能カードを追加 */}
