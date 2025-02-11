@@ -1,16 +1,42 @@
-import LogoutButton from '../Auth/LogoutButton';
+import { useNavigate } from "react-router-dom";
+import { useAuth } from "../../contexts/AuthContext";
 
-export default function Header() {
-    return (
-        <header className="fixed top-0 left-0 w-full h-[48px] bg-gray-800 
-                          flex justify-between items-center px-4 
-                          shadow-lg shadow-gray-900/50 z-50">
-            <div className="text-lg font-bold text-gray-100">
-                メインUI
-            </div>
-            <div className="flex items-center">
-                <LogoutButton />
-            </div>
-        </header>
-    );
-}
+const Header = () => {
+  const { currentUser, setCurrentUser } = useAuth();
+  const navigate = useNavigate();
+
+  const handleLogout = async () => {
+    try {
+      // ユーザー状態をクリア
+      setCurrentUser(null);
+      // ログインページにリダイレクト
+      navigate("/");
+    } catch (error) {
+      console.error("ログアウトエラー:", error);
+    }
+  };
+
+  return (
+    <header className="bg-dark-primary p-4 shadow-md">
+      <div className="container mx-auto flex justify-between items-center">
+        <button
+          onClick={() => navigate("/app/main")}
+          className="text-white text-xl font-bold hover:text-gray-300"
+        >
+          Home
+        </button>
+        <div className="flex items-center gap-4">
+          <span className="text-white">{currentUser?.email}</span>
+          <button
+            onClick={handleLogout}
+            className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 transition-colors"
+          >
+            ログアウト
+          </button>
+        </div>
+      </div>
+    </header>
+  );
+};
+
+export default Header;

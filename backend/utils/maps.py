@@ -1,6 +1,6 @@
 #%%
 import requests
-from logger import logger
+from backend.utils.logger import logger
 
 def get_static_map(api_key, latitude, longitude, zoom=18, size=(600, 600), map_type="satellite"):
     """

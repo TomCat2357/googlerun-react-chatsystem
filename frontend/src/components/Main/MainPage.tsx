@@ -1,18 +1,36 @@
-// src/components/Main/MainPage.tsx
+import { useNavigate } from 'react-router-dom';
 import Header from '../Header/Header';
 
-export default function MainPage() {
+const MainPage = () => {
+  const navigate = useNavigate();
+
   return (
-    <div className="min-h-screen bg-gray-100">
-      <Header />
-      <main className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
-        <div className="px-4 py-6 sm:px-0">
-          <div className="bg-white rounded-lg shadow p-6">
-            <h1 className="text-2xl font-bold text-gray-900 mb-4">メイン画面</h1>
-            <p className="text-gray-600">ログインに成功しました！</p>
+    <div className="min-h-screen bg-dark-primary">
+      
+      <main className="container mx-auto px-4 py-8">
+        <h1 className="text-3xl font-bold text-white mb-8">ダッシュボード</h1>
+        
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {/* チャットへのリンクカード */}
+          <div 
+            onClick={() => navigate('/app/chat')}
+            className="bg-dark-secondary p-6 rounded-lg shadow-lg cursor-pointer hover:bg-dark-accent transition-colors"
+          >
+            <h2 className="text-xl font-bold text-white mb-2">チャット</h2>
+            <p className="text-gray-300">AIとの対話を開始する</p>
           </div>
+
+          {/* 将来的な機能のためのプレースホルダーカード */}
+          <div className="bg-dark-secondary p-6 rounded-lg shadow-lg opacity-50">
+            <h2 className="text-xl font-bold text-white mb-2">履歴</h2>
+            <p className="text-gray-300">過去の会話履歴を確認（開発中）</p>
+          </div>
+          
+          {/* 必要に応じて他の機能カードを追加 */}
         </div>
       </main>
     </div>
   );
-}
+};
+
+export default MainPage;

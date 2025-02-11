@@ -1,33 +1,43 @@
-// src/App.tsx
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
-//import MainPage from './components/Main/MainPage';
-import LoginPage from './components/Login/LoginPage';
-import ProtectedRoute from './routing/ProtectedRoute';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
-import LoadingHandler from './components/Common/LoadingHandler';
-import ChatContainer from './components/Chat/ChatContainer';  // 追加
+import ProtectedRoute from './routing/ProtectedRoute';
+import LoginPage from './components/Login/LoginPage';
+import MainPage from './components/Main/MainPage';
+import ChatPage from './components/Chat/ChatPage';
 import Header from './components/Header/Header';
-export default function App() {
+
+function App() {
   return (
-    <AuthProvider>
-      <BrowserRouter>
-        <LoadingHandler>
+    <Router>
+      <AuthProvider>
+        <div className="min-h-screen bg-dark-primary">
           <Routes>
+            {/* ログインページ - ヘッダーなし */}
             <Route path="/" element={<LoginPage />} />
+
+            {/* 認証が必要なルート - ヘッダーあり */}
             <Route
-              path="/app/main"
+              path="/app/*"
               element={
                 <ProtectedRoute>
-                  <div className="flex flex-col h-screen">
+                  <>
                     <Header />
-                    <ChatContainer />
-                  </div>
+                    <Routes>
+                      <Route path="main" element={<MainPage />} />
+                      <Route path="chat" element={<ChatPage />} />
+                    </Routes>
+                  </>
                 </ProtectedRoute>
-              }
+              } 
             />
+
+            {/* 無効なパスのリダイレクト */}
+            <Route path="*" element={<Navigate to="/app/main" replace />} />
           </Routes>
-        </LoadingHandler>
-      </BrowserRouter>
-    </AuthProvider>
+        </div>
+      </AuthProvider>
+    </Router>
   );
 }
+
+export default App;
