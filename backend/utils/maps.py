@@ -1,5 +1,6 @@
 #%%
-import requests, os
+import requests
+from logger import logger
 
 def get_static_map(api_key, latitude, longitude, zoom=18, size=(600, 600), map_type="satellite"):
     """
@@ -11,8 +12,8 @@ def get_static_map(api_key, latitude, longitude, zoom=18, size=(600, 600), map_t
     :param zoom: ズームレベル（1: 世界、5: 大陸、10: 都市、15: 通り、20: 建物）
     :param size: 画像サイズ（幅, 高さ）最大640x640ピクセル
     :param map_type: マップタイプ（roadmap, satellite, hybrid, terrain）
-    :param filename: 保存するファイル名
     """
+    logger.info("静的地図取得リクエスト開始: 緯度=%s, 経度=%s, ズーム=%s", latitude, longitude, zoom)
     base_url = "https://maps.googleapis.com/maps/api/staticmap"
     params = {
         "center": f"{latitude},{longitude}",
@@ -23,7 +24,10 @@ def get_static_map(api_key, latitude, longitude, zoom=18, size=(600, 600), map_t
     }
 
     response = requests.get(base_url, params=params)
-
+    if response.ok:
+        logger.info("静的地図取得成功。ステータスコード: %s", response.status_code)
+    else:
+        logger.error("静的地図取得失敗。ステータスコード: %s", response.status_code)
     return response
 
 def get_coordinates(api_key, address):
@@ -34,20 +38,19 @@ def get_coordinates(api_key, address):
     :param address: 住所または建物名などのキーワード
     :return: (緯度, 経度) のタプル。取得できなかった場合は None を返します。
     """
+    logger.info("ジオコーディングリクエスト開始: 住所=%s", address)
     base_url = "https://maps.googleapis.com/maps/api/geocode/json"
     params = {
         "address": address,
         "key": api_key
     }
     response = requests.get(base_url, params=params)
-    data = response.json()
-
-    if data.get("status") == "OK" and data.get("results"):
-        location = data["results"][0]["geometry"]["location"]
-        return location["lat"], location["lng"]
+    if response.ok:
+        logger.info("ジオコーディング成功。ステータスコード: %s", response.status_code)
     else:
-        print("ジオコーディングに失敗しました。", data.get("status"), data.get("error_message"))
-        return None
+        logger.error("ジオコーディング失敗。ステータスコード: %s", response.status_code)
+    data = response.json()
+    return data
 
 def get_address(api_key, latitude, longitude):
     """
@@ -58,27 +61,20 @@ def get_address(api_key, latitude, longitude):
     :param longitude: 経度
     :return: 住所（文字列）。取得できなかった場合は None を返します。
     """
+    logger.info("リバースジオコーディングリクエスト開始: 緯度=%s, 経度=%s", latitude, longitude)
     base_url = "https://maps.googleapis.com/maps/api/geocode/json"
     params = {
         "latlng": f"{latitude},{longitude}",
         "key": api_key
     }
     response = requests.get(base_url, params=params)
-    data = response.json()
-
-    if data.get("status") == "OK" and data.get("results"):
-        # 結果の中で最も適合度が高いもの（最初の結果）を返します。
-        return data["results"][0]["formatted_address"]
+    if response.ok:
+        logger.info("リバースジオコーディング成功。ステータスコード: %s", response.status_code)
     else:
-        print("リバースジオコーディングに失敗しました。", data.get("status"), data.get("error_message"))
-        return None
-
+        logger.error("リバースジオコーディング失敗。ステータスコード: %s", response.status_code)
+    data = response.json()
+    return data
 
 #%%
-# 使用例
-
 if __name__ == "__main__":
-    api_key = os.getenv('GOOGLE_MAPS_API_KEY')  # 取得したAPIキーを入力してください
-    latitude = 35.658581  # 例: 東京タワーの緯度
-    longitude = 139.745433  # 例: 東京タワーの経度
-    result = get_static_map(api_key, latitude, longitude)
+    pass

@@ -4,19 +4,12 @@ from flask_cors import CORS
 from firebase_admin import auth, credentials
 from dotenv import load_dotenv
 from functools import wraps
-import os, json, logging, firebase_admin, io, base64
+import os, json, firebase_admin, io, base64
 from PIL import Image
 from typing import Dict, Union, Optional, Tuple, Callable, Any, List
 from litellm import completion, token_counter
-
-
-# ロギング設定
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s",
-    handlers=[logging.StreamHandler(), logging.FileHandler("app.log")],
-)
-logger = logging.getLogger(__name__)
+from backend.utils.logger import *
+from backend.utils.maps import *
 
 # .envファイルを読み込み
 load_dotenv("./backend/config/.env")
