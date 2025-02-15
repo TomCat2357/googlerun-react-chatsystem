@@ -1,4 +1,3 @@
-// src/components/GeocodingInput.tsx
 import React, { useState, useEffect } from "react";
 import { useAuth } from "../../contexts/AuthContext";
 
@@ -9,7 +8,6 @@ const GeocodingPage = () => {
   const [token, setToken] = useState<string>("");
 
   const { currentUser } = useAuth();
-
   const API_BASE_URL: string = import.meta.env.VITE_API_BASE_URL;
 
   useEffect(() => {
@@ -28,8 +26,14 @@ const GeocodingPage = () => {
     setLineCount(validLines.length);
   };
 
+  // 共通の送信処理（確認含む）
   const handleSendLines = async () => {
     const validLines = inputText.split("\n").filter((line) => line.trim().length > 0);
+    if (validLines.length === 0) return;
+
+    const confirmed = window.confirm(`${validLines.length} 行です。実行しますか？`);
+    if (!confirmed) return;
+
     setIsSending(true);
     try {
       const response = await fetch(`${API_BASE_URL}/backend/query2coordinates`, {
@@ -52,6 +56,14 @@ const GeocodingPage = () => {
     }
   };
 
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // Shift+Enterの場合は改行を許可
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleSendLines();
+    }
+  };
+
   return (
     <div className="max-w-2xl mx-auto p-4">
       <h1 className="text-2xl font-bold mb-4 text-gray-100">住所ジオコーディング</h1>
@@ -66,6 +78,7 @@ const GeocodingPage = () => {
           id="addressInput"
           value={inputText}
           onChange={handleTextChange}
+          onKeyDown={handleKeyDown}
           className="w-full h-64 p-2 bg-gray-800 text-gray-100 border border-gray-700 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
           placeholder="札幌市役所　札幌市中央区北１条西２丁目
 札幌市北区北２３条西４丁目３－４"
