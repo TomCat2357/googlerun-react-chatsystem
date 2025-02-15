@@ -1,13 +1,15 @@
+// src/pages/chatpage.tsx
 import React, { useState, useRef, useEffect, ChangeEvent } from "react";
 import { Message, ChatRequest, ChatHistory } from "../../types/apiTypes";
-import { useAuth } from "../../contexts/AuthContext";
+import { useToken } from "../../hooks/useToken";
+import * as indexedDBUtils from "../../utils/indexedDBUtils";
+import * as Config from "../../config";
 
-const ChatContainer: React.FC = () => {
+const ChatPage: React.FC = () => {
   // ==========================
   //  State, Ref の定義
   // ==========================
   const [currentChatId, setCurrentChatId] = useState<number | null>(null);
-  const { currentUser } = useAuth();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
@@ -16,75 +18,49 @@ const ChatContainer: React.FC = () => {
   const [chatHistories, setChatHistories] = useState<ChatHistory[]>([]);
   const messageContainerRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
-  const [token, setToken] = useState<string>("");
   const [selectedImagesBase64, setSelectedImagesBase64] = useState<string[]>([]);
   const [errorMessage, setErrorMessage] = useState<string>("");
-  const API_BASE_URL : string = import.meta.env.VITE_API_BASE_URL;
-  
+  const token = useToken();
+  const API_BASE_URL: string = Config.API_BASE_URL;
 
-  // --- 編集モード用の状態 ---
+  // --- 編集モード用 ---
   const [isEditMode, setIsEditMode] = useState<boolean>(false);
-  // 編集モードに入る前の全メッセージを保持（キャンセル時に元に戻すため）
   const [backupMessages, setBackupMessages] = useState<Message[]>([]);
-
-  // --- 追加: 拡大表示用の画像 URL を保持する state ---
+  // --- 拡大表示用画像 ---
   const [enlargedImage, setEnlargedImage] = useState<string | null>(null);
+
+  // IndexedDB用（ChatHistoryDB）
+  function openChatHistoryDB(): Promise<IDBDatabase> {
+    return indexedDBUtils.openDB("ChatHistoryDB", 1, (db) => {
+      if (!db.objectStoreNames.contains("chatHistory")) {
+        db.createObjectStore("chatHistory", { keyPath: "id" });
+      }
+    });
+  }
 
   // ==========================
   //  IndexedDB 初期化とチャット履歴の読み込み
   // ==========================
   useEffect(() => {
     const initDB = async () => {
-      const request = indexedDB.open("ChatHistoryDB", 1);
-
-      request.onerror = (event) => {
-        console.error(
-          "IndexedDB初期化エラー:",
-          (event.target as IDBRequest).error
-        );
-      };
-
-      request.onupgradeneeded = (event) => {
-        const db = (event.target as IDBOpenDBRequest).result;
-        if (!db.objectStoreNames.contains("chatHistory")) {
-          db.createObjectStore("chatHistory", { keyPath: "id" });
-        }
-      };
-
-      request.onsuccess = () => {
+      try {
+        await openChatHistoryDB();
         console.log("IndexedDB初期化成功");
         loadChatHistories();
-      };
+      } catch (error) {
+        console.error("IndexedDB初期化エラー:", error);
+      }
     };
 
     initDB();
   }, []);
 
   // ==========================
-  //  認証トークンの取得
-  // ==========================
-  useEffect(() => {
-    const fetchToken = async () => {
-      if (currentUser) {
-        try {
-          const t = await currentUser.getIdToken();
-          setToken(t);
-          console.log("トークン取得成功");
-        } catch (error) {
-          console.error("トークン取得エラー:", error);
-        }
-      }
-    };
-    fetchToken();
-  }, [currentUser]);
-
-  // ==========================
   //  メッセージ表示エリアの自動スクロール
   // ==========================
   useEffect(() => {
     if (messageContainerRef.current) {
-      messageContainerRef.current.scrollTop =
-        messageContainerRef.current.scrollHeight;
+      messageContainerRef.current.scrollTop = messageContainerRef.current.scrollHeight;
     }
   }, [messages]);
 
@@ -119,17 +95,17 @@ const ChatContainer: React.FC = () => {
     fetchModels();
   }, [token]);
 
-  // 環境変数から定数を取得（Vite の場合、import.meta.env を利用）
-  const MAX_IMAGES = Number(import.meta.env.VITE_MAX_IMAGES) || 5; // 例：最大5枚
-  const MAX_LONG_EDGE = Number(import.meta.env.VITE_MAX_LONG_EDGE) || 1568; // 例：最大1568px
-  const MAX_IMAGE_SIZE =
-    Number(import.meta.env.VITE_MAX_IMAGE_SIZE) || 5 * 1024 * 1024; // 例：最大5MB（バイト）
+  // ==========================
+  //  画像アップロード関連定数
+  // ==========================
+  const MAX_IMAGES = Config.MAX_IMAGES;
+  const MAX_LONG_EDGE = Config.MAX_LONG_EDGE;
+  const MAX_IMAGE_SIZE = Config.MAX_IMAGE_SIZE;
 
   /**
    * processImageFile
    *
-   * 画像ファイルを読み込み、FileReader で base64 文字列を取得し、
-   * その後、長辺制限と容量制限を適用した dataURL を返す関数です。
+   * 画像ファイルを読み込み、リサイズ・再圧縮後の dataURL を返す
    */
   const processImageFile = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
@@ -149,9 +125,7 @@ const ChatContainer: React.FC = () => {
               scale = MAX_LONG_EDGE / longEdge;
               width = Math.floor(width * scale);
               height = Math.floor(height * scale);
-              console.log(
-                `[processImageFile] リサイズ実施：新サイズ ${width}x${height}`
-              );
+              console.log(`[processImageFile] リサイズ実施：新サイズ ${width}x${height}`);
             } else {
               console.log("[processImageFile] リサイズ不要");
             }
@@ -177,14 +151,10 @@ const ChatContainer: React.FC = () => {
                 intArray[i] = byteString.charCodeAt(i);
               }
               const blob = new Blob([buffer], { type: "image/jpeg" });
-              console.log(
-                `[processImageFile] 現在の品質 ${quality}, Blobサイズ: ${blob.size} bytes`
-              );
+              console.log(`[processImageFile] 現在の品質 ${quality}, Blobサイズ: ${blob.size} bytes`);
               if (blob.size > MAX_IMAGE_SIZE && quality > minQuality) {
                 quality -= 0.1;
-                console.log(
-                  `[processImageFile] サイズ超過のため再圧縮：新品質 ${quality}`
-                );
+                console.log(`[processImageFile] サイズ超過のため再圧縮：新品質 ${quality}`);
                 processCanvas();
               } else {
                 console.log("[processImageFile] 画像処理完了");
@@ -211,45 +181,34 @@ const ChatContainer: React.FC = () => {
   };
 
   // ==========================
-  //  IndexedDB から履歴を読み込み
+  //  IndexedDB からチャット履歴を読み込み
   // ==========================
   const loadChatHistories = async () => {
-    const request = indexedDB.open("ChatHistoryDB", 1);
-    request.onsuccess = (event) => {
-      const db = (event.target as IDBOpenDBRequest).result;
+    try {
+      const db = await openChatHistoryDB();
       const transaction = db.transaction(["chatHistory"], "readonly");
       const store = transaction.objectStore("chatHistory");
-
       store.getAll().onsuccess = (e) => {
         const histories = (e.target as IDBRequest).result as ChatHistory[];
         const sortedHistories = histories
-          .sort(
-            (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
-          )
+          .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
           .slice(0, 30);
         setChatHistories(sortedHistories);
       };
-    };
-
-    request.onerror = (event) => {
-      console.error("履歴読み込みエラー:", (event.target as IDBRequest).error);
-    };
+    } catch (error) {
+      console.error("履歴読み込みエラー:", error);
+    }
   };
 
   // ==========================
-  //  IndexedDB に履歴を保存
+  //  IndexedDB にチャット履歴を保存
   // ==========================
-  const saveChatHistory = async (
-    currentMessages: Message[],
-    chatId: number | null
-  ) => {
+  const saveChatHistory = async (currentMessages: Message[], chatId: number | null) => {
     if (currentMessages.length === 0) return;
-
     const newChatId = chatId ?? Date.now();
     if (!currentChatId) {
       setCurrentChatId(newChatId);
     }
-
     const historyItem: ChatHistory = {
       id: newChatId,
       title: currentMessages[0].content.slice(0, 10) + "...",
@@ -257,19 +216,14 @@ const ChatContainer: React.FC = () => {
       date: new Date().toISOString(),
       lastPromptDate: new Date().toISOString(),
     };
-
-    const request = indexedDB.open("ChatHistoryDB", 1);
-    request.onsuccess = (event) => {
-      const db = (event.target as IDBOpenDBRequest).result;
+    try {
+      const db = await openChatHistoryDB();
       const transaction = db.transaction(["chatHistory"], "readwrite");
       const store = transaction.objectStore("chatHistory");
-
       store.getAll().onsuccess = (e) => {
         const histories = (e.target as IDBRequest).result as ChatHistory[];
-
         const existingIndex = histories.findIndex((h) => h.id === chatId);
         let updatedHistories = [...histories];
-
         if (existingIndex !== -1) {
           updatedHistories[existingIndex] = {
             ...histories[existingIndex],
@@ -279,28 +233,23 @@ const ChatContainer: React.FC = () => {
         } else {
           updatedHistories.push(historyItem);
         }
-
         updatedHistories = updatedHistories
-          .sort(
-            (a, b) =>
-              new Date(b.lastPromptDate).getTime() -
-              new Date(a.lastPromptDate).getTime()
-          )
+          .sort((a, b) => new Date(b.lastPromptDate).getTime() - new Date(a.lastPromptDate).getTime())
           .slice(0, 30);
-
         store.clear().onsuccess = () => {
           updatedHistories.forEach((history) => store.add(history));
           setChatHistories(updatedHistories);
         };
       };
-    };
+    } catch (error) {
+      console.error("履歴保存エラー:", error);
+    }
   };
 
   // ==========================
   //  履歴を復元
   // ==========================
   const restoreHistory = (history: ChatHistory) => {
-    // 履歴から復元する際、もし編集中の場合は入力内容をクリアして編集中状態を解除
     if (isEditMode) {
       setInput("");
       setSelectedImagesBase64([]);
@@ -311,7 +260,7 @@ const ChatContainer: React.FC = () => {
   };
 
   // ==========================
-  //  チャットをクリア
+  //  チャットクリア
   // ==========================
   const clearChat = () => {
     setMessages([]);
@@ -322,24 +271,18 @@ const ChatContainer: React.FC = () => {
   };
 
   // ==========================
-  //  画像アップロードハンドラー（枚数・長辺・容量制限付き）
+  //  画像アップロードハンドラー
   // ==========================
   const handleImageUpload = async (e: ChangeEvent<HTMLInputElement>) => {
     console.log("[handleImageUpload] ファイル選択イベント発生");
     if (!e.target.files) return;
     const files = Array.from(e.target.files);
-
-    // 既に選択されている画像枚数と合わせ、最大枚数を超えないようにする
     const allowedCount = MAX_IMAGES - selectedImagesBase64.length;
     if (files.length > allowedCount) {
-      setErrorMessage(
-        `一度にアップロードできる画像は最大 ${MAX_IMAGES} 枚です`
-      );
+      setErrorMessage(`一度にアップロードできる画像は最大 ${MAX_IMAGES} 枚です`);
       files.splice(allowedCount);
     }
-
     const promises = files.map((file) => processImageFile(file));
-
     try {
       const newBase64s = await Promise.all(promises);
       console.log("[handleImageUpload] 画像処理完了:", newBase64s);
@@ -351,36 +294,24 @@ const ChatContainer: React.FC = () => {
   };
 
   // ==========================
-  //  ユーザー側プロンプトの編集（以前のメッセージに戻って再送信）
-  //  ※ 編集対象はユーザーメッセージのみ。編集対象以降の分岐は削除します。
+  //  プロンプト編集
   // ==========================
   const handleEditPrompt = (index: number) => {
-    if (isProcessing) return; // 生成中は編集不可とする
+    if (isProcessing) return;
     const messageToEdit = messages[index];
-    if (messageToEdit.role !== "user") return; // ユーザーメッセージでなければ何もしない
-
-    // 現在のメッセージをバックアップ（キャンセル時に元に戻すため）
+    if (messageToEdit.role !== "user") return;
     setBackupMessages(messages);
-
-    // 入力エリアに既存のプロンプト内容をロード
     setInput(messageToEdit.content);
-    // 画像があれば再利用（なければクリア）
     if (messageToEdit.images && messageToEdit.images.length > 0) {
       setSelectedImagesBase64([...messageToEdit.images]);
     } else {
       setSelectedImagesBase64([]);
     }
-    // 編集対象以降のメッセージ（＝分岐）を削除
     setMessages(messages.slice(0, index));
-    // 編集モードに入る
     setIsEditMode(true);
   };
 
-  // ==========================
-  //  編集モードのキャンセル（追加）
-  // ==========================
   const cancelEditMode = () => {
-    // バックアップから元のメッセージを復元
     if (backupMessages.length > 0) {
       setMessages(backupMessages);
       setBackupMessages([]);
@@ -397,16 +328,11 @@ const ChatContainer: React.FC = () => {
     let backupInput = "";
     let backupImages: string[] = [];
     let backupMsgs: Message[] = [];
-
     if (!input.trim() && selectedImagesBase64.length === 0) return;
     if (isProcessing || !token) return;
-
     setErrorMessage("");
-
     try {
       setIsProcessing(true);
-
-      // 送信前の状態をバックアップ
       backupInput = input;
       backupImages = [...selectedImagesBase64];
       backupMsgs = [...messages];
@@ -414,14 +340,11 @@ const ChatContainer: React.FC = () => {
       const newUserMessage: Message = {
         role: "user",
         content: input.trim() || "[Images Uploaded]",
-        images:
-          selectedImagesBase64.length > 0 ? [...selectedImagesBase64] : [],
+        images: selectedImagesBase64.length > 0 ? [...selectedImagesBase64] : [],
       };
 
       let updatedMessages: Message[] = [...messages, newUserMessage];
       setMessages(updatedMessages);
-
-      // 入力欄と画像選択状態をリセットし、編集モードも解除
       setInput("");
       setSelectedImagesBase64([]);
       setIsEditMode(false);
@@ -454,19 +377,14 @@ const ChatContainer: React.FC = () => {
       const decoder = new TextDecoder();
 
       if (reader) {
-        updatedMessages = [
-          ...updatedMessages,
-          { role: "assistant", content: "" },
-        ];
+        updatedMessages = [...updatedMessages, { role: "assistant", content: "" }];
         setMessages(updatedMessages);
 
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
-
           const text = decoder.decode(value, { stream: true });
           assistantMessage += text;
-
           setMessages((msgs) => {
             const newMsgs = [...msgs];
             newMsgs[newMsgs.length - 1] = {
@@ -486,9 +404,7 @@ const ChatContainer: React.FC = () => {
         setMessages(backupMsgs);
         setInput(backupInput);
         setSelectedImagesBase64(backupImages);
-        setErrorMessage(
-          error instanceof Error ? error.message : "不明なエラー"
-        );
+        setErrorMessage(error instanceof Error ? error.message : "不明なエラー");
       }
     } finally {
       setIsProcessing(false);
@@ -497,7 +413,7 @@ const ChatContainer: React.FC = () => {
   };
 
   // ==========================
-  //  キー押下時の送信トリガー
+  //  キー押下による送信
   // ==========================
   const handleKeyPress = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -507,7 +423,7 @@ const ChatContainer: React.FC = () => {
   };
 
   // ==========================
-  //  送信停止（AbortController を利用）
+  //  送信停止（AbortController利用）
   // ==========================
   const stopGeneration = () => {
     if (abortControllerRef.current) {
@@ -538,23 +454,17 @@ const ChatContainer: React.FC = () => {
   const uploadHistory = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
-
     const reader = new FileReader();
     reader.onload = async (e) => {
       try {
         const content = e.target?.result as string;
         const uploadedHistories = JSON.parse(content) as ChatHistory[];
-
-        const request = indexedDB.open("ChatHistoryDB", 1);
-        request.onsuccess = (event) => {
-          const db = (event.target as IDBOpenDBRequest).result;
-          const transaction = db.transaction(["chatHistory"], "readwrite");
-          const store = transaction.objectStore("chatHistory");
-
-          store.clear().onsuccess = () => {
-            uploadedHistories.forEach((history) => store.add(history));
-            setChatHistories(uploadedHistories);
-          };
+        const db = await openChatHistoryDB();
+        const transaction = db.transaction(["chatHistory"], "readwrite");
+        const store = transaction.objectStore("chatHistory");
+        store.clear().onsuccess = () => {
+          uploadedHistories.forEach((history) => store.add(history));
+          setChatHistories(uploadedHistories);
         };
       } catch (error) {
         console.error("履歴アップロードエラー:", error);
@@ -567,7 +477,8 @@ const ChatContainer: React.FC = () => {
   //  JSX の描画
   // ==========================
   return (
-    <div className="flex flex-1 h-[calc(100vh-64px)] mt-2 overflow-hidden">      {/* エラーポップアップ */}
+    <div className="flex flex-1 h-[calc(100vh-64px)] mt-2 overflow-hidden">
+      {/* エラーポップアップ */}
       {errorMessage && (
         <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50 z-10">
           <div className="bg-white p-6 rounded shadow">
@@ -586,9 +497,7 @@ const ChatContainer: React.FC = () => {
       {/* サイドバー */}
       <div className="w-64 bg-gray-800 shadow-lg p-4 overflow-y-auto">
         <div className="mb-6">
-          <h2 className="text-lg font-semibold mb-4 text-gray-100">
-            モデル選択
-          </h2>
+          <h2 className="text-lg font-semibold mb-4 text-gray-100">モデル選択</h2>
           <select
             value={selectedModel}
             onChange={(e) => setSelectedModel(e.target.value)}
@@ -615,21 +524,14 @@ const ChatContainer: React.FC = () => {
             履歴保存
           </button>
           <label className="flex-1">
-            <input
-              type="file"
-              accept=".json"
-              onChange={uploadHistory}
-              className="hidden"
-            />
+            <input type="file" accept=".json" onChange={uploadHistory} className="hidden" />
             <span className="block p-2 bg-purple-500 hover:bg-purple-600 text-white rounded-lg transition-colors text-center cursor-pointer">
               履歴読込
             </span>
           </label>
         </div>
         <div>
-          <h2 className="text-lg font-semibold mb-4 text-gray-100">
-            最近のチャット
-          </h2>
+          <h2 className="text-lg font-semibold mb-4 text-gray-100">最近のチャット</h2>
           <div className="space-y-2">
             {chatHistories.map((history) => (
               <div
@@ -650,25 +552,10 @@ const ChatContainer: React.FC = () => {
       {/* メインチャットエリア */}
       <div className="flex-1 flex flex-col h-full">
         {/* メッセージ表示エリア */}
-        <div
-          ref={messageContainerRef}
-          className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-900"
-        >
+        <div ref={messageContainerRef} className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-900">
           {messages.map((message, index) => (
-            <div
-              key={index}
-              className={`max-w-[80%] ${
-                message.role === "user" ? "ml-auto" : "mr-auto"
-              }`}
-            >
-              <div
-                className={`p-4 rounded-lg ${
-                  message.role === "user"
-                    ? "bg-blue-900 text-gray-100"
-                    : "bg-gray-800 border border-gray-700 text-gray-100"
-                }`}
-              >
-                {/* ユーザー側メッセージの場合、編集ボタンを表示 */}
+            <div key={index} className={`max-w-[80%] ${message.role === "user" ? "ml-auto" : "mr-auto"}`}>
+              <div className={`p-4 rounded-lg ${message.role === "user" ? "bg-blue-900 text-gray-100" : "bg-gray-800 border border-gray-700 text-gray-100"}`}>
                 {message.role === "user" ? (
                   <div className="flex justify-between items-center">
                     <div>{message.content}</div>
@@ -697,11 +584,7 @@ const ChatContainer: React.FC = () => {
                   </div>
                 )}
               </div>
-              <div
-                className={`text-xs text-gray-400 mt-1 ${
-                  message.role === "user" ? "text-right" : "text-left"
-                }`}
-              >
+              <div className={`text-xs text-gray-400 mt-1 ${message.role === "user" ? "text-right" : "text-left"}`}>
                 {message.role === "user" ? "あなた" : "アシスタント"}
               </div>
             </div>
@@ -710,19 +593,14 @@ const ChatContainer: React.FC = () => {
 
         {/* 入力エリア */}
         <div className="border-t border-gray-700 p-4 bg-gray-800">
-          {/* 編集中の場合、バナー表示（キャンセルボタン付き） */}
           {isEditMode && (
             <div className="mb-2 p-2 bg-yellow-200 text-yellow-800 rounded flex justify-between items-center">
               <span>※ 現在、プロンプトのやり直しモードです</span>
-              <button
-                onClick={cancelEditMode}
-                className="text-sm text-red-600 hover:underline"
-              >
+              <button onClick={cancelEditMode} className="text-sm text-red-600 hover:underline">
                 キャンセル
               </button>
             </div>
           )}
-          {/* 選択された画像プレビュー */}
           {selectedImagesBase64.length > 0 && (
             <div className="flex flex-wrap mb-4 gap-2">
               {selectedImagesBase64.map((imgBase64, i) => (
@@ -736,9 +614,7 @@ const ChatContainer: React.FC = () => {
                   <button
                     className="absolute top-0 right-0 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center"
                     onClick={() =>
-                      setSelectedImagesBase64((prev) =>
-                        prev.filter((_, index) => index !== i)
-                      )
+                      setSelectedImagesBase64((prev) => prev.filter((_, index) => index !== i))
                     }
                   >
                     ×
@@ -759,48 +635,26 @@ const ChatContainer: React.FC = () => {
             />
             <label className="flex items-center justify-center px-4 py-2 bg-gray-700 hover:bg-gray-600 text-gray-100 rounded-lg cursor-pointer">
               画像選択
-              <input
-                type="file"
-                accept="image/*"
-                multiple
-                className="hidden"
-                onChange={handleImageUpload}
-                disabled={isProcessing}
-              />
+              <input type="file" accept="image/*" multiple className="hidden" onChange={handleImageUpload} disabled={isProcessing} />
             </label>
-            <button
-              onClick={isProcessing ? stopGeneration : sendMessage}
-              className={`px-4 py-2 rounded-lg ${
-                isProcessing
-                  ? "bg-red-900 hover:bg-red-800"
-                  : "bg-blue-900 hover:bg-blue-800"
-              } text-gray-100 transition-colors`}
-            >
+            <button onClick={isProcessing ? stopGeneration : sendMessage} className={`px-4 py-2 rounded-lg ${isProcessing ? "bg-red-900 hover:bg-red-800" : "bg-blue-900 hover:bg-blue-800"} text-gray-100 transition-colors`}>
               {isProcessing ? "停止" : "送信"}
             </button>
           </div>
         </div>
       </div>
 
-      {/* --- 追加: 拡大表示用モーダル --- */}
+      {/* 拡大表示用モーダル */}
       {enlargedImage && (
         <div
           className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-75 z-50"
           onClick={() => setEnlargedImage(null)}
         >
           <div className="relative">
-            <button
-              className="absolute top-0 right-0 m-2 text-white text-2xl font-bold"
-              onClick={() => setEnlargedImage(null)}
-            >
+            <button className="absolute top-0 right-0 m-2 text-white text-2xl font-bold" onClick={() => setEnlargedImage(null)}>
               ×
             </button>
-            <img
-              src={enlargedImage}
-              alt="Enlarged"
-              className="max-h-screen max-w-full"
-              onClick={(e) => e.stopPropagation()}
-            />
+            <img src={enlargedImage} alt="Enlarged" className="max-h-screen max-w-full" onClick={(e) => e.stopPropagation()} />
           </div>
         </div>
       )}
@@ -808,4 +662,4 @@ const ChatContainer: React.FC = () => {
   );
 };
 
-export default ChatContainer;
+export default ChatPage;
