@@ -330,6 +330,25 @@ def logout() -> Response:
         logger.error("ログアウト処理中にエラーが発生: %s", str(e), exc_info=True)
         return jsonify({"error": str(e)}), 401
 
+@app.route("/backend/query2coordinates", methods=["POST"])
+@require_auth
+def log_lines(decoded_token: Dict) -> Response:
+    """
+    フロントエンドから送られてきた有効な行のリストをログに出力するエンドポイント
+    """
+    try:
+        data = request.get_json() or {}
+        lines = data.get("lines", [])
+        logger.info("受信した有効な行: %s", lines)
+        response: Response = make_response(jsonify({"status": "success"}))
+        response.status_code = 200
+        return response
+    except Exception as e:
+        logger.error("行ログ処理エラー: %s", str(e), exc_info=True)
+        error_response = make_response(jsonify({"error": str(e)}))
+        error_response.status_code = 500
+        return error_response
+
 
 # デバッグモードの時は動かない
 # デバッグモードではnode.jsでフロントエンドは動く
@@ -352,3 +371,5 @@ if __name__ == "__main__":
     logger.info("Flaskアプリを起動します DEBUG: %s", bool(int(os.getenv("DEBUG", 0))))
     app.run(port=int(os.getenv("PORT", "8080")), debug=bool(int(os.getenv("DEBUG", 0))))
 # %%
+
+
