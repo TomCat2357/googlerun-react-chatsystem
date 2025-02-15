@@ -4,6 +4,10 @@ import { useAuth } from "../../contexts/AuthContext";
 // encoding-japaneseライブラリをインポート
 import * as Encoding from "encoding-japanese";
 
+// キャッシュTTL（秒）を環境変数から取得（例：3600秒 = 1時間）
+const CACHE_TTL = Number(import.meta.env.VITE_GOOGLE_MAPS_API_CACHE_TTL) || 3600;
+const CACHE_TTL_MS = CACHE_TTL * 1000;
+
 interface GeoResult {
   query: string;
   status: string;
@@ -14,6 +18,48 @@ interface GeoResult {
   place_id: string;
   types: string;
   error?: string;
+  // 追加：キャッシュから取得したかどうか（true: キャッシュ, false: 新規取得）
+  isCached?: boolean;
+  // 追加：データ取得日時（UNIXミリ秒）
+  fetchedAt?: number;
+}
+
+// IndexedDB用の関数
+function openCacheDB(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open("GeocodeCacheDB", 1);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains("geocodeCache")) {
+        db.createObjectStore("geocodeCache", { keyPath: "query" });
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function getCachedResult(query: string): Promise<{ result: GeoResult; timestamp: number } | null> {
+  const db = await openCacheDB();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction("geocodeCache", "readonly");
+    const store = transaction.objectStore("geocodeCache");
+    const req = store.get(query);
+    req.onsuccess = () => resolve(req.result || null);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function setCachedResult(query: string, result: GeoResult): Promise<void> {
+  const db = await openCacheDB();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction("geocodeCache", "readwrite");
+    const store = transaction.objectStore("geocodeCache");
+    const data = { query, result, timestamp: Date.now() };
+    const req = store.put(data);
+    req.onsuccess = () => resolve();
+    req.onerror = () => reject(req.error);
+  });
 }
 
 const GeocodingPage = () => {
@@ -43,30 +89,73 @@ const GeocodingPage = () => {
     setLineCount(validLines.length);
   };
 
-  // サーバから詳細なジオコーディング結果を取得（JSON）して state に保持する
+  // サーバから詳細なジオコーディング結果を取得し、キャッシュを利用する
   const handleSendLines = async () => {
     const validLines = inputText.split("\n").filter((line) => line.trim().length > 0);
     if (validLines.length === 0) return;
 
-    const confirmed = window.confirm(`クエリー数は${validLines.length} 件です。実行しますか？`);
+    const confirmed = window.confirm(`クエリー数は${validLines.length}件です。実行しますか？`);
     if (!confirmed) return;
 
     setIsSending(true);
+
     try {
-      const response = await fetch(`${API_BASE_URL}/backend/query2coordinates`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ lines: validLines }),
-      });
-      if (!response.ok) {
-        throw new Error("サーバーからエラーが返されました");
+      const now = Date.now();
+      // 各行ごとにキャッシュチェック（ユニーク処理は行わない）
+      const cachedResults: { [query: string]: GeoResult } = {};
+      const queriesToFetch: string[] = [];
+
+      await Promise.all(
+        validLines.map(async (line) => {
+          const query = line.trim();
+          try {
+            const cached = await getCachedResult(query);
+            if (cached && now - cached.timestamp < CACHE_TTL_MS) {
+              // キャッシュから取得した結果にはキャッシュフラグと取得日時を付加
+              cachedResults[query] = { ...cached.result, isCached: true, fetchedAt: cached.timestamp };
+            } else {
+              queriesToFetch.push(query);
+            }
+          } catch (error) {
+            queriesToFetch.push(query);
+          }
+        })
+      );
+
+      const fetchedResults: { [query: string]: GeoResult } = {};
+      if (queriesToFetch.length > 0) {
+        const response = await fetch(`${API_BASE_URL}/backend/query2coordinates`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ lines: queriesToFetch }),
+        });
+        if (!response.ok) {
+          throw new Error("サーバーからエラーが返されました");
+        }
+        const data = await response.json();
+        // サーバ側は入力行順（重複含む）に結果を返す想定
+        queriesToFetch.forEach((query, index) => {
+          const fetchedAt = Date.now();
+          // API取得結果にはキャッシュフラグ（false）と取得日時を付加
+          fetchedResults[query] = { ...data.results[index], isCached: false, fetchedAt };
+          // キャッシュに保存（非同期）
+          setCachedResult(query, data.results[index]).catch((err) =>
+            console.error("キャッシュ保存エラー:", err)
+          );
+        });
       }
-      const data = await response.json();
-      console.log("送信成功", data);
-      setResults(data.results || []);
+
+      // キャッシュ済みおよび新規取得分をマージ
+      const mergedResults: { [query: string]: GeoResult } = { ...cachedResults, ...fetchedResults };
+
+      // 入力行順に結果を再構築（重複している場合は同じ結果が複数回展開されます）
+      const finalResults: GeoResult[] = validLines.map((line) => mergedResults[line.trim()]);
+
+      console.log("送信成功", finalResults);
+      setResults(finalResults);
     } catch (error) {
       console.error("送信エラー", error);
     } finally {
@@ -75,9 +164,10 @@ const GeocodingPage = () => {
   };
 
   // フロントエンド側で保持している詳細情報をもとにCSVファイルを生成してShift_JISでダウンロード
+  // ※CSVにはデータ取得日時も含める（画面表示はしません）
   const handleDownloadCSV = () => {
     if (results.length === 0) return;
-    // ヘッダー行
+    // ヘッダー行に「データ取得日時」を追加
     const header = [
       "No.",
       "クエリー",
@@ -89,6 +179,7 @@ const GeocodingPage = () => {
       "Place ID",
       "Types",
       "エラー",
+      "データ取得日時",
     ];
     // 各行のデータ
     const rows = results.map((result, index) => [
@@ -102,6 +193,7 @@ const GeocodingPage = () => {
       result.place_id,
       result.types,
       result.error || "",
+      result.fetchedAt ? new Date(result.fetchedAt).toLocaleString("ja-JP") : "",
     ]);
 
     // CSV用の文字列生成（各項目をダブルクオートで囲み、カンマ区切り）
@@ -114,7 +206,7 @@ const GeocodingPage = () => {
         )
         .join("\n");
 
-    // まず文字列をコード配列に変換し、その後SJISに変換する
+    // 文字列をコード配列に変換し、その後SJISに変換する
     const codeArray = Encoding.stringToCode(csvContent);
     const sjisArray = Encoding.convert(codeArray, "SJIS");
 
@@ -191,7 +283,11 @@ const GeocodingPage = () => {
             </thead>
             <tbody>
               {results.map((result, index) => (
-                <tr key={index} className="border-b border-gray-700">
+                // キャッシュ結果は青系、新規取得結果は緑系の背景色を付与
+                <tr
+                  key={index}
+                  className={`border-b border-gray-700 ${result.isCached ? "bg-blue-800" : "bg-green-800"}`}
+                >
                   <td className="px-2 py-1">{index + 1}</td>
                   <td className="px-2 py-1">{result.query}</td>
                   <td className="px-2 py-1">

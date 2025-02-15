@@ -43,6 +43,7 @@ CORS(
     methods=["GET", "POST", "OPTIONS"],
 )
 
+
 def process_uploaded_image(image_data: str) -> str:
     """
     アップロードされた画像データをリサイズおよび圧縮し、
@@ -57,7 +58,12 @@ def process_uploaded_image(image_data: str) -> str:
         if image.mode not in ("RGB", "RGBA"):
             image = image.convert("RGB")
         width, height = image.size
-        logger.info("元の画像サイズ: %dx%dpx, 容量: %.1fKB", width, height, len(image_bytes)/1024)
+        logger.info(
+            "元の画像サイズ: %dx%dpx, 容量: %.1fKB",
+            width,
+            height,
+            len(image_bytes) / 1024,
+        )
         if max(width, height) > MAX_LONG_EDGE:
             scale = MAX_LONG_EDGE / max(width, height)
             new_width = int(width * scale)
@@ -76,35 +82,50 @@ def process_uploaded_image(image_data: str) -> str:
             image = image.convert("RGB")
             image.save(output, format=output_format, quality=quality, optimize=True)
         output_data = output.getvalue()
-        logger.info("圧縮後の容量: %.1fKB (quality=%d)", len(output_data)/1024, quality)
+        logger.info(
+            "圧縮後の容量: %.1fKB (quality=%d)", len(output_data) / 1024, quality
+        )
         while len(output_data) > MAX_IMAGE_SIZE and quality > 30:
             quality -= 10
             output = io.BytesIO()
             image.save(output, format=output_format, quality=quality, optimize=True)
             output_data = output.getvalue()
-            logger.info("再圧縮後の容量: %.1fKB (quality=%d)", len(output_data)/1024, quality)
+            logger.info(
+                "再圧縮後の容量: %.1fKB (quality=%d)", len(output_data) / 1024, quality
+            )
         processed_base64 = base64.b64encode(output_data).decode("utf-8")
         return f"data:{mime_type};base64,{processed_base64}"
     except Exception as e:
         logger.error("画像処理エラー: %s", str(e), exc_info=True)
         return image_data
 
+
 def get_api_key_for_model(model: str) -> Optional[str]:
     source = model.split("/")[0] if "/" in model else model
     return json.loads(os.getenv("MODEL_API_KEYS", "{}")).get(source, "")
 
-def common_message_function(*, model: str, messages: List, stream: bool = False, **kwargs):
+
+def common_message_function(
+    *, model: str, messages: List, stream: bool = False, **kwargs
+):
     if stream:
+
         def chat_stream():
-            for i, text in enumerate(completion(messages=messages, model=model, stream=True, **kwargs)):
+            for i, text in enumerate(
+                completion(messages=messages, model=model, stream=True, **kwargs)
+            ):
                 if not i:
                     yield
                 yield text["choices"][0]["delta"].get("content", "") or ""
+
         cs = chat_stream()
         cs.__next__()
         return cs
     else:
-        return completion(messages=messages, model=model, stream=False, **kwargs)["choices"][0]["message"]["content"]
+        return completion(messages=messages, model=model, stream=False, **kwargs)[
+            "choices"
+        ][0]["message"]["content"]
+
 
 def require_auth(function: Callable) -> Callable:
     @wraps(function)
@@ -123,9 +144,12 @@ def require_auth(function: Callable) -> Callable:
             response: Response = make_response(jsonify({"error": str(e)}))
             response.status_code = 401
             return response
+
     return decorated_function
 
+
 # ======= 各種エンドポイント =======
+
 
 @app.route("/backend/models", methods=["GET"])
 @require_auth
@@ -144,6 +168,7 @@ def get_models(decoded_token: Dict) -> Response:
         error_response: Response = make_response(jsonify({"error": str(e)}))
         error_response.status_code = 500
         return error_response
+
 
 @app.route("/backend/verify-auth", methods=["GET"])
 @require_auth
@@ -168,6 +193,7 @@ def verify_auth(decoded_token: Dict) -> Response:
         response: Response = make_response(jsonify({"error": str(e)}))
         response.status_code = 401
         return response
+
 
 @app.route("/backend/chat", methods=["POST"])
 @require_auth
@@ -198,7 +224,9 @@ def chat(decoded_token: Dict) -> Response:
                 images_to_process = msg["images"][:MAX_IMAGES]
                 for image in images_to_process:
                     processed_image = process_uploaded_image(image)
-                    parts.append({"type": "image_url", "image_url": {"url": processed_image}})
+                    parts.append(
+                        {"type": "image_url", "image_url": {"url": processed_image}}
+                    )
                 msg["content"] = parts
                 msg.pop("images", None)
             transformed_messages.append(msg)
@@ -224,6 +252,7 @@ def chat(decoded_token: Dict) -> Response:
         error_response.status_code = 500
         return error_response
 
+
 @app.route("/backend/logout", methods=["POST"])
 def logout() -> Response:
     try:
@@ -236,33 +265,41 @@ def logout() -> Response:
         logger.error("ログアウト処理中にエラーが発生: %s", str(e), exc_info=True)
         return jsonify({"error": str(e)}), 401
 
+
 # ======= 詳細なジオコーディング結果を返すエンドポイント =======
 @app.route("/backend/query2coordinates", methods=["POST"])
 @require_auth
 def query2coordinates(decoded_token: Dict) -> Response:
     """
     フロントエンドから送られてきた各行（クエリー）を用いてジオコーディングを行い、
-    Maps API の詳細なレスポンス情報を含む JSON を返却するエンドポイント
+    Maps API の詳細なレスポンス情報を含む JSON を返却するエンドポイント。
+    ※ 同一のクエリーは１回の API 呼び出しで処理し、その結果を全ての出現箇所に展開します。
     """
     try:
         data = request.get_json() or {}
         lines = data.get("lines", [])
         logger.info("受信したクエリーリスト: %s", lines)
-        
+
         google_maps_api_key = os.getenv("GOOGLE_MAPS_API_KEY")
         if not google_maps_api_key:
             raise Exception("Google Maps APIキーが設定されていません")
-        
-        results = []
+
+        # まず、同一クエリーを除外するために一意なクエリーを抽出
+        unique_queries = {}
         for line in lines:
             query = line.strip()
             if not query:
                 continue
+            if query not in unique_queries:
+                unique_queries[query] = None
+
+        # 各一意なクエリーについて、1回だけ API を呼び出す
+        for query in unique_queries.keys():
             geocode_data = get_coordinates(google_maps_api_key, query)
             if geocode_data.get("status") == "OK" and geocode_data.get("results"):
                 result = geocode_data["results"][0]
                 location = result["geometry"]["location"]
-                results.append({
+                unique_queries[query] = {
                     "query": query,
                     "status": geocode_data.get("status"),
                     "formatted_address": result.get("formatted_address", ""),
@@ -271,10 +308,10 @@ def query2coordinates(decoded_token: Dict) -> Response:
                     "location_type": result["geometry"].get("location_type", ""),
                     "place_id": result.get("place_id", ""),
                     "types": ", ".join(result.get("types", [])),
-                    "error": ""
-                })
+                    "error": "",
+                }
             else:
-                results.append({
+                unique_queries[query] = {
                     "query": query,
                     "status": geocode_data.get("status", "エラー"),
                     "formatted_address": "",
@@ -283,10 +320,20 @@ def query2coordinates(decoded_token: Dict) -> Response:
                     "location_type": "",
                     "place_id": "",
                     "types": "",
-                    "error": geocode_data.get("status", "エラー")
-                })
-        
-        response: Response = make_response(jsonify({"status": "success", "results": results}))
+                    "error": geocode_data.get("status", "エラー"),
+                }
+
+        # 元の各行に対して、対応する結果を付与する（重複行も同じ結果となる）
+        results = []
+        for line in lines:
+            query = line.strip()
+            if not query:
+                continue
+            results.append(unique_queries[query])
+
+        response: Response = make_response(
+            jsonify({"status": "success", "results": results})
+        )
         response.status_code = 200
         return response
     except Exception as e:
@@ -295,22 +342,23 @@ def query2coordinates(decoded_token: Dict) -> Response:
         error_response.status_code = 500
         return error_response
 
+
 # ======= フロントエンド配信用（DEBUG以外） =======
 if not int(os.getenv("DEBUG", 0)):
     FRONTEND_PATH = "./frontend/dist"
+
     @app.route("/")
     def index():
         return send_from_directory(FRONTEND_PATH, "index.html")
+
     @app.route("/<path:path>")
     def static_file(path):
         return send_from_directory(FRONTEND_PATH, path)
+
 
 # %%
 if __name__ == "__main__":
     logger.info("Flaskアプリを起動します DEBUG: %s", bool(int(os.getenv("DEBUG", 0))))
     app.run(port=int(os.getenv("PORT", "8080")), debug=bool(int(os.getenv("DEBUG", 0))))
-# %%
-google_maps_api_key = os.getenv("GOOGLE_MAPS_API_KEY")
-query = "東京駅"
-geocode_data = get_coordinates(google_maps_api_key, query)
+
 # %%
