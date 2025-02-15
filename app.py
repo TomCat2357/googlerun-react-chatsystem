@@ -26,6 +26,7 @@ firebase_admin.initialize_app(
 )
 
 app = Flask(__name__)
+
 # CORSの設定 - 開発環境用
 origins = [
     f"http://localhost:{os.getenv('PORT', 8080)}",
@@ -48,32 +49,25 @@ def process_uploaded_image(image_data: str) -> str:
     適切な「data:image/～;base64,」形式の文字列を返す関数。
     """
     try:
-        # data:～のヘッダーがある場合は除去
         header = None
         if image_data.startswith("data:"):
             header, image_data = image_data.split(",", 1)
-
         image_bytes = base64.b64decode(image_data)
         image = Image.open(io.BytesIO(image_bytes))
-
         if image.mode not in ("RGB", "RGBA"):
             image = image.convert("RGB")
-
         width, height = image.size
-        logger.info("元の画像サイズ: %dx%dpx, 容量: %.1fKB", width, height, len(image_bytes) / 1024)
-
+        logger.info("元の画像サイズ: %dx%dpx, 容量: %.1fKB", width, height, len(image_bytes)/1024)
         if max(width, height) > MAX_LONG_EDGE:
             scale = MAX_LONG_EDGE / max(width, height)
             new_width = int(width * scale)
             new_height = int(height * scale)
             image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
             logger.info("リサイズ後: %dx%dpx", new_width, new_height)
-
         quality = 85
         output = io.BytesIO()
         output_format = "JPEG"
         mime_type = "image/jpeg"
-
         if header and "png" in header.lower():
             output_format = "PNG"
             mime_type = "image/png"
@@ -81,17 +75,14 @@ def process_uploaded_image(image_data: str) -> str:
         else:
             image = image.convert("RGB")
             image.save(output, format=output_format, quality=quality, optimize=True)
-
         output_data = output.getvalue()
-        logger.info("圧縮後の容量: %.1fKB (quality=%d)", len(output_data) / 1024, quality)
-
+        logger.info("圧縮後の容量: %.1fKB (quality=%d)", len(output_data)/1024, quality)
         while len(output_data) > MAX_IMAGE_SIZE and quality > 30:
             quality -= 10
             output = io.BytesIO()
             image.save(output, format=output_format, quality=quality, optimize=True)
             output_data = output.getvalue()
-            logger.info("再圧縮後の容量: %.1fKB (quality=%d)", len(output_data) / 1024, quality)
-
+            logger.info("再圧縮後の容量: %.1fKB (quality=%d)", len(output_data)/1024, quality)
         processed_base64 = base64.b64encode(output_data).decode("utf-8")
         return f"data:{mime_type};base64,{processed_base64}"
     except Exception as e:
@@ -123,7 +114,6 @@ def require_auth(function: Callable) -> Callable:
             if not auth_header or not auth_header.startswith("Bearer "):
                 logger.warning("トークンが見つかりません")
                 return jsonify({"error": "認証が必要です"}), 401
-
             token: str = auth_header.split("Bearer ")[1]
             decoded_token: Dict = auth.verify_id_token(token, clock_skew_seconds=60)
             response: Response = function(decoded_token, *args, **kwargs)
@@ -134,6 +124,8 @@ def require_auth(function: Callable) -> Callable:
             response.status_code = 401
             return response
     return decorated_function
+
+# ======= 各種エンドポイント =======
 
 @app.route("/backend/models", methods=["GET"])
 @require_auth
@@ -155,11 +147,11 @@ def get_models(decoded_token: Dict) -> Response:
 
 @app.route("/backend/verify-auth", methods=["GET"])
 @require_auth
-def verify_auth(decoded_token: Dict) -> Tuple[Response, int]:
+def verify_auth(decoded_token: Dict) -> Response:
     try:
         logger.info("認証検証開始")
         logger.info("トークンの復号化成功。ユーザー: %s", decoded_token.get("email"))
-        response_data: Dict[str, Union[str, Dict]] = {
+        response_data = {
             "status": "success",
             "user": {
                 "email": decoded_token.get("email"),
@@ -168,9 +160,9 @@ def verify_auth(decoded_token: Dict) -> Tuple[Response, int]:
             "expire_time": decoded_token.get("exp"),
         }
         logger.info("認証検証完了")
-        renponse: Response = make_response(jsonify(response_data))
-        renponse.status_code = 200
-        return renponse
+        response: Response = make_response(jsonify(response_data))
+        response.status_code = 200
+        return response
     except Exception as e:
         logger.error("認証エラー: %s", str(e), exc_info=True)
         response: Response = make_response(jsonify({"error": str(e)}))
@@ -189,7 +181,6 @@ def chat(decoded_token: Dict) -> Response:
         if model is None:
             raise ValueError("モデル情報が提供されていません")
         model_api_key = get_api_key_for_model(model)
-
         error_keyword = "@trigger_error"
         error_flag = False
         for msg in messages:
@@ -197,7 +188,6 @@ def chat(decoded_token: Dict) -> Response:
             if error_keyword == content:
                 error_flag = True
                 break
-
         transformed_messages = []
         for msg in messages:
             if msg.get("role") == "user" and msg.get("images"):
@@ -212,13 +202,10 @@ def chat(decoded_token: Dict) -> Response:
                 msg["content"] = parts
                 msg.pop("images", None)
             transformed_messages.append(msg)
-
         logger.info(f"選択されたモデル: {model}")
         logger.debug(f"messages: {transformed_messages}")
-
         if error_flag:
             raise ValueError("意図的なエラーがトリガーされました")
-
         response = Response(
             common_message_function(
                 model=model,
@@ -249,20 +236,19 @@ def logout() -> Response:
         logger.error("ログアウト処理中にエラーが発生: %s", str(e), exc_info=True)
         return jsonify({"error": str(e)}), 401
 
-# ======= ここからジオコーディング処理のエンドポイント =======
+# ======= 詳細なジオコーディング結果を返すエンドポイント =======
 @app.route("/backend/query2coordinates", methods=["POST"])
 @require_auth
 def query2coordinates(decoded_token: Dict) -> Response:
     """
-    フロントエンドから送られてきた各行（住所）を用いてジオコーディングを行い、
-    住所・緯度・経度の結果を返却するエンドポイント
+    フロントエンドから送られてきた各行（クエリー）を用いてジオコーディングを行い、
+    Maps API の詳細なレスポンス情報を含む JSON を返却するエンドポイント
     """
     try:
         data = request.get_json() or {}
         lines = data.get("lines", [])
-        logger.info("受信した住所リスト: %s", lines)
+        logger.info("受信したクエリーリスト: %s", lines)
         
-        # Google Maps APIキーを環境変数から取得
         google_maps_api_key = os.getenv("GOOGLE_MAPS_API_KEY")
         if not google_maps_api_key:
             raise Exception("Google Maps APIキーが設定されていません")
@@ -274,17 +260,29 @@ def query2coordinates(decoded_token: Dict) -> Response:
                 continue
             geocode_data = get_coordinates(google_maps_api_key, query)
             if geocode_data.get("status") == "OK" and geocode_data.get("results"):
-                location = geocode_data["results"][0]["geometry"]["location"]
+                result = geocode_data["results"][0]
+                location = result["geometry"]["location"]
                 results.append({
-                    "address": query,
+                    "query": query,
+                    "status": geocode_data.get("status"),
+                    "formatted_address": result.get("formatted_address", ""),
                     "latitude": location.get("lat"),
-                    "longitude": location.get("lng")
+                    "longitude": location.get("lng"),
+                    "location_type": result["geometry"].get("location_type", ""),
+                    "place_id": result.get("place_id", ""),
+                    "types": ", ".join(result.get("types", [])),
+                    "error": ""
                 })
             else:
                 results.append({
-                    "address": query,
+                    "query": query,
+                    "status": geocode_data.get("status", "エラー"),
+                    "formatted_address": "",
                     "latitude": None,
                     "longitude": None,
+                    "location_type": "",
+                    "place_id": "",
+                    "types": "",
                     "error": geocode_data.get("status", "エラー")
                 })
         
@@ -296,16 +294,13 @@ def query2coordinates(decoded_token: Dict) -> Response:
         error_response = make_response(jsonify({"error": str(e)}))
         error_response.status_code = 500
         return error_response
-# =======
 
-# デバッグモードの時は動かない
+# ======= フロントエンド配信用（DEBUG以外） =======
 if not int(os.getenv("DEBUG", 0)):
     FRONTEND_PATH = "./frontend/dist"
-
     @app.route("/")
     def index():
         return send_from_directory(FRONTEND_PATH, "index.html")
-
     @app.route("/<path:path>")
     def static_file(path):
         return send_from_directory(FRONTEND_PATH, path)
@@ -314,4 +309,8 @@ if not int(os.getenv("DEBUG", 0)):
 if __name__ == "__main__":
     logger.info("Flaskアプリを起動します DEBUG: %s", bool(int(os.getenv("DEBUG", 0))))
     app.run(port=int(os.getenv("PORT", "8080")), debug=bool(int(os.getenv("DEBUG", 0))))
+# %%
+google_maps_api_key = os.getenv("GOOGLE_MAPS_API_KEY")
+query = "東京駅"
+geocode_data = get_coordinates(google_maps_api_key, query)
 # %%

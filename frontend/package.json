@@ -16,6 +16,7 @@
     "axios": "^1.7.9",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "encoding-japanese": "^2.2.0",
     "firebase": "^11.2.0",
     "http-proxy-middleware": "^3.0.3",
     "lucide-react": "^0.474.0",
