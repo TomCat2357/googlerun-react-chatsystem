@@ -164,10 +164,10 @@ const GeocodingPage = () => {
   };
 
   // フロントエンド側で保持している詳細情報をもとにCSVファイルを生成してShift_JISでダウンロード
-  // ※CSVにはデータ取得日時も含める（画面表示はしません）
+  // ※CSVにはデータ取得日時とキャッシュ利用状況も含める（画面表示はしません）
   const handleDownloadCSV = () => {
     if (results.length === 0) return;
-    // ヘッダー行に「データ取得日時」を追加
+    // ヘッダー行に「データ取得日時」と「キャッシュ利用」を追加
     const header = [
       "No.",
       "クエリー",
@@ -180,6 +180,7 @@ const GeocodingPage = () => {
       "Types",
       "エラー",
       "データ取得日時",
+      "キャッシュ利用",
     ];
     // 各行のデータ
     const rows = results.map((result, index) => [
@@ -194,6 +195,7 @@ const GeocodingPage = () => {
       result.types,
       result.error || "",
       result.fetchedAt ? new Date(result.fetchedAt).toLocaleString("ja-JP") : "",
+      result.isCached ? "キャッシュ" : "API取得",
     ]);
 
     // CSV用の文字列生成（各項目をダブルクオートで囲み、カンマ区切り）
