@@ -13,6 +13,7 @@ import MainPage from "./components/Main/MainPage";
 import ChatPage from "./components/Chat/ChatPage";
 import Header from "./components/Header/Header";
 import "./index.css";
+import GeocodingPage from "./components/Geocoding/GeocodingPage";
 
 function App() {
   return (
@@ -33,6 +34,7 @@ function App() {
                     <Routes>
                       <Route path="main" element={<MainPage />} />
                       <Route path="chat" element={<ChatPage />} />
+                      <Route path="geocoding" element={<GeocodingPage />} />
                     </Routes>
                   </>
                 </ProtectedRoute>

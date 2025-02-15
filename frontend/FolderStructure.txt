@@ -2,6 +2,10 @@ frontend/
 ├── src/
 │   ├── main.tsx
 │   ├── components/
+│   │   ├── Common/
+│   │   │   └── LoadingHandler.tsx
+│   │   ├── Geocoding/
+│   │   │   └── GeocodingPage.tsx
 │   │   ├── Login/
 │   │   │   └── LoginPage.tsx
 │   │   ├── Main/
