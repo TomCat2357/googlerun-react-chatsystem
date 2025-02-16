@@ -65,6 +65,8 @@ const GeocodingPage = () => {
   const [results, setResults] = useState<GeoResult[]>([]);
   // 入力モードの状態（"address" または "latlng"）　デフォルトは "address"
   const [inputMode, setInputMode] = useState<"address" | "latlng">("address");
+  // CSV出力エンコーディングの選択状態（"utf8" または "shift-jis"）
+  const [csvEncoding, setCsvEncoding] = useState<"utf8" | "shift-jis">("shift-jis");
   const token = useToken();
 
   const API_BASE_URL: string = Config.API_BASE_URL;
@@ -73,7 +75,7 @@ const GeocodingPage = () => {
     const text = e.target.value;
     setInputText(text);
     // 入力モードにより、有効行の判定を変更
-    let validLines = [];
+    let validLines: string[] = [];
     if (inputMode === "address") {
       validLines = text.split("\n").filter((line) => line.trim().length > 0);
     } else {
@@ -91,7 +93,10 @@ const GeocodingPage = () => {
   };
 
   const handleSendLines = async () => {
-    const allLines = inputText.split("\n").map((line) => line.trim()).filter(line => line.length > 0);
+    const allLines = inputText
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0);
     if (allLines.length === 0) return;
 
     const confirmed = window.confirm(`入力件数は${allLines.length}件です。実行しますか？`);
@@ -315,10 +320,17 @@ const GeocodingPage = () => {
         )
         .join("\n");
 
-    const codeArray = Encoding.stringToCode(csvContent);
-    const sjisArray = Encoding.convert(codeArray, "SJIS");
+    let blob: Blob;
+    if (csvEncoding === "utf8") {
+      // UTF-8の場合はそのままBlob生成
+      blob = new Blob([csvContent], { type: "text/csv;charset=utf-8" });
+    } else {
+      // Shift-JISの場合、エンコード変換
+      const codeArray = Encoding.stringToCode(csvContent);
+      const sjisArray = Encoding.convert(codeArray, "SJIS");
+      blob = new Blob([new Uint8Array(sjisArray)], { type: "text/csv;charset=shift_jis" });
+    }
 
-    const blob = new Blob([new Uint8Array(sjisArray)], { type: "text/csv;charset=shift_jis" });
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -385,11 +397,11 @@ const GeocodingPage = () => {
           }
         />
       </div>
-      <div className="flex justify-between items-center mb-4">
-        <span className="text-sm text-gray-200">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4">
+        <span className="text-sm text-gray-200 mb-2 sm:mb-0">
           有効な行数: <strong>{lineCount}</strong>
         </span>
-        <div className="space-x-2">
+        <div className="flex items-center space-x-2">
           <button
             onClick={handleSendLines}
             disabled={isSending}
@@ -404,6 +416,29 @@ const GeocodingPage = () => {
           >
             CSVダウンロード
           </button>
+          {/* CSV出力エンコーディング選択用のラジオボタン */}
+          <div className="flex items-center text-gray-200">
+            <label className="mr-2">
+              <input
+                type="radio"
+                name="csvEncoding"
+                value="utf8"
+                checked={csvEncoding === "utf8"}
+                onChange={() => setCsvEncoding("utf8")}
+              />{" "}
+              UTF-8
+            </label>
+            <label>
+              <input
+                type="radio"
+                name="csvEncoding"
+                value="shift-jis"
+                checked={csvEncoding === "shift-jis"}
+                onChange={() => setCsvEncoding("shift-jis")}
+              />{" "}
+              Shift-JIS
+            </label>
+          </div>
         </div>
       </div>
       <div>
