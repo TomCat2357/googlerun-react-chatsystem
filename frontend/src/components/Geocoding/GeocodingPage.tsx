@@ -21,6 +21,8 @@ export interface GeoResult {
   fetchedAt?: number;
   // 緯度経度入力の場合、元の入力値を保持する（例："35.6812996,139.7670658"）
   original?: string;
+  // 追加: 取得時のモード ("address" または "latlng")
+  mode?: "address" | "latlng";
 }
 
 // IndexedDB用の関数（GeocodeCacheDB）
@@ -135,7 +137,13 @@ const GeocodingPage = () => {
           }
           const data = await response.json();
           queriesToFetch.forEach((query, index) => {
-            const geoResult: GeoResult = { query, ...data.results[index], isCached: false, fetchedAt: timestamp };
+            const geoResult: GeoResult = {
+              query,
+              ...data.results[index],
+              isCached: false,
+              fetchedAt: timestamp,
+              mode: "address",
+            };
             fetchedResults[query] = geoResult;
             setCachedResult(geoResult).catch((err) =>
               console.error("キャッシュ保存エラー:", err)
@@ -167,6 +175,7 @@ const GeocodingPage = () => {
               place_id: "",
               types: "",
               error: "無効な形式",
+              mode: "latlng",
             };
           } else {
             const parts = noSpace.split(",");
@@ -183,6 +192,7 @@ const GeocodingPage = () => {
                 place_id: "",
                 types: "",
                 error: "範囲外",
+                mode: "latlng",
               };
             } else {
               // 小数第8桁目で四捨五入し、小数第7桁までの文字列に変換
@@ -228,7 +238,13 @@ const GeocodingPage = () => {
           }
           const data = await response.json();
           queriesToFetch.forEach((query, index) => {
-            const geoResult: GeoResult = { query, ...data.results[index], isCached: false, fetchedAt: timestamp };
+            const geoResult: GeoResult = {
+              query,
+              ...data.results[index],
+              isCached: false,
+              fetchedAt: timestamp,
+              mode: "latlng",
+            };
             fetchedResults[query] = geoResult;
             setCachedResult(geoResult).catch((err) =>
               console.error("キャッシュ保存エラー:", err)
@@ -399,7 +415,8 @@ const GeocodingPage = () => {
             <thead>
               <tr className="border-b border-gray-700">
                 <th className="px-2 py-1">No.</th>
-                {inputMode === "address" ? (
+                {/* 結果ごとの mode に合わせてヘッダーを表示（※ここでは先頭の結果で判定） */}
+                {results[0]?.mode === "address" ? (
                   <>
                     <th className="px-2 py-1">クエリー</th>
                     <th className="px-2 py-1">緯度</th>
@@ -415,9 +432,14 @@ const GeocodingPage = () => {
             </thead>
             <tbody>
               {results.map((result, index) => (
-                <tr key={index} className={`border-b border-gray-700 ${result.isCached ? "bg-blue-800" : "bg-green-800"}`}>
+                <tr
+                  key={index}
+                  className={`border-b border-gray-700 ${
+                    result.isCached ? "bg-blue-800" : "bg-green-800"
+                  }`}
+                >
                   <td className="px-2 py-1">{index + 1}</td>
-                  {inputMode === "address" ? (
+                  {result.mode === "address" ? (
                     <>
                       <td className="px-2 py-1">{result.query}</td>
                       <td className="px-2 py-1">
