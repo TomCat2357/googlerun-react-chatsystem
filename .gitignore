@@ -7,3 +7,6 @@
 *.pyc
 *firebase*.json
 *service_account*.json
+code_printer.py
+FolderStructure.txt
+tree.py
