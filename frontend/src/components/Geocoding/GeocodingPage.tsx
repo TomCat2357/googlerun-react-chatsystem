@@ -19,6 +19,8 @@ export interface GeoResult {
   isCached?: boolean;
   // データ取得日時（UNIXミリ秒）
   fetchedAt?: number;
+  // 緯度経度入力の場合、元の入力値を保持する（例："35.6812996,139.7670658"）
+  original?: string;
 }
 
 // IndexedDB用の関数（GeocodeCacheDB）
@@ -41,13 +43,13 @@ async function getCachedResult(query: string): Promise<GeoResult | null> {
   });
 }
 
-// 修正: GeoResult オブジェクトそのものを保存する（余分なラッパーを外す）
-async function setCachedResult(query: string, result: GeoResult): Promise<void> {
+// GeoResult オブジェクトそのものを保存する
+async function setCachedResult(result: GeoResult): Promise<void> {
   const db = await openCacheDB();
   return new Promise((resolve, reject) => {
     const transaction = db.transaction("geocodeCache", "readwrite");
     const store = transaction.objectStore("geocodeCache");
-    const req = store.put(result); // 修正前は store.put({ query, result })
+    const req = store.put(result);
     req.onsuccess = () => resolve();
     req.onerror = () => reject(req.error);
   });
@@ -59,6 +61,8 @@ const GeocodingPage = () => {
   const [isSending, setIsSending] = useState(false);
   // サーバから取得した詳細な結果を保持する
   const [results, setResults] = useState<GeoResult[]>([]);
+  // 入力モードの状態（"address" または "latlng"）　デフォルトは "address"
+  const [inputMode, setInputMode] = useState<"address" | "latlng">("address");
   const token = useToken();
 
   const API_BASE_URL: string = Config.API_BASE_URL;
@@ -66,73 +70,188 @@ const GeocodingPage = () => {
   const handleTextChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const text = e.target.value;
     setInputText(text);
-    const validLines = text.split("\n").filter((line) => line.trim().length > 0);
+    // 入力モードにより、有効行の判定を変更
+    let validLines = [];
+    if (inputMode === "address") {
+      validLines = text.split("\n").filter((line) => line.trim().length > 0);
+    } else {
+      // 緯度経度モードの場合、空白削除後、正しい形式の行のみカウント
+      const pattern = /^-?\d+(\.\d+)?,-?\d+(\.\d+)?$/;
+      validLines = text
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((line) => {
+          const noSpace = line.replace(/\s/g, "");
+          return pattern.test(noSpace);
+        });
+    }
     setLineCount(validLines.length);
   };
 
-  // サーバから詳細なジオコーディング結果を取得し、キャッシュを利用する
   const handleSendLines = async () => {
-    const validLines = inputText.split("\n").filter((line) => line.trim().length > 0);
-    if (validLines.length === 0) return;
+    const allLines = inputText.split("\n").map((line) => line.trim()).filter(line => line.length > 0);
+    if (allLines.length === 0) return;
 
-    const confirmed = window.confirm(`クエリー数は${validLines.length}件です。実行しますか？`);
+    const confirmed = window.confirm(`入力件数は${allLines.length}件です。実行しますか？`);
     if (!confirmed) return;
 
     setIsSending(true);
+    const timestamp = Date.now();
 
     try {
-      const timestamp = Date.now();
-      // キャッシュチェック
-      const cachedResults: { [query: string]: GeoResult } = {};
-      const queriesToFetch: string[] = [];
+      if (inputMode === "address") {
+        // クエリー入力の場合（従来の処理）
+        const cachedResults: { [query: string]: GeoResult } = {};
+        const queriesToFetch: string[] = [];
 
-      await Promise.all(
-        validLines.map(async (line) => {
-          const query = line.trim();
-          try {
-            const cached = await getCachedResult(query);
-            // 修正: キャッシュは GeoResult オブジェクトそのものなので、直接プロパティにアクセスできる
-            if (cached && timestamp - (cached.fetchedAt || 0) < Config.CACHE_TTL_MS) {
-              cachedResults[query] = { ...cached, isCached: true };
-            } else {
+        await Promise.all(
+          allLines.map(async (line) => {
+            const query = line;
+            try {
+              const cached = await getCachedResult(query);
+              if (cached && timestamp - (cached.fetchedAt || 0) < Config.CACHE_TTL_MS) {
+                cachedResults[query] = { ...cached, isCached: true };
+              } else {
+                queriesToFetch.push(query);
+              }
+            } catch (error) {
               queriesToFetch.push(query);
             }
-          } catch (error) {
-            queriesToFetch.push(query);
+          })
+        );
+
+        const fetchedResults: { [query: string]: GeoResult } = {};
+        if (queriesToFetch.length > 0) {
+          const response = await fetch(`${API_BASE_URL}/backend/address2coordinates`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({ lines: queriesToFetch }),
+          });
+          if (!response.ok) {
+            throw new Error("サーバーからエラーが返されました");
           }
-        })
-      );
-
-      const fetchedResults: { [query: string]: GeoResult } = {};
-      if (queriesToFetch.length > 0) {
-        const response = await fetch(`${API_BASE_URL}/backend/query2coordinates`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({ lines: queriesToFetch }),
-        });
-        if (!response.ok) {
-          throw new Error("サーバーからエラーが返されました");
+          const data = await response.json();
+          queriesToFetch.forEach((query, index) => {
+            const geoResult: GeoResult = { query, ...data.results[index], isCached: false, fetchedAt: timestamp };
+            fetchedResults[query] = geoResult;
+            setCachedResult(geoResult).catch((err) =>
+              console.error("キャッシュ保存エラー:", err)
+            );
+          });
         }
-        const data = await response.json();
-        // API取得結果は入力行順（重複含む）で返される前提
-        queriesToFetch.forEach((query, index) => {
-          // 修正: API結果に query を追加して GeoResult として保存する
-          const geoResult = { query, ...data.results[index], isCached: false, fetchedAt: timestamp };
-          fetchedResults[query] = geoResult;
-          setCachedResult(query, geoResult).catch((err) =>
-            console.error("キャッシュ保存エラー:", err)
-          );
-        });
-      }
 
-      // キャッシュ済みと新規取得分のマージ
-      const mergedResults: { [query: string]: GeoResult } = { ...cachedResults, ...fetchedResults };
-      const finalResults: GeoResult[] = validLines.map((line) => mergedResults[line.trim()]);
-      console.log("送信成功", finalResults);
-      setResults(finalResults);
+        const mergedResults: { [query: string]: GeoResult } = { ...cachedResults, ...fetchedResults };
+        const finalResults: GeoResult[] = allLines.map((line) => mergedResults[line]);
+        console.log("送信成功", finalResults);
+        setResults(finalResults);
+      } else {
+        // 緯度経度入力の場合：各行を「数字,数字」の形式に整形し、範囲チェックおよび四捨五入（小数第8桁目で四捨五入して小数第7桁まで）を実施
+        const pattern = /^-?\d+(\.\d+)?,-?\d+(\.\d+)?$/;
+        const validLines: string[] = [];
+        const errorResults: { [original: string]: GeoResult } = {};
+        const originalMapping: { [original: string]: string } = {};
+
+        allLines.forEach((line) => {
+          const noSpace = line.replace(/\s/g, "");
+          if (!pattern.test(noSpace)) {
+            errorResults[line] = {
+              query: line,
+              status: "INVALID_FORMAT",
+              formatted_address: "",
+              latitude: null,
+              longitude: null,
+              location_type: "",
+              place_id: "",
+              types: "",
+              error: "無効な形式",
+            };
+          } else {
+            const parts = noSpace.split(",");
+            let lat = parseFloat(parts[0]);
+            let lng = parseFloat(parts[1]);
+            if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+              errorResults[line] = {
+                query: line,
+                status: "INVALID_RANGE",
+                formatted_address: "",
+                latitude: lat,
+                longitude: lng,
+                location_type: "",
+                place_id: "",
+                types: "",
+                error: "範囲外",
+              };
+            } else {
+              // 小数第8桁目で四捨五入し、小数第7桁までの文字列に変換
+              lat = Math.round(lat * 1e7) / 1e7;
+              lng = Math.round(lng * 1e7) / 1e7;
+              const roundedLine = `${lat.toFixed(7)},${lng.toFixed(7)}`;
+              validLines.push(roundedLine);
+              originalMapping[line] = roundedLine;
+            }
+          }
+        });
+
+        // キャッシュチェック
+        const cachedResults: { [query: string]: GeoResult } = {};
+        const queriesToFetch: string[] = [];
+        await Promise.all(
+          validLines.map(async (query) => {
+            try {
+              const cached = await getCachedResult(query);
+              if (cached && timestamp - (cached.fetchedAt || 0) < Config.CACHE_TTL_MS) {
+                cachedResults[query] = { ...cached, isCached: true };
+              } else {
+                queriesToFetch.push(query);
+              }
+            } catch (error) {
+              queriesToFetch.push(query);
+            }
+          })
+        );
+
+        const fetchedResults: { [query: string]: GeoResult } = {};
+        if (queriesToFetch.length > 0) {
+          const response = await fetch(`${API_BASE_URL}/backend/latlng2query`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({ lines: queriesToFetch }),
+          });
+          if (!response.ok) {
+            throw new Error("サーバーからエラーが返されました");
+          }
+          const data = await response.json();
+          queriesToFetch.forEach((query, index) => {
+            const geoResult: GeoResult = { query, ...data.results[index], isCached: false, fetchedAt: timestamp };
+            fetchedResults[query] = geoResult;
+            setCachedResult(geoResult).catch((err) =>
+              console.error("キャッシュ保存エラー:", err)
+            );
+          });
+        }
+
+        const mergedResults: { [query: string]: GeoResult } = { ...cachedResults, ...fetchedResults };
+        const finalResults: GeoResult[] = [];
+        allLines.forEach((line) => {
+          if (errorResults[line]) {
+            finalResults.push(errorResults[line]);
+          } else if (originalMapping[line]) {
+            const key = originalMapping[line];
+            // ここで元の入力値もセットする
+            const res = mergedResults[key];
+            res.original = line;
+            finalResults.push(res);
+          }
+        });
+        console.log("送信成功", finalResults);
+        setResults(finalResults);
+      }
     } catch (error) {
       console.error("送信エラー", error);
     } finally {
@@ -140,7 +259,6 @@ const GeocodingPage = () => {
     }
   };
 
-  // CSVダウンロード処理（Shift_JIS変換付き）
   const handleDownloadCSV = () => {
     if (results.length === 0) return;
     const header = [
@@ -206,8 +324,35 @@ const GeocodingPage = () => {
     <div className="max-w-2xl mx-auto p-4">
       <h1 className="text-2xl font-bold mb-4 text-gray-100">ジオコーディング</h1>
       <div className="mb-4">
+        <label className="block text-sm font-medium text-gray-200 mb-2">入力モード</label>
+        <div>
+          <label className="mr-4 text-gray-200">
+            <input
+              type="radio"
+              name="inputMode"
+              value="address"
+              checked={inputMode === "address"}
+              onChange={() => setInputMode("address")}
+            />{" "}
+            住所等
+          </label>
+          <label className="text-gray-200">
+            <input
+              type="radio"
+              name="inputMode"
+              value="latlng"
+              checked={inputMode === "latlng"}
+              onChange={() => setInputMode("latlng")}
+            />{" "}
+            緯度経度
+          </label>
+        </div>
+      </div>
+      <div className="mb-4">
         <label htmlFor="addressInput" className="block text-sm font-medium mb-2 text-gray-200">
-          クエリー一覧（1行に1つのクエリーを入力）
+          {inputMode === "address"
+            ? "1行毎に住所や施設名等の「キーワード」を入力"
+            : "1行毎に「緯度,経度」を入力"}
         </label>
         <textarea
           id="addressInput"
@@ -215,9 +360,13 @@ const GeocodingPage = () => {
           onChange={handleTextChange}
           onKeyDown={handleKeyDown}
           className="w-full h-64 p-2 bg-gray-800 text-gray-100 border border-gray-700 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-          placeholder={`例:
-札幌市役所 札幌市中央区北１条西２丁目
-札幌市北区北２３条西４丁目３－４`}
+          placeholder={
+            inputMode === "address"
+              ? `札幌市役所　札幌市中央区北１条西２丁目
+札幌市北区北８条西３丁目４－６
+東京タワー`
+              : `35.6812996,139.7670658`
+          }
         />
       </div>
       <div className="flex justify-between items-center mb-4">
@@ -250,22 +399,42 @@ const GeocodingPage = () => {
             <thead>
               <tr className="border-b border-gray-700">
                 <th className="px-2 py-1">No.</th>
-                <th className="px-2 py-1">クエリー</th>
-                <th className="px-2 py-1">緯度</th>
-                <th className="px-2 py-1">経度</th>
+                {inputMode === "address" ? (
+                  <>
+                    <th className="px-2 py-1">クエリー</th>
+                    <th className="px-2 py-1">緯度</th>
+                    <th className="px-2 py-1">経度</th>
+                  </>
+                ) : (
+                  <>
+                    <th className="px-2 py-1">クエリー</th>
+                    <th className="px-2 py-1">住所</th>
+                  </>
+                )}
               </tr>
             </thead>
             <tbody>
               {results.map((result, index) => (
                 <tr key={index} className={`border-b border-gray-700 ${result.isCached ? "bg-blue-800" : "bg-green-800"}`}>
                   <td className="px-2 py-1">{index + 1}</td>
-                  <td className="px-2 py-1">{result.query}</td>
-                  <td className="px-2 py-1">
-                    {result.latitude !== null ? Number(result.latitude).toFixed(7) : "-"}
-                  </td>
-                  <td className="px-2 py-1">
-                    {result.longitude !== null ? Number(result.longitude).toFixed(7) : "-"}
-                  </td>
+                  {inputMode === "address" ? (
+                    <>
+                      <td className="px-2 py-1">{result.query}</td>
+                      <td className="px-2 py-1">
+                        {result.latitude !== null ? Number(result.latitude).toFixed(7) : "-"}
+                      </td>
+                      <td className="px-2 py-1">
+                        {result.longitude !== null ? Number(result.longitude).toFixed(7) : "-"}
+                      </td>
+                    </>
+                  ) : (
+                    <>
+                      <td className="px-2 py-1">{result.original || result.query}</td>
+                      <td className="px-2 py-1">
+                        {result.formatted_address || result.error || "-"}
+                      </td>
+                    </>
+                  )}
                 </tr>
               ))}
             </tbody>

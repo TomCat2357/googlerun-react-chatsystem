@@ -253,21 +253,7 @@ def chat(decoded_token: Dict) -> Response:
         return error_response
 
 
-@app.route("/backend/logout", methods=["POST"])
-def logout() -> Response:
-    try:
-        logger.info("ログアウト処理開始")
-        response: Response = make_response(
-            jsonify({"status": "success", "message": "ログアウトに成功しました"})
-        )
-        return response, 200
-    except Exception as e:
-        logger.error("ログアウト処理中にエラーが発生: %s", str(e), exc_info=True)
-        return jsonify({"error": str(e)}), 401
-
-
-# ======= 詳細なジオコーディング結果を返すエンドポイント =======
-@app.route("/backend/query2coordinates", methods=["POST"])
+@app.route("/backend/address2coordinates", methods=["POST"])
 @require_auth
 def query2coordinates(decoded_token: Dict) -> Response:
     """
@@ -343,6 +329,129 @@ def query2coordinates(decoded_token: Dict) -> Response:
         return error_response
 
 
+@app.route("/backend/latlng2query", methods=["POST"])
+@require_auth
+def latlng2query(decoded_token: Dict) -> Response:
+    """
+    フロントエンドから送られてきた各行（緯度,経度）を用いてリバースジオコーディングを行い、
+    Maps API の詳細なレスポンス情報を含む JSON を返却するエンドポイント。
+    """
+    try:
+        data = request.get_json() or {}
+        lines = data.get("lines", [])
+        logger.info("受信した緯度経度リスト: %s", lines)
+        google_maps_api_key = os.getenv("GOOGLE_MAPS_API_KEY")
+        if not google_maps_api_key:
+            raise Exception("Google Maps APIキーが設定されていません")
+
+        unique_lines = {}
+        for line in lines:
+            query = line.strip()
+            if not query:
+                continue
+            if query not in unique_lines:
+                unique_lines[query] = None
+
+        for line in unique_lines.keys():
+            parts = line.split(",")
+            if len(parts) != 2:
+                unique_lines[line] = {
+                    "query": line,
+                    "status": "INVALID_FORMAT",
+                    "formatted_address": "",
+                    "latitude": None,
+                    "longitude": None,
+                    "location_type": "",
+                    "place_id": "",
+                    "types": "",
+                    "error": "無効な形式"
+                }
+            else:
+                try:
+                    lat = float(parts[0])
+                    lng = float(parts[1])
+                except ValueError:
+                    unique_lines[line] = {
+                        "query": line,
+                        "status": "INVALID_FORMAT",
+                        "formatted_address": "",
+                        "latitude": None,
+                        "longitude": None,
+                        "location_type": "",
+                        "place_id": "",
+                        "types": "",
+                        "error": "数値変換エラー"
+                    }
+                    continue
+                if lat < -90 or lat > 90 or lng < -180 or lng > 180:
+                    unique_lines[line] = {
+                        "query": line,
+                        "status": "INVALID_RANGE",
+                        "formatted_address": "",
+                        "latitude": lat,
+                        "longitude": lng,
+                        "location_type": "",
+                        "place_id": "",
+                        "types": "",
+                        "error": "範囲外"
+                    }
+                    continue
+                geocode_data = get_address(google_maps_api_key, lat, lng)
+                if geocode_data.get("status") == "OK" and geocode_data.get("results"):
+                    result = geocode_data["results"][0]
+                    location = result["geometry"]["location"]
+                    unique_lines[line] = {
+                        "query": line,
+                        "status": geocode_data.get("status"),
+                        "formatted_address": result.get("formatted_address", ""),
+                        "latitude": location.get("lat"),
+                        "longitude": location.get("lng"),
+                        "location_type": result["geometry"].get("location_type", ""),
+                        "place_id": result.get("place_id", ""),
+                        "types": ", ".join(result.get("types", [])),
+                        "error": ""
+                    }
+                else:
+                    unique_lines[line] = {
+                        "query": line,
+                        "status": geocode_data.get("status", "エラー"),
+                        "formatted_address": "",
+                        "latitude": None,
+                        "longitude": None,
+                        "location_type": "",
+                        "place_id": "",
+                        "types": "",
+                        "error": geocode_data.get("status", "エラー")
+                    }
+        results = []
+        for line in lines:
+            query = line.strip()
+            if not query:
+                continue
+            results.append(unique_lines[query])
+        response: Response = make_response(jsonify({"status": "success", "results": results}))
+        response.status_code = 200
+        return response
+    except Exception as e:
+        logger.error("リバースジオコーディング処理エラー: %s", str(e), exc_info=True)
+        error_response = make_response(jsonify({"error": str(e)}))
+        error_response.status_code = 500
+        return error_response
+
+
+@app.route("/backend/logout", methods=["POST"])
+def logout() -> Response:
+    try:
+        logger.info("ログアウト処理開始")
+        response: Response = make_response(
+            jsonify({"status": "success", "message": "ログアウトに成功しました"})
+        )
+        return response, 200
+    except Exception as e:
+        logger.error("ログアウト処理中にエラーが発生: %s", str(e), exc_info=True)
+        return jsonify({"error": str(e)}), 401
+
+
 # ======= フロントエンド配信用（DEBUG以外） =======
 if not int(os.getenv("DEBUG", 0)):
     FRONTEND_PATH = "./frontend/dist"
@@ -360,5 +469,4 @@ if not int(os.getenv("DEBUG", 0)):
 if __name__ == "__main__":
     logger.info("Flaskアプリを起動します DEBUG: %s", bool(int(os.getenv("DEBUG", 0))))
     app.run(port=int(os.getenv("PORT", "8080")), debug=bool(int(os.getenv("DEBUG", 0))))
-
 # %%
