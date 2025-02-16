@@ -213,7 +213,6 @@ const ChatPage: React.FC = () => {
       id: newChatId,
       title: currentMessages[0].content.slice(0, 10) + "...",
       messages: [...currentMessages],
-      date: new Date().toISOString(),
       lastPromptDate: new Date().toISOString(),
     };
     try {

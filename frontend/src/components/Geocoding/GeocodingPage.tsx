@@ -1,5 +1,5 @@
 // src/pages/geocodingpage.tsx
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import { useToken } from "../../hooks/useToken";
 import * as indexedDBUtils from "../../utils/indexedDBUtils";
 import * as Config from "../../config";
@@ -30,24 +30,24 @@ function openCacheDB(): Promise<IDBDatabase> {
   });
 }
 
-async function getCachedResult(query: string): Promise<{ result: GeoResult; timestamp: number } | null> {
+async function getCachedResult(query: string): Promise<GeoResult | null> {
   const db = await openCacheDB();
   return new Promise((resolve, reject) => {
     const transaction = db.transaction("geocodeCache", "readonly");
     const store = transaction.objectStore("geocodeCache");
     const req = store.get(query);
-    req.onsuccess = () => resolve(req.result || null);
+    req.onsuccess = () => resolve(req.result ? req.result : null);
     req.onerror = () => reject(req.error);
   });
 }
 
+// 修正: GeoResult オブジェクトそのものを保存する（余分なラッパーを外す）
 async function setCachedResult(query: string, result: GeoResult): Promise<void> {
   const db = await openCacheDB();
   return new Promise((resolve, reject) => {
     const transaction = db.transaction("geocodeCache", "readwrite");
     const store = transaction.objectStore("geocodeCache");
-    const data = { query, result, timestamp: Date.now() };
-    const req = store.put(data);
+    const req = store.put(result); // 修正前は store.put({ query, result })
     req.onsuccess = () => resolve();
     req.onerror = () => reject(req.error);
   });
@@ -81,7 +81,7 @@ const GeocodingPage = () => {
     setIsSending(true);
 
     try {
-      const now = Date.now();
+      const timestamp = Date.now();
       // キャッシュチェック
       const cachedResults: { [query: string]: GeoResult } = {};
       const queriesToFetch: string[] = [];
@@ -91,8 +91,9 @@ const GeocodingPage = () => {
           const query = line.trim();
           try {
             const cached = await getCachedResult(query);
-            if (cached && now - cached.timestamp < Config.CACHE_TTL_MS) {
-              cachedResults[query] = { ...cached.result, isCached: true, fetchedAt: cached.timestamp };
+            // 修正: キャッシュは GeoResult オブジェクトそのものなので、直接プロパティにアクセスできる
+            if (cached && timestamp - (cached.fetchedAt || 0) < Config.CACHE_TTL_MS) {
+              cachedResults[query] = { ...cached, isCached: true };
             } else {
               queriesToFetch.push(query);
             }
@@ -118,9 +119,10 @@ const GeocodingPage = () => {
         const data = await response.json();
         // API取得結果は入力行順（重複含む）で返される前提
         queriesToFetch.forEach((query, index) => {
-          const fetchedAt = Date.now();
-          fetchedResults[query] = { ...data.results[index], isCached: false, fetchedAt };
-          setCachedResult(query, data.results[index]).catch((err) =>
+          // 修正: API結果に query を追加して GeoResult として保存する
+          const geoResult = { query, ...data.results[index], isCached: false, fetchedAt: timestamp };
+          fetchedResults[query] = geoResult;
+          setCachedResult(query, geoResult).catch((err) =>
             console.error("キャッシュ保存エラー:", err)
           );
         });

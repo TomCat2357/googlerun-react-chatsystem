@@ -22,6 +22,5 @@ export interface Message {
     id: number;
     title: string;
     messages: Message[];
-    date: string;
     lastPromptDate: string;
   }
