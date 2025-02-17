@@ -501,13 +501,22 @@ const GeocodingPage = () => {
         </div>
       </div>
 
-      {/* テキスト入力エリア */}
+      {/* テキスト入力エリアとテキストクリアボタンを同一行に配置 */}
       <div className="mb-4">
-        <label className="block text-sm font-medium mb-2 text-gray-200">
-          {inputMode === "address"
-            ? "1行毎に住所や施設名等の「キーワード」を入力すると、緯度経度を返します。"
-            : "1行毎に「緯度,経度」を入力すると、住所を返します。"}
-        </label>
+        <div className="mb-2 flex justify-between items-center">
+          <label className="text-sm font-medium text-gray-200">
+            {inputMode === "address"
+              ? "1行毎に住所や施設名等の「キーワード」を入力すると、緯度経度を返します。"
+              : "1行毎に「緯度,経度」を入力すると、住所を返します。"}
+          </label>
+          <button
+            onClick={handleClearText}
+            disabled={inputText.trim() === ""}
+            className="px-4 py-2 bg-yellow-600 text-white rounded hover:bg-yellow-700 disabled:opacity-50"
+          >
+            テキストボックスをクリア
+          </button>
+        </div>
         <textarea
           value={inputText}
           onChange={handleTextChange}
@@ -516,7 +525,7 @@ const GeocodingPage = () => {
         />
       </div>
 
-      {/* アクションボタン */}
+      {/* アクションボタン（有効行数/送信/CSVダウンロード/CSVエンコーディングラジオボタン/結果クリア） */}
       <div className="flex items-center justify-between mb-4">
         <div className="text-gray-200">
           有効な行数: <strong>{lineCount}</strong>
@@ -529,57 +538,43 @@ const GeocodingPage = () => {
           >
             {isSending || isLoadingImages ? "処理中..." : "送信"}
           </button>
-          <div className="flex items-center space-x-4">
-            <div className="flex items-center space-x-2">
-              <span className="text-gray-200">CSVエンコーディング:</span>
-              <label className="text-gray-200">
-                <input
-                  type="radio"
-                  name="csvEncoding"
-                  value="utf8"
-                  checked={csvEncoding === "utf8"}
-                  onChange={() => setCsvEncoding("utf8")}
-                />{" "}
-                UTF-8
-              </label>
-              <label className="text-gray-200">
-                <input
-                  type="radio"
-                  name="csvEncoding"
-                  value="shift-jis"
-                  checked={csvEncoding === "shift-jis"}
-                  onChange={() => setCsvEncoding("shift-jis")}
-                />{" "}
-                Shift-JIS
-              </label>
-            </div>
-            <button
-              onClick={handleDownloadCSV}
-              disabled={isSending || results.length === 0}
-              className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50"
-            >
-              CSVダウンロード
-            </button>
+          <button
+            onClick={handleDownloadCSV}
+            disabled={isSending || results.length === 0}
+            className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50"
+          >
+            CSVダウンロード
+          </button>
+          <div className="flex items-center space-x-2">
+            <label className="text-gray-200">
+              <input
+                type="radio"
+                name="csvEncoding"
+                value="utf8"
+                checked={csvEncoding === "utf8"}
+                onChange={() => setCsvEncoding("utf8")}
+              />{" "}
+              UTF-8
+            </label>
+            <label className="text-gray-200">
+              <input
+                type="radio"
+                name="csvEncoding"
+                value="shift-jis"
+                checked={csvEncoding === "shift-jis"}
+                onChange={() => setCsvEncoding("shift-jis")}
+              />{" "}
+              Shift-JIS
+            </label>
           </div>
+          <button
+            onClick={handleClearResults}
+            disabled={results.length === 0}
+            className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50"
+          >
+            結果をクリア
+          </button>
         </div>
-      </div>
-
-      {/* 追加：結果クリアとテキストボックスクリアのボタン */}
-      <div className="flex items-center justify-between mb-4">
-        <button
-          onClick={handleClearResults}
-          disabled={results.length === 0}
-          className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50"
-        >
-          結果をクリア
-        </button>
-        <button
-          onClick={handleClearText}
-          disabled={inputText.trim() === ""}
-          className="px-4 py-2 bg-yellow-600 text-white rounded hover:bg-yellow-700 disabled:opacity-50"
-        >
-          テキストボックスをクリア
-        </button>
       </div>
 
       {/* 結果テーブル */}
