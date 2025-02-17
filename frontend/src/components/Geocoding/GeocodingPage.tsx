@@ -362,7 +362,7 @@ const GeocodingPage = () => {
               checked={inputMode === "address"}
               onChange={() => setInputMode("address")}
             />{" "}
-            住所等
+            住所等⇒緯度経度
           </label>
           <label className="text-gray-200">
             <input
@@ -372,15 +372,15 @@ const GeocodingPage = () => {
               checked={inputMode === "latlng"}
               onChange={() => setInputMode("latlng")}
             />{" "}
-            緯度経度
+            緯度経度⇒住所
           </label>
         </div>
       </div>
       <div className="mb-4">
         <label htmlFor="addressInput" className="block text-sm font-medium mb-2 text-gray-200">
           {inputMode === "address"
-            ? "1行毎に住所や施設名等の「キーワード」を入力"
-            : "1行毎に「緯度,経度」を入力"}
+            ? "1行毎に住所や施設名等の「キーワード」を入力すると、緯度経度を返します。"
+            : "1行毎に「緯度,経度」を入力すると、住所を返します。"}
         </label>
         <textarea
           id="addressInput"
