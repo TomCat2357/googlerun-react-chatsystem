@@ -75,6 +75,32 @@ def get_address(api_key, latitude, longitude):
     data = response.json()
     return data
 
-#%%
-if __name__ == "__main__":
-    pass
+def get_street_view(api_key, latitude, longitude, size=(600, 600), heading=0, pitch=0, fov=90):
+    """
+    Google Maps Street View Static APIを使用して、指定した地点のストリートビューの静止画像を取得します。
+
+    :param api_key: APIキー
+    :param latitude: 緯度
+    :param longitude: 経度
+    :param size: 画像サイズ（幅, 高さ）最大640x640ピクセル
+    :param heading: カメラの向き（0〜360度）
+    :param pitch: カメラの上下角度（-90〜90度）
+    :param fov: 画像の視野（1〜120度）
+    """
+    logger.info("ストリートビュー静止画像取得リクエスト開始: 緯度=%s, 経度=%s, heading=%s, pitch=%s, fov=%s", latitude, longitude, heading, pitch, fov)
+    base_url = "https://maps.googleapis.com/maps/api/streetview"
+    params = {
+        "size": f"{size[0]}x{size[1]}",
+        "location": f"{latitude},{longitude}",
+        "heading": heading,
+        "pitch": pitch,
+        "fov": fov,
+        "key": api_key
+    }
+    response = requests.get(base_url, params=params)
+    if response.ok:
+        logger.info("ストリートビュー静止画像取得成功。ステータスコード: %s", response.status_code)
+    else:
+        logger.error("ストリートビュー静止画像取得失敗。ステータスコード: %s", response.status_code)
+    return response
+
