@@ -8,6 +8,7 @@ interface SliderControlProps {
   min: number;
   max: number;
   step: number;
+  disabled?: boolean;
 }
 
 export const SliderControl: React.FC<SliderControlProps> = ({
@@ -16,7 +17,8 @@ export const SliderControl: React.FC<SliderControlProps> = ({
   onChange,
   min,
   max,
-  step
+  step,
+  disabled = false,
 }) => {
   return (
     <div className="flex items-center space-x-2 mb-2">
@@ -27,12 +29,14 @@ export const SliderControl: React.FC<SliderControlProps> = ({
         max={max}
         step={step}
         value={value}
+        disabled={disabled}
         onChange={(e) => onChange(Number(e.target.value))}
         className="flex-1"
       />
       <input
         type="number"
         value={value}
+        disabled={disabled}
         onChange={(e) => {
           const val = Number(e.target.value);
           if (val >= min && val <= max) {
@@ -46,6 +50,7 @@ export const SliderControl: React.FC<SliderControlProps> = ({
 };
 
 interface MapControlsProps {
+  disabled?: boolean;
   showSatellite: boolean;
   showStreetView: boolean;
   onShowSatelliteChange: (checked: boolean) => void;
@@ -61,6 +66,7 @@ interface MapControlsProps {
 }
 
 export const MapControls: React.FC<MapControlsProps> = ({
+  disabled = false,
   showSatellite,
   showStreetView,
   onShowSatelliteChange,
@@ -81,6 +87,7 @@ export const MapControls: React.FC<MapControlsProps> = ({
           <input
             type="checkbox"
             checked={showSatellite}
+            disabled={disabled}
             onChange={(e) => onShowSatelliteChange(e.target.checked)}
             className="form-checkbox"
           />
@@ -90,6 +97,7 @@ export const MapControls: React.FC<MapControlsProps> = ({
           <input
             type="checkbox"
             checked={showStreetView}
+            disabled={disabled}
             onChange={(e) => onShowStreetViewChange(e.target.checked)}
             className="form-checkbox"
           />
@@ -101,6 +109,7 @@ export const MapControls: React.FC<MapControlsProps> = ({
         <div className="mb-4">
           <h3 className="text-gray-200 font-bold mb-2">衛星写真設定</h3>
           <SliderControl
+            disabled={disabled}
             label="ズームレベル"
             value={satelliteZoom}
             onChange={onSatelliteZoomChange}
@@ -115,6 +124,7 @@ export const MapControls: React.FC<MapControlsProps> = ({
         <div>
           <h3 className="text-gray-200 font-bold mb-2">ストリートビュー設定</h3>
           <SliderControl
+            disabled={disabled}
             label="方角"
             value={streetViewHeading}
             onChange={onStreetViewHeadingChange}
@@ -123,6 +133,7 @@ export const MapControls: React.FC<MapControlsProps> = ({
             step={1}
           />
           <SliderControl
+            disabled={disabled}
             label="上下角度"
             value={streetViewPitch}
             onChange={onStreetViewPitchChange}
@@ -131,6 +142,7 @@ export const MapControls: React.FC<MapControlsProps> = ({
             step={1}
           />
           <SliderControl
+            disabled={disabled}
             label="視野角"
             value={streetViewFov}
             onChange={onStreetViewFovChange}

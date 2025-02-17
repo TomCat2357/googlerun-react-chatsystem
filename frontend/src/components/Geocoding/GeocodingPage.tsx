@@ -432,6 +432,17 @@ const GeocodingPage = () => {
     }
   };
 
+  // 結果クリアボタンのハンドラー
+  const handleClearResults = () => {
+    setResults([]);
+  };
+
+  // テキストボックスクリアボタンのハンドラー
+  const handleClearText = () => {
+    setInputText("");
+    setLineCount(0);
+  };
+
   // 地図設定が変更されたときに画像を再取得する
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -446,8 +457,9 @@ const GeocodingPage = () => {
     <div className="max-w-6xl mx-auto p-4">
       <h1 className="text-2xl font-bold mb-4 text-gray-100">ジオコーディング</h1>
 
-      {/* 地図コントロール */}
+      {/* 地図コントロール（結果がある場合は操作不可） */}
       <MapControls
+        disabled={results.length > 0}
         showSatellite={showSatellite}
         showStreetView={showStreetView}
         onShowSatelliteChange={setShowSatellite}
@@ -517,14 +529,57 @@ const GeocodingPage = () => {
           >
             {isSending || isLoadingImages ? "処理中..." : "送信"}
           </button>
-          <button
-            onClick={handleDownloadCSV}
-            disabled={isSending || results.length === 0}
-            className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50"
-          >
-            CSVダウンロード
-          </button>
+          <div className="flex items-center space-x-4">
+            <div className="flex items-center space-x-2">
+              <span className="text-gray-200">CSVエンコーディング:</span>
+              <label className="text-gray-200">
+                <input
+                  type="radio"
+                  name="csvEncoding"
+                  value="utf8"
+                  checked={csvEncoding === "utf8"}
+                  onChange={() => setCsvEncoding("utf8")}
+                />{" "}
+                UTF-8
+              </label>
+              <label className="text-gray-200">
+                <input
+                  type="radio"
+                  name="csvEncoding"
+                  value="shift-jis"
+                  checked={csvEncoding === "shift-jis"}
+                  onChange={() => setCsvEncoding("shift-jis")}
+                />{" "}
+                Shift-JIS
+              </label>
+            </div>
+            <button
+              onClick={handleDownloadCSV}
+              disabled={isSending || results.length === 0}
+              className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50"
+            >
+              CSVダウンロード
+            </button>
+          </div>
         </div>
+      </div>
+
+      {/* 追加：結果クリアとテキストボックスクリアのボタン */}
+      <div className="flex items-center justify-between mb-4">
+        <button
+          onClick={handleClearResults}
+          disabled={results.length === 0}
+          className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50"
+        >
+          結果をクリア
+        </button>
+        <button
+          onClick={handleClearText}
+          disabled={inputText.trim() === ""}
+          className="px-4 py-2 bg-yellow-600 text-white rounded hover:bg-yellow-700 disabled:opacity-50"
+        >
+          テキストボックスをクリア
+        </button>
       </div>
 
       {/* 結果テーブル */}
