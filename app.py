@@ -451,6 +451,91 @@ def logout() -> Response:
         logger.error("ログアウト処理中にエラーが発生: %s", str(e), exc_info=True)
         return jsonify({"error": str(e)}), 401
 
+@app.route("/backend/static-map", methods=["GET"])
+@require_auth
+def get_static_map_image(decoded_token: Dict) -> Response:
+    """
+    指定された緯度経度の静的地図（衛星写真）を取得するエンドポイント
+    """
+    try:
+        latitude = float(request.args.get("latitude"))
+        longitude = float(request.args.get("longitude"))
+        zoom = int(request.args.get("zoom", 18))
+        width = int(request.args.get("width", 600))
+        height = int(request.args.get("height", 600))
+        map_type = request.args.get("maptype", "satellite")
+
+        google_maps_api_key = os.getenv("GOOGLE_MAPS_API_KEY")
+        if not google_maps_api_key:
+            raise Exception("Google Maps APIキーが設定されていません")
+
+        response = get_static_map(
+            google_maps_api_key,
+            latitude,
+            longitude,
+            zoom=zoom,
+            size=(width, height),
+            map_type=map_type
+        )
+
+        if not response.ok:
+            raise Exception(f"Maps API error: {response.status_code}")
+
+        return Response(
+            response.content,
+            mimetype="image/jpeg",
+            headers={
+                "Cache-Control": "public, max-age=31536000",
+                "Content-Type": "image/jpeg"
+            }
+        )
+    except Exception as e:
+        logger.error("静的地図取得エラー: %s", str(e), exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/backend/street-view", methods=["GET"])
+@require_auth
+def get_street_view_image(decoded_token: Dict) -> Response:
+    """
+    指定された緯度経度のストリートビュー画像を取得するエンドポイント
+    """
+    try:
+        latitude = float(request.args.get("latitude"))
+        longitude = float(request.args.get("longitude"))
+        heading = float(request.args.get("heading", 0))
+        pitch = float(request.args.get("pitch", 0))
+        fov = float(request.args.get("fov", 90))
+        width = int(request.args.get("width", 600))
+        height = int(request.args.get("height", 600))
+
+        google_maps_api_key = os.getenv("GOOGLE_MAPS_API_KEY")
+        if not google_maps_api_key:
+            raise Exception("Google Maps APIキーが設定されていません")
+
+        response = get_street_view(
+            google_maps_api_key,
+            latitude,
+            longitude,
+            size=(width, height),
+            heading=heading,
+            pitch=pitch,
+            fov=fov
+        )
+
+        if not response.ok:
+            raise Exception(f"Street View API error: {response.status_code}")
+
+        return Response(
+            response.content,
+            mimetype="image/jpeg",
+            headers={
+                "Cache-Control": "public, max-age=31536000",
+                "Content-Type": "image/jpeg"
+            }
+        )
+    except Exception as e:
+        logger.error("ストリートビュー取得エラー: %s", str(e), exc_info=True)
+        return jsonify({"error": str(e)}), 500
 
 # ======= フロントエンド配信用（DEBUG以外） =======
 if not int(os.getenv("DEBUG", 0)):
