@@ -63,7 +63,9 @@ const GeocodingPage = () => {
   const [isSending, setIsSending] = useState(false);
   const [results, setResults] = useState<GeoResult[]>([]);
   const [inputMode, setInputMode] = useState<"address" | "latlng">("address");
-  const [csvEncoding, setCsvEncoding] = useState<"utf8" | "shift-jis">("shift-jis");
+  const [csvEncoding, setCsvEncoding] = useState<"utf8" | "shift-jis">(
+    "shift-jis"
+  );
 
   // 地図表示用のstate
   const [showSatellite, setShowSatellite] = useState(false);
@@ -86,7 +88,14 @@ const GeocodingPage = () => {
     const cacheKey =
       type === "satellite"
         ? { type, lat, lng, zoom: satelliteZoom }
-        : { type, lat, lng, heading: streetViewHeading, pitch: streetViewPitch, fov: streetViewFov };
+        : {
+            type,
+            lat,
+            lng,
+            heading: streetViewHeading,
+            pitch: streetViewPitch,
+            fov: streetViewFov,
+          };
 
     const cachedImage = imageCache.get(cacheKey);
     if (cachedImage) {
@@ -102,8 +111,8 @@ const GeocodingPage = () => {
         : {
             heading: streetViewHeading.toString(),
             pitch: streetViewPitch.toString(),
-            fov: streetViewFov.toString()
-          })
+            fov: streetViewFov.toString(),
+          }),
     });
 
     try {
@@ -145,8 +154,12 @@ const GeocodingPage = () => {
             return result;
           }
           const [satelliteImage, streetViewImage] = await Promise.all([
-            showSatellite ? fetchMapImage(result.latitude, result.longitude, "satellite") : Promise.resolve(""),
-            showStreetView ? fetchMapImage(result.latitude, result.longitude, "streetview") : Promise.resolve(""),
+            showSatellite
+              ? fetchMapImage(result.latitude, result.longitude, "satellite")
+              : Promise.resolve(""),
+            showStreetView
+              ? fetchMapImage(result.latitude, result.longitude, "streetview")
+              : Promise.resolve(""),
           ]);
           return {
             ...result,
@@ -209,15 +222,15 @@ const GeocodingPage = () => {
       result.place_id,
       result.types,
       result.error || "",
-      result.fetchedAt ? new Date(result.fetchedAt).toLocaleString("ja-JP") : "",
+      result.fetchedAt
+        ? new Date(result.fetchedAt).toLocaleString("ja-JP")
+        : "",
       result.isCached ? "キャッシュ" : "API取得",
     ]);
 
     const csvContent = [header, ...rows]
       .map((row) =>
-        row
-          .map((cell) => `"${String(cell).replace(/"/g, '""')}"`)
-          .join(",")
+        row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(",")
       )
       .join("\n");
 
@@ -227,7 +240,9 @@ const GeocodingPage = () => {
     } else {
       const codeArray = Encoding.stringToCode(csvContent);
       const sjisArray = Encoding.convert(codeArray, "SJIS");
-      blob = new Blob([new Uint8Array(sjisArray)], { type: "text/csv;charset=shift_jis" });
+      blob = new Blob([new Uint8Array(sjisArray)], {
+        type: "text/csv;charset=shift_jis",
+      });
     }
 
     const url = window.URL.createObjectURL(blob);
@@ -248,7 +263,23 @@ const GeocodingPage = () => {
       .filter((line) => line.length > 0);
     if (allLines.length === 0) return;
 
-    const confirmed = window.confirm(`入力件数は${allLines.length}件です。実行しますか？`);
+    // 画像表示の有無に応じた上限件数を設定
+    const maxBatchSize =
+      showSatellite || showStreetView
+        ? Config.WITH_IMAGE_MAX_BATCH_SIZE
+        : Config.NO_IMAGE_MAX_BATCH_SIZE;
+
+    if (allLines.length > maxBatchSize) {
+      alert(
+        `入力された件数は${allLines.length}件ですが、1回の送信で取得可能な上限は${maxBatchSize}件です。\n` +
+          `件数を減らして再度送信してください。`
+      );
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `入力件数は${allLines.length}件です。実行しますか？`
+    );
     if (!confirmed) return;
 
     setIsSending(true);
@@ -257,6 +288,7 @@ const GeocodingPage = () => {
 
     try {
       if (inputMode === "address") {
+        // 住所入力の場合の処理（キャッシュチェック等）
         const cachedResults: { [query: string]: GeoResult } = {};
         const queriesToFetch: string[] = [];
 
@@ -265,7 +297,10 @@ const GeocodingPage = () => {
             const query = line;
             try {
               const cached = await getCachedResult(query);
-              if (cached && timestamp - (cached.fetchedAt || 0) < Config.CACHE_TTL_MS) {
+              if (
+                cached &&
+                timestamp - (cached.fetchedAt || 0) < Config.CACHE_TTL_MS
+              ) {
                 cachedResults[query] = { ...cached, isCached: true };
               } else {
                 queriesToFetch.push(query);
@@ -278,14 +313,17 @@ const GeocodingPage = () => {
 
         const fetchedResults: { [query: string]: GeoResult } = {};
         if (queriesToFetch.length > 0) {
-          const response = await fetch(`${API_BASE_URL}/backend/address2coordinates`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${token}`,
-            },
-            body: JSON.stringify({ lines: queriesToFetch }),
-          });
+          const response = await fetch(
+            `${API_BASE_URL}/backend/address2coordinates`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${token}`,
+              },
+              body: JSON.stringify({ lines: queriesToFetch }),
+            }
+          );
           if (!response.ok) {
             throw new Error("サーバーからエラーが返されました");
           }
@@ -311,7 +349,7 @@ const GeocodingPage = () => {
         };
         finalResults = allLines.map((line) => mergedResults[line]);
       } else {
-        // 緯度経度入力の場合
+        // 緯度経度入力の場合の処理
         const pattern = /^-?\d+(\.\d+)?,-?\d+(\.\d+)?$/;
         const validLines: string[] = [];
         const errorResults: { [original: string]: GeoResult } = {};
@@ -366,7 +404,10 @@ const GeocodingPage = () => {
           validLines.map(async (query) => {
             try {
               const cached = await getCachedResult(query);
-              if (cached && timestamp - (cached.fetchedAt || 0) < Config.CACHE_TTL_MS) {
+              if (
+                cached &&
+                timestamp - (cached.fetchedAt || 0) < Config.CACHE_TTL_MS
+              ) {
                 cachedResults[query] = { ...cached, isCached: true };
               } else {
                 queriesToFetch.push(query);
@@ -451,11 +492,20 @@ const GeocodingPage = () => {
       }
     }, 500); // 500ms後にAPIコールを実行
     return () => clearTimeout(timer);
-  }, [showSatellite, showStreetView, satelliteZoom, streetViewHeading, streetViewPitch, streetViewFov]);
-  
+  }, [
+    showSatellite,
+    showStreetView,
+    satelliteZoom,
+    streetViewHeading,
+    streetViewPitch,
+    streetViewFov,
+  ]);
+
   return (
     <div className="max-w-6xl mx-auto p-4">
-      <h1 className="text-2xl font-bold mb-4 text-gray-100">ジオコーディング</h1>
+      <h1 className="text-2xl font-bold mb-4 text-gray-100">
+        ジオコーディング
+      </h1>
 
       {/* 地図コントロール（結果がある場合は操作不可） */}
       <MapControls
@@ -476,7 +526,9 @@ const GeocodingPage = () => {
 
       {/* 入力モード選択 */}
       <div className="mb-4">
-        <label className="block text-sm font-medium text-gray-200 mb-2">入力モード</label>
+        <label className="block text-sm font-medium text-gray-200 mb-2">
+          入力モード
+        </label>
         <div>
           <label className="mr-4 text-gray-200">
             <input
@@ -521,7 +573,11 @@ const GeocodingPage = () => {
           value={inputText}
           onChange={handleTextChange}
           className="w-full h-64 p-2 bg-gray-800 text-gray-100 border border-gray-700 rounded-lg focus:ring-2 focus:ring-blue-500"
-          placeholder={inputMode === "address" ? "例：札幌市役所" : "例：35.6812996,139.7670658"}
+          placeholder={
+            inputMode === "address"
+              ? "例：札幌市役所"
+              : "例：35.6812996,139.7670658"
+          }
         />
       </div>
 
@@ -594,21 +650,29 @@ const GeocodingPage = () => {
                   <th className="px-4 py-2">住所</th>
                 )}
                 {showSatellite && <th className="px-4 py-2">衛星写真</th>}
-                {showStreetView && <th className="px-4 py-2">ストリートビュー</th>}
+                {showStreetView && (
+                  <th className="px-4 py-2">ストリートビュー</th>
+                )}
               </tr>
             </thead>
             <tbody>
               {results.map((result, index) => (
                 <tr key={index} className="border-b border-gray-700">
                   <td className="px-4 py-2">{index + 1}</td>
-                  <td className="px-4 py-2">{result.original || result.query}</td>
+                  <td className="px-4 py-2">
+                    {result.original || result.query}
+                  </td>
                   {inputMode === "address" ? (
                     <>
                       <td className="px-4 py-2">
-                        {result.latitude !== null ? result.latitude.toFixed(7) : "-"}
+                        {result.latitude !== null
+                          ? result.latitude.toFixed(7)
+                          : "-"}
                       </td>
                       <td className="px-4 py-2">
-                        {result.longitude !== null ? result.longitude.toFixed(7) : "-"}
+                        {result.longitude !== null
+                          ? result.longitude.toFixed(7)
+                          : "-"}
                       </td>
                     </>
                   ) : (

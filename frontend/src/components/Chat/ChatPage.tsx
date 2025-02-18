@@ -18,7 +18,9 @@ const ChatPage: React.FC = () => {
   const [chatHistories, setChatHistories] = useState<ChatHistory[]>([]);
   const messageContainerRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
-  const [selectedImagesBase64, setSelectedImagesBase64] = useState<string[]>([]);
+  const [selectedImagesBase64, setSelectedImagesBase64] = useState<string[]>(
+    []
+  );
   const [errorMessage, setErrorMessage] = useState<string>("");
   const token = useToken();
   const API_BASE_URL: string = Config.API_BASE_URL;
@@ -60,7 +62,8 @@ const ChatPage: React.FC = () => {
   // ==========================
   useEffect(() => {
     if (messageContainerRef.current) {
-      messageContainerRef.current.scrollTop = messageContainerRef.current.scrollHeight;
+      messageContainerRef.current.scrollTop =
+        messageContainerRef.current.scrollHeight;
     }
   }, [messages]);
 
@@ -125,7 +128,9 @@ const ChatPage: React.FC = () => {
               scale = MAX_LONG_EDGE / longEdge;
               width = Math.floor(width * scale);
               height = Math.floor(height * scale);
-              console.log(`[processImageFile] リサイズ実施：新サイズ ${width}x${height}`);
+              console.log(
+                `[processImageFile] リサイズ実施：新サイズ ${width}x${height}`
+              );
             } else {
               console.log("[processImageFile] リサイズ不要");
             }
@@ -151,10 +156,14 @@ const ChatPage: React.FC = () => {
                 intArray[i] = byteString.charCodeAt(i);
               }
               const blob = new Blob([buffer], { type: "image/jpeg" });
-              console.log(`[processImageFile] 現在の品質 ${quality}, Blobサイズ: ${blob.size} bytes`);
+              console.log(
+                `[processImageFile] 現在の品質 ${quality}, Blobサイズ: ${blob.size} bytes`
+              );
               if (blob.size > MAX_IMAGE_SIZE && quality > minQuality) {
                 quality -= 0.1;
-                console.log(`[processImageFile] サイズ超過のため再圧縮：新品質 ${quality}`);
+                console.log(
+                  `[processImageFile] サイズ超過のため再圧縮：新品質 ${quality}`
+                );
                 processCanvas();
               } else {
                 console.log("[processImageFile] 画像処理完了");
@@ -191,7 +200,9 @@ const ChatPage: React.FC = () => {
       store.getAll().onsuccess = (e) => {
         const histories = (e.target as IDBRequest).result as ChatHistory[];
         const sortedHistories = histories
-          .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+          .sort(
+            (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
+          )
           .slice(0, 30);
         setChatHistories(sortedHistories);
       };
@@ -203,7 +214,10 @@ const ChatPage: React.FC = () => {
   // ==========================
   //  IndexedDB にチャット履歴を保存
   // ==========================
-  const saveChatHistory = async (currentMessages: Message[], chatId: number | null) => {
+  const saveChatHistory = async (
+    currentMessages: Message[],
+    chatId: number | null
+  ) => {
     if (currentMessages.length === 0) return;
     const newChatId = chatId ?? Date.now();
     if (!currentChatId) {
@@ -233,7 +247,11 @@ const ChatPage: React.FC = () => {
           updatedHistories.push(historyItem);
         }
         updatedHistories = updatedHistories
-          .sort((a, b) => new Date(b.lastPromptDate).getTime() - new Date(a.lastPromptDate).getTime())
+          .sort(
+            (a, b) =>
+              new Date(b.lastPromptDate).getTime() -
+              new Date(a.lastPromptDate).getTime()
+          )
           .slice(0, 30);
         store.clear().onsuccess = () => {
           updatedHistories.forEach((history) => store.add(history));
@@ -278,7 +296,9 @@ const ChatPage: React.FC = () => {
     const files = Array.from(e.target.files);
     const allowedCount = MAX_IMAGES - selectedImagesBase64.length;
     if (files.length > allowedCount) {
-      setErrorMessage(`一度にアップロードできる画像は最大 ${MAX_IMAGES} 枚です`);
+      setErrorMessage(
+        `一度にアップロードできる画像は最大 ${MAX_IMAGES} 枚です`
+      );
       files.splice(allowedCount);
     }
     const promises = files.map((file) => processImageFile(file));
@@ -339,7 +359,8 @@ const ChatPage: React.FC = () => {
       const newUserMessage: Message = {
         role: "user",
         content: input.trim() || "[Images Uploaded]",
-        images: selectedImagesBase64.length > 0 ? [...selectedImagesBase64] : [],
+        images:
+          selectedImagesBase64.length > 0 ? [...selectedImagesBase64] : [],
       };
 
       let updatedMessages: Message[] = [...messages, newUserMessage];
@@ -376,7 +397,10 @@ const ChatPage: React.FC = () => {
       const decoder = new TextDecoder();
 
       if (reader) {
-        updatedMessages = [...updatedMessages, { role: "assistant", content: "" }];
+        updatedMessages = [
+          ...updatedMessages,
+          { role: "assistant", content: "" },
+        ];
         setMessages(updatedMessages);
 
         while (true) {
@@ -403,7 +427,9 @@ const ChatPage: React.FC = () => {
         setMessages(backupMsgs);
         setInput(backupInput);
         setSelectedImagesBase64(backupImages);
-        setErrorMessage(error instanceof Error ? error.message : "不明なエラー");
+        setErrorMessage(
+          error instanceof Error ? error.message : "不明なエラー"
+        );
       }
     } finally {
       setIsProcessing(false);
@@ -496,7 +522,9 @@ const ChatPage: React.FC = () => {
       {/* サイドバー */}
       <div className="w-64 bg-gray-800 shadow-lg p-4 overflow-y-auto">
         <div className="mb-6">
-          <h2 className="text-lg font-semibold mb-4 text-gray-100">モデル選択</h2>
+          <h2 className="text-lg font-semibold mb-4 text-gray-100">
+            モデル選択
+          </h2>
           <select
             value={selectedModel}
             onChange={(e) => setSelectedModel(e.target.value)}
@@ -523,14 +551,21 @@ const ChatPage: React.FC = () => {
             履歴保存
           </button>
           <label className="flex-1">
-            <input type="file" accept=".json" onChange={uploadHistory} className="hidden" />
+            <input
+              type="file"
+              accept=".json"
+              onChange={uploadHistory}
+              className="hidden"
+            />
             <span className="block p-2 bg-purple-500 hover:bg-purple-600 text-white rounded-lg transition-colors text-center cursor-pointer">
               履歴読込
             </span>
           </label>
         </div>
         <div>
-          <h2 className="text-lg font-semibold mb-4 text-gray-100">最近のチャット</h2>
+          <h2 className="text-lg font-semibold mb-4 text-gray-100">
+            最近のチャット
+          </h2>
           <div className="space-y-2">
             {chatHistories.map((history) => (
               <div
@@ -551,10 +586,24 @@ const ChatPage: React.FC = () => {
       {/* メインチャットエリア */}
       <div className="flex-1 flex flex-col h-full">
         {/* メッセージ表示エリア */}
-        <div ref={messageContainerRef} className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-900">
+        <div
+          ref={messageContainerRef}
+          className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-900"
+        >
           {messages.map((message, index) => (
-            <div key={index} className={`max-w-[80%] ${message.role === "user" ? "ml-auto" : "mr-auto"}`}>
-              <div className={`p-4 rounded-lg ${message.role === "user" ? "bg-blue-900 text-gray-100" : "bg-gray-800 border border-gray-700 text-gray-100"}`}>
+            <div
+              key={index}
+              className={`max-w-[80%] ${
+                message.role === "user" ? "ml-auto" : "mr-auto"
+              }`}
+            >
+              <div
+                className={`p-4 rounded-lg ${
+                  message.role === "user"
+                    ? "bg-blue-900 text-gray-100"
+                    : "bg-gray-800 border border-gray-700 text-gray-100"
+                }`}
+              >
                 {message.role === "user" ? (
                   <div className="flex justify-between items-center">
                     <div>{message.content}</div>
@@ -583,7 +632,11 @@ const ChatPage: React.FC = () => {
                   </div>
                 )}
               </div>
-              <div className={`text-xs text-gray-400 mt-1 ${message.role === "user" ? "text-right" : "text-left"}`}>
+              <div
+                className={`text-xs text-gray-400 mt-1 ${
+                  message.role === "user" ? "text-right" : "text-left"
+                }`}
+              >
                 {message.role === "user" ? "あなた" : "アシスタント"}
               </div>
             </div>
@@ -595,7 +648,10 @@ const ChatPage: React.FC = () => {
           {isEditMode && (
             <div className="mb-2 p-2 bg-yellow-200 text-yellow-800 rounded flex justify-between items-center">
               <span>※ 現在、プロンプトのやり直しモードです</span>
-              <button onClick={cancelEditMode} className="text-sm text-red-600 hover:underline">
+              <button
+                onClick={cancelEditMode}
+                className="text-sm text-red-600 hover:underline"
+              >
                 キャンセル
               </button>
             </div>
@@ -613,7 +669,9 @@ const ChatPage: React.FC = () => {
                   <button
                     className="absolute top-0 right-0 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center"
                     onClick={() =>
-                      setSelectedImagesBase64((prev) => prev.filter((_, index) => index !== i))
+                      setSelectedImagesBase64((prev) =>
+                        prev.filter((_, index) => index !== i)
+                      )
                     }
                   >
                     ×
@@ -634,9 +692,23 @@ const ChatPage: React.FC = () => {
             />
             <label className="flex items-center justify-center px-4 py-2 bg-gray-700 hover:bg-gray-600 text-gray-100 rounded-lg cursor-pointer">
               画像選択
-              <input type="file" accept="image/*" multiple className="hidden" onChange={handleImageUpload} disabled={isProcessing} />
+              <input
+                type="file"
+                accept="image/*"
+                multiple
+                className="hidden"
+                onChange={handleImageUpload}
+                disabled={isProcessing}
+              />
             </label>
-            <button onClick={isProcessing ? stopGeneration : sendMessage} className={`px-4 py-2 rounded-lg ${isProcessing ? "bg-red-900 hover:bg-red-800" : "bg-blue-900 hover:bg-blue-800"} text-gray-100 transition-colors`}>
+            <button
+              onClick={isProcessing ? stopGeneration : sendMessage}
+              className={`px-4 py-2 rounded-lg ${
+                isProcessing
+                  ? "bg-red-900 hover:bg-red-800"
+                  : "bg-blue-900 hover:bg-blue-800"
+              } text-gray-100 transition-colors`}
+            >
               {isProcessing ? "停止" : "送信"}
             </button>
           </div>
@@ -650,10 +722,18 @@ const ChatPage: React.FC = () => {
           onClick={() => setEnlargedImage(null)}
         >
           <div className="relative">
-            <button className="absolute top-0 right-0 m-2 text-white text-2xl font-bold" onClick={() => setEnlargedImage(null)}>
+            <button
+              className="absolute top-0 right-0 m-2 text-white text-2xl font-bold"
+              onClick={() => setEnlargedImage(null)}
+            >
               ×
             </button>
-            <img src={enlargedImage} alt="Enlarged" className="max-h-screen max-w-full" onClick={(e) => e.stopPropagation()} />
+            <img
+              src={enlargedImage}
+              alt="Enlarged"
+              className="max-h-screen max-w-full"
+              onClick={(e) => e.stopPropagation()}
+            />
           </div>
         </div>
       )}

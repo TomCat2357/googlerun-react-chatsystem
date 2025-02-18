@@ -7,6 +7,11 @@ export const API_BASE_URL: string = import.meta.env.VITE_API_BASE_URL;
 export const CACHE_TTL: number = Number(import.meta.env.VITE_GOOGLE_MAPS_API_CACHE_TTL) || 3600;
 export const CACHE_TTL_MS: number = CACHE_TTL * 1000;
 
+// Gecoding用で一回の送信で得られる件数
+export const NO_IMAGE_MAX_BATCH_SIZE: number = Number(import.meta.env.VITE_GEOCODING_NO_IMAGE_MAX_BATCH_SIZE);
+export const WITH_IMAGE_MAX_BATCH_SIZE: number = Number(import.meta.env.VITE_GEOCODING_WITH_IMAGE_MAX_BATCH_SIZE);
+
+
 // 画像アップロード関連の定数（chatpage.tsx用）
 export const MAX_IMAGES: number = Number(import.meta.env.VITE_MAX_IMAGES) || 5;
 export const MAX_LONG_EDGE: number = Number(import.meta.env.VITE_MAX_LONG_EDGE) || 1568;
