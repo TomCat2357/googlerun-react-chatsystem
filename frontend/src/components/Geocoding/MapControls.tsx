@@ -63,6 +63,9 @@ interface MapControlsProps {
   onStreetViewPitchChange: (value: number) => void;
   streetViewFov: number;
   onStreetViewFovChange: (value: number) => void;
+  // 追加: 方角指定を無効にするかどうかのプロパティ
+  streetViewNoHeading: boolean;
+  onStreetViewNoHeadingChange: (checked: boolean) => void;
 }
 
 export const MapControls: React.FC<MapControlsProps> = ({
@@ -79,6 +82,8 @@ export const MapControls: React.FC<MapControlsProps> = ({
   onStreetViewPitchChange,
   streetViewFov,
   onStreetViewFovChange,
+  streetViewNoHeading,
+  onStreetViewNoHeadingChange,
 }) => {
   return (
     <div className="p-4 bg-gray-800 rounded-lg mb-4">
@@ -123,8 +128,21 @@ export const MapControls: React.FC<MapControlsProps> = ({
       {showStreetView && (
         <div>
           <h3 className="text-gray-200 font-bold mb-2">ストリートビュー設定</h3>
+          {/* 新たに「方角を指定しない」チェックボックスを追加 */}
+          <div className="flex items-center space-x-2 mb-2">
+            <label className="text-gray-200">
+              <input
+                type="checkbox"
+                checked={streetViewNoHeading}
+                disabled={disabled}
+                onChange={(e) => onStreetViewNoHeadingChange(e.target.checked)}
+                className="form-checkbox"
+              />
+              方角を指定しない
+            </label>
+          </div>
           <SliderControl
-            disabled={disabled}
+            disabled={disabled || streetViewNoHeading}
             label="方角"
             value={streetViewHeading}
             onChange={onStreetViewHeadingChange}

@@ -1,5 +1,5 @@
 // src/components/Geocoding/GeocodingPage.tsx
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import { useToken } from "../../hooks/useToken";
 import * as indexedDBUtils from "../../utils/indexedDBUtils";
 import * as Config from "../../config";
@@ -63,9 +63,7 @@ const GeocodingPage = () => {
   const [isSending, setIsSending] = useState(false);
   const [results, setResults] = useState<GeoResult[]>([]);
   const [inputMode, setInputMode] = useState<"address" | "latlng">("address");
-  const [csvEncoding, setCsvEncoding] = useState<"utf8" | "shift-jis">(
-    "shift-jis"
-  );
+  const [csvEncoding, setCsvEncoding] = useState<"utf8" | "shift-jis">("shift-jis");
 
   // 地図表示用のstate
   const [showSatellite, setShowSatellite] = useState(false);
@@ -75,6 +73,8 @@ const GeocodingPage = () => {
   const [streetViewPitch, setStreetViewPitch] = useState(0);
   const [streetViewFov, setStreetViewFov] = useState(90);
   const [isLoadingImages, setIsLoadingImages] = useState(false);
+  // 追加: 「方角を指定しない」状態
+  const [streetViewNoHeading, setStreetViewNoHeading] = useState(false);
 
   const token = useToken();
   const API_BASE_URL: string = Config.API_BASE_URL;
@@ -85,62 +85,90 @@ const GeocodingPage = () => {
     lng: number,
     type: "satellite" | "streetview"
   ): Promise<string> => {
-    const cacheKey =
-      type === "satellite"
-        ? { type, lat, lng, zoom: satelliteZoom }
-        : {
-            type,
-            lat,
-            lng,
-            heading: streetViewHeading,
-            pitch: streetViewPitch,
-            fov: streetViewFov,
-          };
-
-    const cachedImage = imageCache.get(cacheKey);
-    if (cachedImage) {
-      return cachedImage;
-    }
-
-    const endpoint = type === "satellite" ? "static-map" : "street-view";
-    const params = new URLSearchParams({
-      latitude: lat.toString(),
-      longitude: lng.toString(),
-      ...(type === "satellite"
-        ? { zoom: satelliteZoom.toString(), maptype: "satellite" }
-        : {
-            heading: streetViewHeading.toString(),
-            pitch: streetViewPitch.toString(),
-            fov: streetViewFov.toString(),
-          }),
-    });
-
-    try {
-      const response = await fetch(
-        `${API_BASE_URL}/backend/${endpoint}?${params.toString()}`,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        }
-      );
-
-      if (!response.ok) {
-        throw new Error(`画像取得エラー: ${response.statusText}`);
+    if (type === "satellite") {
+      const cacheKey = { type, lat, lng, zoom: satelliteZoom };
+      const cachedImage = imageCache.get(cacheKey);
+      if (cachedImage) {
+        return cachedImage;
       }
-
-      const blob = await response.blob();
-      const base64 = await new Promise<string>((resolve) => {
-        const reader = new FileReader();
-        reader.onloadend = () => resolve(reader.result as string);
-        reader.readAsDataURL(blob);
+      const endpoint = "static-map";
+      const params = new URLSearchParams({
+        latitude: lat.toString(),
+        longitude: lng.toString(),
+        zoom: satelliteZoom.toString(),
+        maptype: "satellite",
       });
-
-      imageCache.set(cacheKey, base64);
-      return base64;
-    } catch (error) {
-      console.error(`${type}画像取得エラー:`, error);
-      return "";
+      try {
+        const response = await fetch(
+          `${API_BASE_URL}/backend/${endpoint}?${params.toString()}`,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          }
+        );
+        if (!response.ok) {
+          throw new Error(`画像取得エラー: ${response.statusText}`);
+        }
+        const blob = await response.blob();
+        const base64 = await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result as string);
+          reader.readAsDataURL(blob);
+        });
+        imageCache.set(cacheKey, base64);
+        return base64;
+      } catch (error) {
+        console.error(`satellite画像取得エラー:`, error);
+        return "";
+      }
+    } else {
+      // ストリートビューの場合
+      const headingValue = streetViewNoHeading ? null : streetViewHeading;
+      const cacheKey = {
+        type,
+        lat,
+        lng,
+        heading: headingValue, // nullの場合も含む
+        pitch: streetViewPitch,
+        fov: streetViewFov,
+      };
+      const cachedImage = imageCache.get(cacheKey);
+      if (cachedImage) {
+        return cachedImage;
+      }
+      const endpoint = "street-view";
+      const params = new URLSearchParams({
+        latitude: lat.toString(),
+        longitude: lng.toString(),
+        heading: headingValue === null ? "null" : headingValue.toString(),
+        pitch: streetViewPitch.toString(),
+        fov: streetViewFov.toString(),
+      });
+      try {
+        const response = await fetch(
+          `${API_BASE_URL}/backend/${endpoint}?${params.toString()}`,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          }
+        );
+        if (!response.ok) {
+          throw new Error(`画像取得エラー: ${response.statusText}`);
+        }
+        const blob = await response.blob();
+        const base64 = await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result as string);
+          reader.readAsDataURL(blob);
+        });
+        imageCache.set(cacheKey, base64);
+        return base64;
+      } catch (error) {
+        console.error(`streetview画像取得エラー:`, error);
+        return "";
+      }
     }
   };
 
@@ -465,6 +493,7 @@ const GeocodingPage = () => {
       }
       console.log("送信成功", finalResults);
       setResults(finalResults);
+      // ※ 画像更新は「送信」ボタン押下時に反映（スライダー操作のみでは反映されない）
       await addImagesToResults(finalResults);
     } catch (error) {
       console.error("送信エラー", error);
@@ -484,32 +513,12 @@ const GeocodingPage = () => {
     setLineCount(0);
   };
 
-  // 地図設定が変更されたときに画像を再取得する
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      if (results.length > 0 && (showSatellite || showStreetView)) {
-        addImagesToResults(results);
-      }
-    }, 500); // 500ms後にAPIコールを実行
-    return () => clearTimeout(timer);
-  }, [
-    showSatellite,
-    showStreetView,
-    satelliteZoom,
-    streetViewHeading,
-    streetViewPitch,
-    streetViewFov,
-  ]);
-
   return (
     <div className="max-w-6xl mx-auto p-4">
-      <h1 className="text-2xl font-bold mb-4 text-gray-100">
-        ジオコーディング
-      </h1>
+      <h1 className="text-2xl font-bold mb-4 text-gray-100">ジオコーディング</h1>
 
-      {/* 地図コントロール（結果がある場合は操作不可） */}
+      {/* 地図コントロール（結果が表示されていても操作可能） */}
       <MapControls
-        disabled={results.length > 0}
         showSatellite={showSatellite}
         showStreetView={showStreetView}
         onShowSatelliteChange={setShowSatellite}
@@ -522,6 +531,8 @@ const GeocodingPage = () => {
         onStreetViewPitchChange={setStreetViewPitch}
         streetViewFov={streetViewFov}
         onStreetViewFovChange={setStreetViewFov}
+        streetViewNoHeading={streetViewNoHeading}
+        onStreetViewNoHeadingChange={setStreetViewNoHeading}
       />
 
       {/* 入力モード選択 */}
@@ -574,9 +585,7 @@ const GeocodingPage = () => {
           onChange={handleTextChange}
           className="w-full h-64 p-2 bg-gray-800 text-gray-100 border border-gray-700 rounded-lg focus:ring-2 focus:ring-blue-500"
           placeholder={
-            inputMode === "address"
-              ? "例：札幌市役所"
-              : "例：35.6812996,139.7670658"
+            inputMode === "address" ? "例：札幌市役所" : "例：35.6812996,139.7670658"
           }
         />
       </div>
@@ -650,9 +659,7 @@ const GeocodingPage = () => {
                   <th className="px-4 py-2">住所</th>
                 )}
                 {showSatellite && <th className="px-4 py-2">衛星写真</th>}
-                {showStreetView && (
-                  <th className="px-4 py-2">ストリートビュー</th>
-                )}
+                {showStreetView && <th className="px-4 py-2">ストリートビュー</th>}
               </tr>
             </thead>
             <tbody>

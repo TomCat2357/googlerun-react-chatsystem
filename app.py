@@ -502,7 +502,11 @@ def get_street_view_image(decoded_token: Dict) -> Response:
     try:
         latitude = float(request.args.get("latitude"))
         longitude = float(request.args.get("longitude"))
-        heading = float(request.args.get("heading", 0))
+        heading = request.args.get("heading")
+        if heading == "null":
+            heading = None
+        else:
+            heading = float(request.args.get("heading", 0))
         pitch = float(request.args.get("pitch", 0))
         fov = float(request.args.get("fov", 90))
         width = int(request.args.get("width", 600))
