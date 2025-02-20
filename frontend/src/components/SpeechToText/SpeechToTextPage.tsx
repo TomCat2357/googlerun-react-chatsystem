@@ -23,6 +23,12 @@ interface SpeechRecord {
   lastUpdateTime: string;
 }
 
+interface TimedSegment {
+  start_time: string; // "HH:MM:SS"形式
+  end_time: string;
+  text: string;
+}
+
 /**
  * 共通の SpeechToText 用 IndexedDB オープン関数  
  * DB名："SpeechToTextDB"、オブジェクトストア名："speechRecords"  
@@ -47,6 +53,14 @@ const formatDate = (timestamp: number): string => {
   return `${year}/${month}/${day}`;
 };
 
+/**
+ * "HH:MM:SS"形式の文字列を秒数に変換するヘルパー関数
+ */
+const timeStringToSeconds = (timeStr: string): number => {
+  const parts = timeStr.split(":").map(Number);
+  return parts[0] * 3600 + parts[1] * 60 + parts[2];
+};
+
 const SpeechToTextPage = () => {
   const token = useToken();
   const API_BASE_URL: string = Config.API_BASE_URL;
@@ -62,17 +76,25 @@ const SpeechToTextPage = () => {
   const [isSending, setIsSending] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // 説明・録音日・履歴管理用の状態（DBのキーは normalizedAudio）
+  // 説明・録音日・履歴管理用の状態
   const [description, setDescription] = useState("");
   const [recordingDate, setRecordingDate] = useState("");
-  // 現在のセッションがどのキーに紐づいているか（キーがあればDB上のレコードと同様の動作）
   const [currentAudioKey, setCurrentAudioKey] = useState<string | null>(null);
   const [speechRecords, setSpeechRecords] = useState<SpeechRecord[]>([]);
   const debounceTimer = useRef<number | null>(null);
 
+  // 追加：再生・一時停止、再生速度、現在時刻、タイムドセグメント、カーソル位置、タイムスタンプ表示の状態
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [playbackSpeed, setPlaybackSpeed] = useState(1);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [timedTranscript, setTimedTranscript] = useState<TimedSegment[]>([]);
+  const [cursorTime, setCursorTime] = useState<string | null>(null);
+  const [showTimestamps, setShowTimestamps] = useState(false);
+
+  const audioRef = useRef<HTMLAudioElement>(null);
+
   /**
-   * 現在のセッション内容（音声データ、文字起こし、説明、録音日など）を
-   * DB（SpeechToTextDB/speechRecords）に保存する関数。  
+   * 現在のセッション内容をDBに保存する関数。
    * ※保存対象は、文字起こし結果が存在する場合に限定する。
    */
   const updateCurrentSpeechRecord = async () => {
@@ -252,7 +274,6 @@ const SpeechToTextPage = () => {
         normalizedAudio
       );
       if (record) {
-        // DBに既に同じキーのレコードが存在すれば、自動でその内容を復元（履歴ボタンを押した場合と同じ動作）
         restoreHistory(record);
       }
     } catch (error) {
@@ -339,8 +360,15 @@ const SpeechToTextPage = () => {
     setDescription("");
     setRecordingDate("");
     setCurrentAudioKey(null);
+    setTimedTranscript([]);
+    setCursorTime(null);
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
+    }
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+      setIsPlaying(false);
     }
   };
 
@@ -372,7 +400,7 @@ const SpeechToTextPage = () => {
     } catch (dbError) {
       console.error("DBチェックエラー:", dbError);
     }
-
+  
     try {
       const response = await fetch(`${API_BASE_URL}/backend/speech2text`, {
         method: "POST",
@@ -384,17 +412,25 @@ const SpeechToTextPage = () => {
       });
       if (response.ok) {
         const data = await response.json();
-        setOutputText(data.transcription);
-        const db = await openSpeechDB();
-        await indexedDBUtils.setItemToStore(db, "speechRecords", {
-          audioKey: normalizedAudio,
-          audioData,
-          description,
-          recordingDate,
-          transcription: data.transcription,
-          lastUpdateTime: new Date().toISOString(),
-        });
-        updateCurrentSpeechRecord();
+        // もしエラーが返ってきた場合はDBに保存しない
+        if (data.error) {
+          setOutputText("エラーが発生しました: " + data.error);
+        } else {
+          setOutputText(data.transcription);
+          if (data.timed_transcription) {
+            setTimedTranscript(data.timed_transcription);
+          }
+          const db = await openSpeechDB();
+          await indexedDBUtils.setItemToStore(db, "speechRecords", {
+            audioKey: normalizedAudio,
+            audioData,
+            description,
+            recordingDate,
+            transcription: data.transcription,
+            lastUpdateTime: new Date().toISOString(),
+          });
+          updateCurrentSpeechRecord();
+        }
       } else {
         setOutputText("エラーが発生しました");
       }
@@ -405,6 +441,7 @@ const SpeechToTextPage = () => {
       setIsSending(false);
     }
   };
+  
 
   const [selectedEncoding, setSelectedEncoding] = useState("utf8");
   const handleDownload = () => {
@@ -425,6 +462,58 @@ const SpeechToTextPage = () => {
     a.click();
     document.body.removeChild(a);
     window.URL.revokeObjectURL(url);
+  };
+
+  // 再生/一時停止ボタンのハンドラー
+  const handlePlayPause = () => {
+    if (!audioRef.current) return;
+    if (isPlaying) {
+      audioRef.current.pause();
+      setIsPlaying(false);
+    } else {
+      // 一時停止中にカーソル位置が設定されていればそこから再生
+      if (cursorTime) {
+        audioRef.current.currentTime = timeStringToSeconds(cursorTime);
+      }
+      audioRef.current.play();
+      setIsPlaying(true);
+    }
+  };
+
+  // オーディオ再生中の時間更新処理
+  const handleTimeUpdate = () => {
+    if (audioRef.current) {
+      setCurrentTime(audioRef.current.currentTime);
+    }
+  };
+
+  // テキストセグメントのシングルクリック：再生中なら一時停止、停止中ならカーソル移動
+  const handleSegmentClick = (segment: TimedSegment) => {
+    if (isPlaying && audioRef.current) {
+      audioRef.current.pause();
+      setIsPlaying(false);
+    } else {
+      setCursorTime(segment.start_time);
+    }
+  };
+
+  // テキストセグメントのダブルクリック：その位置から再生開始
+  const handleSegmentDoubleClick = (segment: TimedSegment) => {
+    if (audioRef.current) {
+      audioRef.current.currentTime = timeStringToSeconds(segment.start_time);
+      audioRef.current.play();
+      setIsPlaying(true);
+      setCursorTime(segment.start_time);
+    }
+  };
+
+  // 再生速度変更ハンドラー
+  const handleSpeedChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const speed = Number(e.target.value);
+    setPlaybackSpeed(speed);
+    if (audioRef.current) {
+      audioRef.current.playbackRate = speed;
+    }
   };
 
   return (
@@ -582,6 +671,39 @@ const SpeechToTextPage = () => {
           )}
         </div>
 
+        {/* 再生コントロール */}
+        <div className="mb-6">
+          <button
+            onClick={handlePlayPause}
+            className="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded mr-4"
+          >
+            {isPlaying ? "一時停止" : "再生"}
+          </button>
+          <select value={playbackSpeed} onChange={handleSpeedChange} className="p-2 text-black">
+            <option value={0.5}>0.5x</option>
+            <option value={1}>1x</option>
+            <option value={1.5}>1.5x</option>
+            <option value={2}>2x</option>
+          </select>
+          <label className="ml-4">
+            <input
+              type="checkbox"
+              checked={showTimestamps}
+              onChange={() => setShowTimestamps(!showTimestamps)}
+            />{" "}
+            タイムスタンプ表示
+          </label>
+        </div>
+
+        {/* 隠しオーディオ要素 */}
+        {audioData && (
+          <audio
+            ref={audioRef}
+            src={audioData}
+            onTimeUpdate={handleTimeUpdate}
+          />
+        )}
+
         {/* 送信ボタン */}
         <button
           onClick={handleSend}
@@ -591,10 +713,38 @@ const SpeechToTextPage = () => {
           {isSending ? "処理中..." : "送信"}
         </button>
 
-        {/* 文字起こし結果の表示 */}
+        {/* 文字起こし結果の表示（インタラクティブなテキスト） */}
         <div className="mt-6">
           <h2 className="text-xl font-bold mb-2">文字起こし結果</h2>
-          <textarea value={outputText} readOnly className="w-full p-2 text-black" rows={6} />
+          <div className="p-2 bg-white text-black rounded" style={{ maxHeight: "300px", overflowY: "auto" }}>
+            {timedTranscript.length > 0 ? (
+              timedTranscript.map((segment, index) => {
+                // 現在の再生位置に近いセグメントをハイライト
+                const segmentStartSec = timeStringToSeconds(segment.start_time);
+                const segmentEndSec = timeStringToSeconds(segment.end_time);
+                const isActive =
+                  currentTime >= segmentStartSec && currentTime < segmentEndSec;
+                const style: React.CSSProperties = {
+                  cursor: "pointer",
+                  backgroundColor: isActive || (cursorTime === segment.start_time) ? "#ffd700" : "transparent",
+                  padding: "2px 0",
+                };
+                return (
+                  <div
+                    key={index}
+                    style={style}
+                    onClick={() => handleSegmentClick(segment)}
+                    onDoubleClick={() => handleSegmentDoubleClick(segment)}
+                  >
+                    {showTimestamps && <span className="mr-2 text-blue-700">[{segment.start_time}]</span>}
+                    <span>{segment.text}</span>
+                  </div>
+                );
+              })
+            ) : (
+              <textarea value={outputText} readOnly className="w-full p-2 text-black" rows={6} />
+            )}
+          </div>
         </div>
 
         {/* ダウンロードボタンとエンコーディング選択 */}

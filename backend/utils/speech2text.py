@@ -14,10 +14,10 @@ def transcribe_streaming_v2(
     戻り値:
         list[cloud_speech_types.StreamingRecognizeResponse]: 文字起こしされたセグメントを含む認識結果のリスト。
     """
-    project_id = os.getenv("VERTEX_PROJECT")    # クライアントの生成
+    project_id = os.getenv("VERTEX_PROJECT")  # プロジェクトIDの取得
     client = SpeechClient()
 
-    # API の制限に合わせ、各チャンクサイズを25600バイトに固定
+    # API の制限に合わせ、各チャンクサイズを25600バイト（約25KB）に固定
     chunk_length = 25600
     stream = [
         audio_content[start : start + chunk_length]
@@ -27,11 +27,14 @@ def transcribe_streaming_v2(
         cloud_speech_types.StreamingRecognizeRequest(audio=audio) for audio in stream
     )
 
-    # 認識用の設定。ここでは言語コードを日本語（ja-JP）に変更
+    # RecognitionConfig の設定（単語時刻情報は features 内で指定）
     recognition_config = cloud_speech_types.RecognitionConfig(
         auto_decoding_config=cloud_speech_types.AutoDetectDecodingConfig(),
         language_codes=language_codes,
         model="long",
+        features=cloud_speech_types.RecognitionFeatures(
+            enable_word_time_offsets=True
+        )
     )
     streaming_config = cloud_speech_types.StreamingRecognitionConfig(
         config=recognition_config

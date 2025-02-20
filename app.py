@@ -11,7 +11,7 @@ from typing import Dict, Union, Optional, Tuple, Callable, Any, List
 from litellm import completion, token_counter
 from backend.utils.logger import *
 from backend.utils.maps import *  # maps.py の関数群をインポート
-from backend.utils.speech2text import *
+from backend.utils.speech2text import transcribe_streaming_v2
 
 # .envファイルを読み込み
 load_dotenv("./backend/config/.env")
@@ -150,7 +150,6 @@ def require_auth(function: Callable) -> Callable:
 
 
 # ======= 各種エンドポイント =======
-
 
 @app.route("/backend/models", methods=["GET"])
 @require_auth
@@ -566,16 +565,40 @@ def speech2text(decoded_token: dict) -> Response:
         # 音声文字起こしを実行（日本語認識の場合）
         responses = transcribe_streaming_v2(audio_bytes, language_codes=["ja-JP"])
 
-        # 各レスポンスの文字起こし結果を連結
-        transcript = ""
+        full_transcript = ""
+        timed_transcription = []
+
+        # 修正：datetime.timedeltaオブジェクトに対応するため total_seconds() を使用
+        def format_time(time_obj):
+            seconds = time_obj.total_seconds()
+            hrs = int(seconds // 3600)
+            mins = int((seconds % 3600) // 60)
+            secs = int(seconds % 60)
+            return f"{hrs:02d}:{mins:02d}:{secs:02d}"
+
         for response in responses:
             for result in response.results:
-                transcript += result.alternatives[0].transcript + "\n"
+                alternative = result.alternatives[0]
+                full_transcript += alternative.transcript + "\n"
+                if alternative.words:
+                    # 修正：start_offset/end_offset を利用
+                    start_time = format_time(alternative.words[0].start_offset)
+                    end_time = format_time(alternative.words[-1].end_offset)
+                    timed_transcription.append({
+                        "start_time": start_time,
+                        "end_time": end_time,
+                        "text": alternative.transcript
+                    })
 
-        return jsonify({"transcription": transcript})
+        return jsonify({
+            "transcription": full_transcript,
+            "timed_transcription": timed_transcription
+        })
     except Exception as e:
         logger.error(f"音声文字起こしエラー: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
+
+
 
 
 # ======= フロントエンド配信用（DEBUG以外） =======
