@@ -4,6 +4,7 @@ import React, { useState, useRef } from "react";
 import { useToken } from "../../hooks/useToken";
 import * as Config from "../../config";
 import Encoding from "encoding-japanese";
+import * as indexedDBUtils from "../../utils/indexedDBUtils";
 
 interface AudioInfo {
   duration: number;
@@ -11,6 +12,19 @@ interface AudioInfo {
   fileSize?: number | null;
   mimeType?: string;
 }
+
+/**
+ * SpeechToText 用 IndexedDB をオープンする関数
+ * DB 名は "SpeechToTextCacheDB"、オブジェクトストア名は "speechCache" とする。
+ * キーは正規化済みの音声データ文字列（data URL のプレフィックスを除去済み）となる。
+ */
+const openSpeechToTextDB = (): Promise<IDBDatabase> => {
+  return indexedDBUtils.openDB("SpeechToTextCacheDB", 1, (db) => {
+    if (!db.objectStoreNames.contains("speechCache")) {
+      db.createObjectStore("speechCache", { keyPath: "audioKey" });
+    }
+  });
+};
 
 const SpeechToTextPage = () => {
   const token = useToken();
@@ -157,6 +171,11 @@ const SpeechToTextPage = () => {
     }
   };
 
+  /**
+   * 送信ボタン押下時の処理  
+   * ・音声データの先頭にある "data:audio/～;base64," 部分を削除して正規化したキーを作成  
+   * ・IndexedDB 内に同じキーの結果が存在すればキャッシュを利用、なければバックエンドへリクエストし結果をキャッシュする
+   */
   const handleSend = async () => {
     if (!audioData) {
       alert("送信するデータがありません");
@@ -164,6 +183,26 @@ const SpeechToTextPage = () => {
     }
     setIsSending(true);
     try {
+      // 正規化：data URL のプレフィックス（例："data:audio/wav;base64," や "data:audio/mpeg;base64,"）を除去
+      const normalizedAudio = audioData.replace(/^data:audio\/[a-zA-Z0-9]+;base64,/, "");
+      let db: IDBDatabase | undefined;
+      try {
+        db = await openSpeechToTextDB();
+        const cachedResult = await indexedDBUtils.getItemFromStore<{ audioKey: string; transcription: string }>(
+          db,
+          "speechCache",
+          normalizedAudio
+        );
+        if (cachedResult && cachedResult.transcription) {
+          setOutputText(cachedResult.transcription);
+          setIsSending(false);
+          return;
+        }
+      } catch (dbError) {
+        console.error("IndexedDB エラー:", dbError);
+        // DB エラーがあっても通常の処理を続行
+      }
+
       const response = await fetch(`${API_BASE_URL}/backend/speech2text`, {
         method: "POST",
         headers: {
@@ -175,6 +214,13 @@ const SpeechToTextPage = () => {
       if (response.ok) {
         const data = await response.json();
         setOutputText(data.transcription);
+        if (db) {
+          // キャッシュに保存：キーは正規化済み音声データ、値は文字起こし結果
+          await indexedDBUtils.setItemToStore(db, "speechCache", {
+            audioKey: normalizedAudio,
+            transcription: data.transcription,
+          });
+        }
       } else {
         setOutputText("エラーが発生しました");
       }
