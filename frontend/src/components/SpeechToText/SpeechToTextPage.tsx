@@ -1,6 +1,6 @@
 // frontend/src/components/SpeechToText/SpeechToTextPage.tsx
 
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { useToken } from "../../hooks/useToken";
 import * as Config from "../../config";
 import Encoding from "encoding-japanese";
@@ -13,52 +13,198 @@ interface AudioInfo {
   mimeType?: string;
 }
 
+interface SpeechRecord {
+  // 共通DBのキーは正規化済みの音声データ文字列
+  audioKey: string;
+  audioData: string;
+  description: string;
+  recordingDate: string;
+  transcription: string;
+  lastUpdateTime: string;
+}
+
 /**
- * SpeechToText 用 IndexedDB をオープンする関数
- * DB 名は "SpeechToTextCacheDB"、オブジェクトストア名は "speechCache" とする。
- * キーは正規化済みの音声データ文字列（data URL のプレフィックスを除去済み）となる。
+ * 共通の SpeechToText 用 IndexedDB オープン関数  
+ * DB名："SpeechToTextDB"、オブジェクトストア名："speechRecords"  
+ * キーは audioKey（正規化済み音声データ）とする。
  */
-const openSpeechToTextDB = (): Promise<IDBDatabase> => {
-  return indexedDBUtils.openDB("SpeechToTextCacheDB", 1, (db) => {
-    if (!db.objectStoreNames.contains("speechCache")) {
-      db.createObjectStore("speechCache", { keyPath: "audioKey" });
+const openSpeechDB = (): Promise<IDBDatabase> => {
+  return indexedDBUtils.openDB("SpeechToTextDB", 1, (db) => {
+    if (!db.objectStoreNames.contains("speechRecords")) {
+      db.createObjectStore("speechRecords", { keyPath: "audioKey" });
     }
   });
+};
+
+/**
+ * ファイルの lastModified プロパティ（ミリ秒）を "YYYY/mm/dd" 形式に変換する関数
+ */
+const formatDate = (timestamp: number): string => {
+  const date = new Date(timestamp);
+  const year = date.getFullYear();
+  const month = ("0" + (date.getMonth() + 1)).slice(-2);
+  const day = ("0" + date.getDate()).slice(-2);
+  return `${year}/${month}/${day}`;
 };
 
 const SpeechToTextPage = () => {
   const token = useToken();
   const API_BASE_URL: string = Config.API_BASE_URL;
 
-  // アップロード方法の選択："file"（ファイル選択／ドラッグ＆ドロップ） or "base64"
+  // アップロードモード、音声データ、文字起こし結果、その他各種状態
   const [uploadMode, setUploadMode] = useState<"file" | "base64">("file");
-
-  // ファイル選択用とBase64貼り付け用のデータ（どちらか片方のみ有効）
   const [fileBase64Data, setFileBase64Data] = useState("");
   const [pastedBase64Data, setPastedBase64Data] = useState("");
   const audioData = fileBase64Data || pastedBase64Data;
   const preview = audioData.substring(0, 30);
-
-  // バックエンドからの文字起こし結果
   const [outputText, setOutputText] = useState("");
-
-  // 音声データのメタ情報（再生時間、ファイル名、サイズ、MIMEタイプ）
   const [audioInfo, setAudioInfo] = useState<AudioInfo | null>(null);
-
-  // 送信中状態
   const [isSending, setIsSending] = useState(false);
-
-  // ファイル入力要素の参照（リセット用）
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // ファイル選択／ドラッグ時の処理
-  const processFile = (file: File) => {
-    // ① 音声ファイルかどうかチェック
+  // 説明・録音日・履歴管理用の状態（DBのキーは normalizedAudio）
+  const [description, setDescription] = useState("");
+  const [recordingDate, setRecordingDate] = useState("");
+  // 現在のセッションがどのキーに紐づいているか（キーがあればDB上のレコードと同様の動作）
+  const [currentAudioKey, setCurrentAudioKey] = useState<string | null>(null);
+  const [speechRecords, setSpeechRecords] = useState<SpeechRecord[]>([]);
+  const debounceTimer = useRef<number | null>(null);
+
+  /**
+   * 現在のセッション内容（音声データ、文字起こし、説明、録音日など）を
+   * DB（SpeechToTextDB/speechRecords）に保存する関数。  
+   * ※保存対象は、文字起こし結果が存在する場合に限定する。
+   */
+  const updateCurrentSpeechRecord = async () => {
+    if (!outputText.trim() || !audioData) return;
+    const normalizedAudio = audioData.replace(/^data:audio\/[a-zA-Z0-9]+;base64,/, "");
+    setCurrentAudioKey(normalizedAudio);
+    const record: SpeechRecord = {
+      audioKey: normalizedAudio,
+      audioData,
+      description,
+      recordingDate,
+      transcription: outputText,
+      lastUpdateTime: new Date().toISOString(),
+    };
+    try {
+      const db = await openSpeechDB();
+      const transaction = db.transaction("speechRecords", "readwrite");
+      const store = transaction.objectStore("speechRecords");
+      store.put(record);
+      loadSpeechRecords();
+    } catch (error) {
+      console.error("Speech record update error:", error);
+    }
+  };
+
+  // 説明、録音日、音声データ、文字起こし結果の変更後、1秒後に自動保存（デバウンス）
+  useEffect(() => {
+    if (debounceTimer.current) {
+      clearTimeout(debounceTimer.current);
+    }
+    debounceTimer.current = window.setTimeout(() => {
+      updateCurrentSpeechRecord();
+    }, 1000);
+    return () => {
+      if (debounceTimer.current) clearTimeout(debounceTimer.current);
+    };
+  }, [description, recordingDate, audioData, outputText]);
+
+  // DBから全レコードを読み込み、最終更新日時の新しい順に並べる
+  const loadSpeechRecords = async () => {
+    try {
+      const db = await openSpeechDB();
+      const transaction = db.transaction("speechRecords", "readonly");
+      const store = transaction.objectStore("speechRecords");
+      const request = store.getAll();
+      request.onsuccess = (e) => {
+        const records = (e.target as IDBRequest).result as SpeechRecord[];
+        const sortedRecords = records.sort(
+          (a, b) =>
+            new Date(b.lastUpdateTime).getTime() -
+            new Date(a.lastUpdateTime).getTime()
+        );
+        setSpeechRecords(sortedRecords);
+      };
+      request.onerror = () => {
+        console.error("Failed to load speech records", request.error);
+      };
+    } catch (error) {
+      console.error("Error loading speech records:", error);
+    }
+  };
+
+  useEffect(() => {
+    loadSpeechRecords();
+  }, []);
+
+  // 履歴（レコード）ボタンを押したとき、該当レコードの内容を復元する
+  const restoreHistory = (record: SpeechRecord) => {
+    setDescription(record.description);
+    setRecordingDate(record.recordingDate);
+    setFileBase64Data(record.audioData);
+    setPastedBase64Data("");
+    setOutputText(record.transcription);
+    setCurrentAudioKey(record.audioKey);
+  };
+
+  // 「履歴保存」ボタン：DB上の全レコードをJSONとしてダウンロード
+  const downloadHistory = () => {
+    const historyData = JSON.stringify(speechRecords, null, 2);
+    const blob = new Blob([historyData], { type: "application/json" });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `speech-history-${new Date().toISOString()}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(url);
+  };
+
+  // 「履歴読込」ボタン：JSONファイルをアップロードしてDBを上書き・復元
+  const uploadHistory = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      try {
+        const content = e.target?.result as string;
+        const uploadedRecords = JSON.parse(content) as SpeechRecord[];
+        const db = await openSpeechDB();
+        const transaction = db.transaction("speechRecords", "readwrite");
+        const store = transaction.objectStore("speechRecords");
+        store.clear().onsuccess = () => {
+          uploadedRecords.forEach((record) => store.add(record));
+          setSpeechRecords(uploadedRecords);
+        };
+      } catch (error) {
+        console.error("履歴アップロードエラー:", error);
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  // 説明・録音日の入力変更ハンドラー
+  const handleDescriptionChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setDescription(e.target.value);
+  };
+  const handleRecordingDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setRecordingDate(e.target.value);
+  };
+
+  /**
+   * ファイル選択／ドラッグ時の処理  
+   * ファイル読み込み後、Base64文字列に変換し、  
+   * ・自動で説明と録音日を設定（ファイル名、作成日）  
+   * ・正規化した音声データキーでDBを確認し、既存レコードがあればその内容を復元する
+   */
+  const processFile = async (file: File) => {
     if (!file.type.startsWith("audio/")) {
       alert("音声ファイル以外はアップロードできません");
       return;
     }
-    // Audioオブジェクトでメタ情報を取得
     const url = URL.createObjectURL(file);
     const audio = new Audio();
     audio.src = url;
@@ -78,14 +224,40 @@ const SpeechToTextPage = () => {
       URL.revokeObjectURL(url);
     };
 
-    // FileReaderでBase64文字列に変換
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const result = event.target?.result as string;
-      setFileBase64Data(result);
-      setPastedBase64Data("");
-    };
-    reader.readAsDataURL(file);
+    const fileData = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        if (event.target?.result) {
+          resolve(event.target.result as string);
+        } else {
+          reject(new Error("ファイル読み込みエラー"));
+        }
+      };
+      reader.onerror = () => reject(new Error("ファイル読み込みエラー"));
+      reader.readAsDataURL(file);
+    });
+
+    setFileBase64Data(fileData);
+    setPastedBase64Data("");
+    // 自動で説明（ファイル名）と録音日（ファイルの最終更新日）を設定
+    setDescription(file.name);
+    setRecordingDate(formatDate(file.lastModified));
+
+    const normalizedAudio = fileData.replace(/^data:audio\/[a-zA-Z0-9]+;base64,/, "");
+    try {
+      const db = await openSpeechDB();
+      const record = await indexedDBUtils.getItemFromStore<SpeechRecord>(
+        db,
+        "speechRecords",
+        normalizedAudio
+      );
+      if (record) {
+        // DBに既に同じキーのレコードが存在すれば、自動でその内容を復元（履歴ボタンを押した場合と同じ動作）
+        restoreHistory(record);
+      }
+    } catch (error) {
+      console.error("DBチェックエラー:", error);
+    }
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -101,21 +273,19 @@ const SpeechToTextPage = () => {
     processFile(file);
   };
 
-  // Base64貼り付けの場合の入力文字列チェック用関数
+  // Base64貼り付けの場合の処理
   const isValidBase64String = (str: string): boolean => {
     const cleaned = str.replace(/\s/g, "");
     if (cleaned === "") return false;
     if (cleaned.startsWith("data:")) {
       const parts = cleaned.split(",");
       if (parts.length < 2) return false;
-      const base64Part = parts[1];
-      return /^[A-Za-z0-9+/=]+$/.test(base64Part);
+      return /^[A-Za-z0-9+/=]+$/.test(parts[1]);
     } else {
       return /^[A-Za-z0-9+/=]+$/.test(cleaned);
     }
   };
 
-  // Base64貼り付けデータの処理（メタ情報取得）
   const processBase64Data = (data: string) => {
     let dataUrl = data;
     const cleaned = data.replace(/\s/g, "");
@@ -160,12 +330,15 @@ const SpeechToTextPage = () => {
     }
   };
 
-  // ヘッダーの「クリア」ボタン：全ての入力・結果・メタ情報をリセット
+  // クリアボタン：全入力・結果・メタ情報をリセット
   const handleClearBoth = () => {
     setFileBase64Data("");
     setPastedBase64Data("");
     setOutputText("");
     setAudioInfo(null);
+    setDescription("");
+    setRecordingDate("");
+    setCurrentAudioKey(null);
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
@@ -173,8 +346,8 @@ const SpeechToTextPage = () => {
 
   /**
    * 送信ボタン押下時の処理  
-   * ・音声データの先頭にある "data:audio/～;base64," 部分を削除して正規化したキーを作成  
-   * ・IndexedDB 内に同じキーの結果が存在すればキャッシュを利用、なければバックエンドへリクエストし結果をキャッシュする
+   * ・音声データの正規化キーでDBからレコードを確認し、なければバックエンドへリクエスト  
+   * ・送信後は現在のセッション内容をDBに保存する
    */
   const handleSend = async () => {
     if (!audioData) {
@@ -182,27 +355,25 @@ const SpeechToTextPage = () => {
       return;
     }
     setIsSending(true);
+    const normalizedAudio = audioData.replace(/^data:audio\/[a-zA-Z0-9]+;base64,/, "");
     try {
-      // 正規化：data URL のプレフィックス（例："data:audio/wav;base64," や "data:audio/mpeg;base64,"）を除去
-      const normalizedAudio = audioData.replace(/^data:audio\/[a-zA-Z0-9]+;base64,/, "");
-      let db: IDBDatabase | undefined;
-      try {
-        db = await openSpeechToTextDB();
-        const cachedResult = await indexedDBUtils.getItemFromStore<{ audioKey: string; transcription: string }>(
-          db,
-          "speechCache",
-          normalizedAudio
-        );
-        if (cachedResult && cachedResult.transcription) {
-          setOutputText(cachedResult.transcription);
-          setIsSending(false);
-          return;
-        }
-      } catch (dbError) {
-        console.error("IndexedDB エラー:", dbError);
-        // DB エラーがあっても通常の処理を続行
+      const db = await openSpeechDB();
+      const record = await indexedDBUtils.getItemFromStore<SpeechRecord>(
+        db,
+        "speechRecords",
+        normalizedAudio
+      );
+      if (record && record.transcription) {
+        setOutputText(record.transcription);
+        setIsSending(false);
+        updateCurrentSpeechRecord();
+        return;
       }
+    } catch (dbError) {
+      console.error("DBチェックエラー:", dbError);
+    }
 
+    try {
       const response = await fetch(`${API_BASE_URL}/backend/speech2text`, {
         method: "POST",
         headers: {
@@ -214,13 +385,16 @@ const SpeechToTextPage = () => {
       if (response.ok) {
         const data = await response.json();
         setOutputText(data.transcription);
-        if (db) {
-          // キャッシュに保存：キーは正規化済み音声データ、値は文字起こし結果
-          await indexedDBUtils.setItemToStore(db, "speechCache", {
-            audioKey: normalizedAudio,
-            transcription: data.transcription,
-          });
-        }
+        const db = await openSpeechDB();
+        await indexedDBUtils.setItemToStore(db, "speechRecords", {
+          audioKey: normalizedAudio,
+          audioData,
+          description,
+          recordingDate,
+          transcription: data.transcription,
+          lastUpdateTime: new Date().toISOString(),
+        });
+        updateCurrentSpeechRecord();
       } else {
         setOutputText("エラーが発生しました");
       }
@@ -254,9 +428,44 @@ const SpeechToTextPage = () => {
   };
 
   return (
-    <div className="min-h-screen bg-dark-primary text-white">
-      <div className="container mx-auto px-4 py-8">
-        {/* ヘッダー：タイトルと右側にクリアボタン */}
+    <div className="flex flex-1 h-[calc(100vh-64px)] mt-2 overflow-hidden">
+      {/* サイドバー：DBに保存された全レコード一覧 */}
+      <div className="w-64 bg-gray-800 shadow-lg p-4 overflow-y-auto">
+        <h2 className="text-lg font-semibold mb-4 text-gray-100">音声文字起こし履歴</h2>
+        <div className="flex space-x-2 mb-6">
+          <button
+            onClick={downloadHistory}
+            className="flex-1 p-2 bg-green-500 hover:bg-green-600 text-white rounded-lg"
+          >
+            履歴保存
+          </button>
+          <label className="flex-1">
+            <input type="file" accept=".json" onChange={uploadHistory} className="hidden" />
+            <span className="block p-2 bg-purple-500 hover:bg-purple-600 text-white rounded-lg text-center cursor-pointer">
+              履歴読込
+            </span>
+          </label>
+        </div>
+        <div className="space-y-2">
+          {speechRecords.map((record) => (
+            <div
+              key={record.audioKey}
+              onClick={() => restoreHistory(record)}
+              className="p-2 hover:bg-gray-700 text-gray-100 rounded cursor-pointer"
+            >
+              <div className="font-medium">
+                {record.description.trim() !== ""
+                  ? record.description.slice(0, 20)
+                  : record.transcription.slice(0, 20) + '...'}
+              </div>
+              <div className="text-sm text-gray-400">{record.recordingDate}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* メインエリア：音声アップロード・文字起こしインターフェース */}
+      <div className="flex-1 p-4 overflow-y-auto bg-dark-primary text-white">
         <div className="flex justify-between items-center mb-8">
           <h1 className="text-3xl font-bold">音声文字起こし</h1>
           <button
@@ -267,12 +476,38 @@ const SpeechToTextPage = () => {
           </button>
         </div>
 
+        {/* 説明と録音日の入力欄 */}
+        <div className="mb-6">
+          <div className="mb-4">
+            <label className="block text-sm font-medium text-gray-200">説明</label>
+            <input
+              type="text"
+              value={description}
+              onChange={handleDescriptionChange}
+              maxLength={20}
+              placeholder="20文字以内"
+              className="w-full p-2 text-black"
+            />
+          </div>
+          <div className="mb-4">
+            <label className="block text-sm font-medium text-gray-200">録音日</label>
+            <input
+              type="text"
+              value={recordingDate}
+              onChange={handleRecordingDateChange}
+              placeholder="YYYY/mm/dd"
+              className="w-full p-2 text-black"
+            />
+          </div>
+        </div>
+
         {/* アップロードセクション */}
         <div className="mb-6">
           <h2 className="text-xl font-bold mb-2">音声データのアップロード方法</h2>
-          {/* アップロード方法選択 */}
           <div className="mb-4">
-            <label className="block text-sm font-medium text-gray-200 mb-2">アップロード方法</label>
+            <label className="block text-sm font-medium text-gray-200 mb-2">
+              アップロード方法
+            </label>
             <div>
               <label className="mr-4 text-gray-200">
                 <input
@@ -303,7 +538,6 @@ const SpeechToTextPage = () => {
             </div>
           </div>
 
-          {/* 選択されたアップロード方法に応じた入力欄 */}
           {uploadMode === "file" ? (
             <div
               onDragOver={(e) => e.preventDefault()}
@@ -312,13 +546,7 @@ const SpeechToTextPage = () => {
               onClick={() => fileInputRef.current?.click()}
             >
               ここにドラッグ＆ドロップするか、クリックしてファイルを選択してください（音声ファイル）
-              <input
-                type="file"
-                ref={fileInputRef}
-                accept="audio/*"
-                onChange={handleFileChange}
-                className="hidden"
-              />
+              <input type="file" ref={fileInputRef} accept="audio/*" onChange={handleFileChange} className="hidden" />
             </div>
           ) : (
             <div className="mb-4">
@@ -333,21 +561,21 @@ const SpeechToTextPage = () => {
             </div>
           )}
 
-          {/* プレビュー表示 */}
           <div className="mb-4">
             <p className="text-sm">
               アップロードされたデータの先頭: <span className="text-green-300">{preview}</span>
             </p>
           </div>
 
-          {/* 音声情報の表示 */}
           {audioInfo && (
             <div className="mb-4">
               <p className="text-sm">
                 音声情報:{" "}
                 {audioInfo.fileName && `ファイル名: ${audioInfo.fileName}, `}
                 {audioInfo.duration !== undefined && `再生時間: ${audioInfo.duration.toFixed(2)}秒, `}
-                {audioInfo.fileSize !== null && audioInfo.fileSize !== undefined && `ファイルサイズ: ${(audioInfo.fileSize / 1024).toFixed(1)}KB, `}
+                {audioInfo.fileSize !== null &&
+                  audioInfo.fileSize !== undefined &&
+                  `ファイルサイズ: ${(audioInfo.fileSize / 1024).toFixed(1)}KB, `}
                 {audioInfo.mimeType && `MIMEタイプ: ${audioInfo.mimeType}`}
               </p>
             </div>
@@ -366,12 +594,7 @@ const SpeechToTextPage = () => {
         {/* 文字起こし結果の表示 */}
         <div className="mt-6">
           <h2 className="text-xl font-bold mb-2">文字起こし結果</h2>
-          <textarea
-            value={outputText}
-            readOnly
-            className="w-full p-2 text-black"
-            rows={6}
-          />
+          <textarea value={outputText} readOnly className="w-full p-2 text-black" rows={6} />
         </div>
 
         {/* ダウンロードボタンとエンコーディング選択 */}
