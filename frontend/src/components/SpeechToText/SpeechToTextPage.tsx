@@ -31,6 +31,9 @@ const SpeechToTextPage = () => {
   // 音声データのメタ情報（再生時間、ファイル名、サイズ、MIMEタイプ）
   const [audioInfo, setAudioInfo] = useState<AudioInfo | null>(null);
 
+  // 送信中状態
+  const [isSending, setIsSending] = useState(false);
+
   // ファイル入力要素の参照（リセット用）
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -86,10 +89,8 @@ const SpeechToTextPage = () => {
 
   // Base64貼り付けの場合の入力文字列チェック用関数
   const isValidBase64String = (str: string): boolean => {
-    // 余分な空白を除去
     const cleaned = str.replace(/\s/g, "");
     if (cleaned === "") return false;
-    // data URL形式の場合は、カンマ以降の部分だけチェック
     if (cleaned.startsWith("data:")) {
       const parts = cleaned.split(",");
       if (parts.length < 2) return false;
@@ -110,18 +111,16 @@ const SpeechToTextPage = () => {
       setAudioInfo(null);
       return;
     }
-    // rawなBase64の場合は、デフォルトのMIMEタイプを付与
     if (!cleaned.startsWith("data:")) {
       dataUrl = "data:audio/mpeg;base64," + cleaned;
     }
-    // Audioオブジェクトでメタ情報を取得
     const audio = new Audio();
     audio.src = dataUrl;
     audio.onloadedmetadata = () => {
       setAudioInfo({
         duration: audio.duration,
         fileName: "Base64貼り付けデータ",
-        fileSize: null, // サイズは不明
+        fileSize: null,
         mimeType: audio.src.substring(5, audio.src.indexOf(";")),
       });
     };
@@ -135,7 +134,6 @@ const SpeechToTextPage = () => {
 
   const handleTextInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const value = e.target.value;
-    // Base64貼り付け時はファイル選択をクリア
     setFileBase64Data("");
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
@@ -160,11 +158,12 @@ const SpeechToTextPage = () => {
   };
 
   const handleSend = async () => {
+    if (!audioData) {
+      alert("送信するデータがありません");
+      return;
+    }
+    setIsSending(true);
     try {
-      if (!audioData) {
-        alert("送信するデータがありません");
-        return;
-      }
       const response = await fetch(`${API_BASE_URL}/backend/speech2text`, {
         method: "POST",
         headers: {
@@ -182,6 +181,8 @@ const SpeechToTextPage = () => {
     } catch (error) {
       console.error(error);
       setOutputText("エラーが発生しました");
+    } finally {
+      setIsSending(false);
     }
   };
 
@@ -310,9 +311,10 @@ const SpeechToTextPage = () => {
         {/* 送信ボタン */}
         <button
           onClick={handleSend}
+          disabled={isSending}
           className="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded"
         >
-          送信
+          {isSending ? "処理中..." : "送信"}
         </button>
 
         {/* 文字起こし結果の表示 */}
