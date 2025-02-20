@@ -5,47 +5,78 @@ import { useToken } from "../../hooks/useToken";
 import * as Config from "../../config";
 import Encoding from "encoding-japanese";
 
+interface AudioInfo {
+  duration: number;
+  fileName?: string;
+  fileSize?: number | null;
+  mimeType?: string;
+}
+
 const SpeechToTextPage = () => {
   const token = useToken();
   const API_BASE_URL: string = Config.API_BASE_URL;
 
-  // アップロード方法の選択状態："file" または "base64"
+  // アップロード方法の選択："file"（ファイル選択／ドラッグ＆ドロップ） or "base64"
   const [uploadMode, setUploadMode] = useState<"file" | "base64">("file");
 
-  // ファイル選択とBase64貼り付け用の状態（どちらか片方のみ利用）
+  // ファイル選択用とBase64貼り付け用のデータ（どちらか片方のみ有効）
   const [fileBase64Data, setFileBase64Data] = useState("");
   const [pastedBase64Data, setPastedBase64Data] = useState("");
-
-  // 送信に使用する音声データ（ファイル選択優先）
   const audioData = fileBase64Data || pastedBase64Data;
   const preview = audioData.substring(0, 30);
 
-  // バックエンドから返却された文字起こし結果
+  // バックエンドからの文字起こし結果
   const [outputText, setOutputText] = useState("");
 
-  // ファイル入力要素をリセットするためのref
+  // 音声データのメタ情報（再生時間、ファイル名、サイズ、MIMEタイプ）
+  const [audioInfo, setAudioInfo] = useState<AudioInfo | null>(null);
+
+  // ファイル入力要素の参照（リセット用）
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // ファイルの読み込み処理（FileReader）
+  // ファイル選択／ドラッグ時の処理
   const processFile = (file: File) => {
+    // ① 音声ファイルかどうかチェック
+    if (!file.type.startsWith("audio/")) {
+      alert("音声ファイル以外はアップロードできません");
+      return;
+    }
+    // Audioオブジェクトでメタ情報を取得
+    const url = URL.createObjectURL(file);
+    const audio = new Audio();
+    audio.src = url;
+    audio.onloadedmetadata = () => {
+      setAudioInfo({
+        duration: audio.duration,
+        fileName: file.name,
+        fileSize: file.size,
+        mimeType: file.type,
+      });
+      URL.revokeObjectURL(url);
+    };
+    audio.onerror = () => {
+      alert("無効な音声データです");
+      setFileBase64Data("");
+      setAudioInfo(null);
+      URL.revokeObjectURL(url);
+    };
+
+    // FileReaderでBase64文字列に変換
     const reader = new FileReader();
     reader.onload = (event) => {
       const result = event.target?.result as string;
       setFileBase64Data(result);
-      // ファイル選択時はBase64貼り付け状態をクリア
       setPastedBase64Data("");
     };
     reader.readAsDataURL(file);
   };
 
-  // ファイル選択時のハンドラー
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     processFile(file);
   };
 
-  // ドラッグ＆ドロップ時のハンドラー
   const handleFileDrop = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     const file = e.dataTransfer.files?.[0];
@@ -53,28 +84,81 @@ const SpeechToTextPage = () => {
     processFile(file);
   };
 
-  // Base64貼り付け時のハンドラー
+  // Base64貼り付けの場合の入力文字列チェック用関数
+  const isValidBase64String = (str: string): boolean => {
+    // 余分な空白を除去
+    const cleaned = str.replace(/\s/g, "");
+    if (cleaned === "") return false;
+    // data URL形式の場合は、カンマ以降の部分だけチェック
+    if (cleaned.startsWith("data:")) {
+      const parts = cleaned.split(",");
+      if (parts.length < 2) return false;
+      const base64Part = parts[1];
+      return /^[A-Za-z0-9+/=]+$/.test(base64Part);
+    } else {
+      return /^[A-Za-z0-9+/=]+$/.test(cleaned);
+    }
+  };
+
+  // Base64貼り付けデータの処理（メタ情報取得）
+  const processBase64Data = (data: string) => {
+    let dataUrl = data;
+    const cleaned = data.replace(/\s/g, "");
+    if (!isValidBase64String(cleaned)) {
+      alert("無効なBase64データです");
+      setPastedBase64Data("");
+      setAudioInfo(null);
+      return;
+    }
+    // rawなBase64の場合は、デフォルトのMIMEタイプを付与
+    if (!cleaned.startsWith("data:")) {
+      dataUrl = "data:audio/mpeg;base64," + cleaned;
+    }
+    // Audioオブジェクトでメタ情報を取得
+    const audio = new Audio();
+    audio.src = dataUrl;
+    audio.onloadedmetadata = () => {
+      setAudioInfo({
+        duration: audio.duration,
+        fileName: "Base64貼り付けデータ",
+        fileSize: null, // サイズは不明
+        mimeType: audio.src.substring(5, audio.src.indexOf(";")),
+      });
+    };
+    audio.onerror = () => {
+      alert("無効な音声データです");
+      setPastedBase64Data("");
+      setAudioInfo(null);
+    };
+    setPastedBase64Data(dataUrl);
+  };
+
   const handleTextInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const value = e.target.value;
-    setPastedBase64Data(value);
-    // 貼り付け時はファイル選択状態をクリア
+    // Base64貼り付け時はファイル選択をクリア
     setFileBase64Data("");
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
+    setPastedBase64Data(value);
+    if (value.trim() !== "") {
+      processBase64Data(value);
+    } else {
+      setAudioInfo(null);
+    }
   };
 
-  // ヘッダーの「クリア」ボタン押下時の処理（全ての入力・結果をリセット）
+  // ヘッダーの「クリア」ボタン：全ての入力・結果・メタ情報をリセット
   const handleClearBoth = () => {
     setFileBase64Data("");
     setPastedBase64Data("");
     setOutputText("");
+    setAudioInfo(null);
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
   };
 
-  // 送信ボタン押下時の処理
   const handleSend = async () => {
     try {
       if (!audioData) {
@@ -101,10 +185,7 @@ const SpeechToTextPage = () => {
     }
   };
 
-  // ダウンロード時のエンコーディング選択（"utf8"または"shift-jis"）の状態
   const [selectedEncoding, setSelectedEncoding] = useState("utf8");
-
-  // ダウンロードボタン押下時の処理
   const handleDownload = () => {
     let blob;
     let filename = "transcription.txt";
@@ -141,9 +222,10 @@ const SpeechToTextPage = () => {
 
         {/* アップロードセクション */}
         <div className="mb-6">
-          <h2 className="text-xl font-bold mb-2">音声アップロード</h2>
-          {/* ① アップロード方法選択のラジオボタン */}
+          <h2 className="text-xl font-bold mb-2">音声データのアップロード方法</h2>
+          {/* アップロード方法選択 */}
           <div className="mb-4">
+            <label className="block text-sm font-medium text-gray-200 mb-2">アップロード方法</label>
             <div>
               <label className="mr-4 text-gray-200">
                 <input
@@ -151,7 +233,10 @@ const SpeechToTextPage = () => {
                   name="uploadMode"
                   value="file"
                   checked={uploadMode === "file"}
-                  onChange={() => setUploadMode("file")}
+                  onChange={() => {
+                    setUploadMode("file");
+                    handleClearBoth();
+                  }}
                 />{" "}
                 ファイル選択
               </label>
@@ -161,14 +246,17 @@ const SpeechToTextPage = () => {
                   name="uploadMode"
                   value="base64"
                   checked={uploadMode === "base64"}
-                  onChange={() => setUploadMode("base64")}
+                  onChange={() => {
+                    setUploadMode("base64");
+                    handleClearBoth();
+                  }}
                 />{" "}
                 Base64貼り付け
               </label>
             </div>
           </div>
 
-          {/* ② 選択されたアップロード方法に応じた入力欄 */}
+          {/* 選択されたアップロード方法に応じた入力欄 */}
           {uploadMode === "file" ? (
             <div
               onDragOver={(e) => e.preventDefault()}
@@ -198,12 +286,25 @@ const SpeechToTextPage = () => {
             </div>
           )}
 
-          {/* アップロードされたデータの先頭部分を表示 */}
+          {/* プレビュー表示 */}
           <div className="mb-4">
             <p className="text-sm">
-              アップロードされたデータ: <span className="text-green-300">{preview}</span>
+              アップロードされたデータの先頭: <span className="text-green-300">{preview}</span>
             </p>
           </div>
+
+          {/* 音声情報の表示 */}
+          {audioInfo && (
+            <div className="mb-4">
+              <p className="text-sm">
+                音声情報:{" "}
+                {audioInfo.fileName && `ファイル名: ${audioInfo.fileName}, `}
+                {audioInfo.duration !== undefined && `再生時間: ${audioInfo.duration.toFixed(2)}秒, `}
+                {audioInfo.fileSize !== null && audioInfo.fileSize !== undefined && `ファイルサイズ: ${(audioInfo.fileSize / 1024).toFixed(1)}KB, `}
+                {audioInfo.mimeType && `MIMEタイプ: ${audioInfo.mimeType}`}
+              </p>
+            </div>
+          )}
         </div>
 
         {/* 送信ボタン */}
@@ -225,7 +326,7 @@ const SpeechToTextPage = () => {
           />
         </div>
 
-        {/* ダウンロードボタンとエンコーディング選択ラジオボタンを同一行に配置 */}
+        {/* ダウンロードボタンとエンコーディング選択 */}
         <div className="mt-6 flex items-center space-x-4">
           <button
             onClick={handleDownload}
