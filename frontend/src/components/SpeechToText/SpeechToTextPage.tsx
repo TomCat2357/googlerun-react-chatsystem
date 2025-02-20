@@ -95,10 +95,11 @@ const SpeechToTextPage = () => {
 
   /**
    * 現在のセッション内容をDBに保存する関数。
-   * ※保存対象は、文字起こし結果が存在する場合に限定する。
+   * ※保存対象は、文字起こし結果が存在し、かつエラーでない場合に限定する。
    */
   const updateCurrentSpeechRecord = async () => {
-    if (!outputText.trim() || !audioData) return;
+    // 文字起こし結果が空、またはエラーのときは保存しない
+    if (!outputText.trim() || !audioData || outputText.startsWith("エラーが発生しました:")) return;
     const normalizedAudio = audioData.replace(/^data:audio\/[a-zA-Z0-9]+;base64,/, "");
     setCurrentAudioKey(normalizedAudio);
     const record: SpeechRecord = {
