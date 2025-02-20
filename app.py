@@ -11,6 +11,7 @@ from typing import Dict, Union, Optional, Tuple, Callable, Any, List
 from litellm import completion, token_counter
 from backend.utils.logger import *
 from backend.utils.maps import *  # maps.py の関数群をインポート
+from backend.utils.speech2text import *
 
 # .envファイルを読み込み
 load_dotenv("./backend/config/.env")
