@@ -270,7 +270,6 @@ def query2coordinates(decoded_token: Dict) -> Response:
         if not google_maps_api_key:
             raise Exception("Google Maps APIキーが設定されていません")
 
-        # まず、同一クエリーを除外するために一意なクエリーを抽出
         unique_queries = {}
         for line in lines:
             query = line.strip()
@@ -279,7 +278,6 @@ def query2coordinates(decoded_token: Dict) -> Response:
             if query not in unique_queries:
                 unique_queries[query] = None
 
-        # 各一意なクエリーについて、1回だけ API を呼び出す
         for query in unique_queries.keys():
             geocode_data = get_coordinates(google_maps_api_key, query)
             if geocode_data.get("status") == "OK" and geocode_data.get("results"):
@@ -309,14 +307,12 @@ def query2coordinates(decoded_token: Dict) -> Response:
                     "error": geocode_data.get("status", "エラー"),
                 }
 
-        # 元の各行に対して、対応する結果を付与する（重複行も同じ結果となる）
         results = []
         for line in lines:
             query = line.strip()
             if not query:
                 continue
             results.append(unique_queries[query])
-
         response: Response = make_response(
             jsonify({"status": "success", "results": results})
         )
@@ -549,6 +545,7 @@ def get_street_view_image(decoded_token: Dict) -> Response:
 @app.route("/backend/speech2text", methods=["POST"])
 @require_auth
 def speech2text(decoded_token: dict) -> Response:
+    logger.info("音声認識処理開始")
     try:
         data = request.get_json() or {}
         audio_data = data.get("audio_data", "")
@@ -568,7 +565,6 @@ def speech2text(decoded_token: dict) -> Response:
         full_transcript = ""
         timed_transcription = []
 
-        # 修正：datetime.timedeltaオブジェクトに対応するため total_seconds() を使用
         def format_time(time_obj):
             seconds = time_obj.total_seconds()
             hrs = int(seconds // 3600)
@@ -581,24 +577,29 @@ def speech2text(decoded_token: dict) -> Response:
                 alternative = result.alternatives[0]
                 full_transcript += alternative.transcript + "\n"
                 if alternative.words:
-                    # 修正：start_offset/end_offset を利用
-                    start_time = format_time(alternative.words[0].start_offset)
-                    end_time = format_time(alternative.words[-1].end_offset)
+                    # 各単語ごとにセグメントを作成
+                    for w in alternative.words:
+                        start_time_str = format_time(w.start_offset)
+                        end_time_str   = format_time(w.end_offset)
+                        timed_transcription.append({
+                            "start_time": start_time_str,
+                            "end_time": end_time_str,
+                            "text": w.word
+                        })
+                else:
                     timed_transcription.append({
-                        "start_time": start_time,
-                        "end_time": end_time,
+                        "start_time": "00:00:00",
+                        "end_time": "00:00:00",
                         "text": alternative.transcript
                     })
 
         return jsonify({
-            "transcription": full_transcript,
+            "transcription": full_transcript.strip(),
             "timed_transcription": timed_transcription
         })
     except Exception as e:
         logger.error(f"音声文字起こしエラー: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
-
-
 
 
 # ======= フロントエンド配信用（DEBUG以外） =======

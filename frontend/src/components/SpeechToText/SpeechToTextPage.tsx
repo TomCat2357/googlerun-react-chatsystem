@@ -61,6 +61,18 @@ const timeStringToSeconds = (timeStr: string): number => {
   return parts[0] * 3600 + parts[1] * 60 + parts[2];
 };
 
+/**
+ * 秒数を "HH:MM:SS" 形式の文字列に変換するヘルパー関数
+ */
+const secondsToTimeString = (seconds: number): string => {
+  const hrs = Math.floor(seconds / 3600);
+  const mins = Math.floor((seconds % 3600) / 60);
+  const secs = Math.floor(seconds % 60);
+  return `${hrs.toString().padStart(2, "0")}:${mins
+    .toString()
+    .padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+};
+
 const SpeechToTextPage = () => {
   const token = useToken();
   const API_BASE_URL: string = Config.API_BASE_URL;
@@ -95,11 +107,10 @@ const SpeechToTextPage = () => {
 
   /**
    * 現在のセッション内容をDBに保存する関数。
-   * ※保存対象は、文字起こし結果が存在し、かつエラーでない場合に限定する。
+   * ※保存対象は、文字起こし結果が存在する場合に限定する。
    */
   const updateCurrentSpeechRecord = async () => {
-    // 文字起こし結果が空、またはエラーのときは保存しない
-    if (!outputText.trim() || !audioData || outputText.startsWith("エラーが発生しました:")) return;
+    if (!outputText.trim() || !audioData) return;
     const normalizedAudio = audioData.replace(/^data:audio\/[a-zA-Z0-9]+;base64,/, "");
     setCurrentAudioKey(normalizedAudio);
     const record: SpeechRecord = {
@@ -413,7 +424,6 @@ const SpeechToTextPage = () => {
       });
       if (response.ok) {
         const data = await response.json();
-        // もしエラーが返ってきた場合はDBに保存しない
         if (data.error) {
           setOutputText("エラーが発生しました: " + data.error);
         } else {
@@ -472,7 +482,6 @@ const SpeechToTextPage = () => {
       audioRef.current.pause();
       setIsPlaying(false);
     } else {
-      // 一時停止中にカーソル位置が設定されていればそこから再生
       if (cursorTime) {
         audioRef.current.currentTime = timeStringToSeconds(cursorTime);
       }
@@ -484,16 +493,23 @@ const SpeechToTextPage = () => {
   // オーディオ再生中の時間更新処理
   const handleTimeUpdate = () => {
     if (audioRef.current) {
-      setCurrentTime(audioRef.current.currentTime);
+      const current = audioRef.current.currentTime;
+      setCurrentTime(current);
+      if (isPlaying) {
+        setCursorTime(secondsToTimeString(current));
+      }
     }
   };
 
-  // テキストセグメントのシングルクリック：再生中なら一時停止、停止中ならカーソル移動
+  // テキストセグメントのシングルクリック：一時停止状態の場合、カーソル位置を更新
   const handleSegmentClick = (segment: TimedSegment) => {
-    if (isPlaying && audioRef.current) {
-      audioRef.current.pause();
-      setIsPlaying(false);
-    } else {
+    if (audioRef.current) {
+      if (isPlaying) {
+        audioRef.current.pause();
+        setIsPlaying(false);
+      }
+      const newTime = timeStringToSeconds(segment.start_time);
+      audioRef.current.currentTime = newTime;
       setCursorTime(segment.start_time);
     }
   };
@@ -714,34 +730,42 @@ const SpeechToTextPage = () => {
           {isSending ? "処理中..." : "送信"}
         </button>
 
-        {/* 文字起こし結果の表示（インタラクティブなテキスト） */}
+        {/* 文字起こし結果の表示（インライン表示に変更） */}
         <div className="mt-6">
           <h2 className="text-xl font-bold mb-2">文字起こし結果</h2>
           <div className="p-2 bg-white text-black rounded" style={{ maxHeight: "300px", overflowY: "auto" }}>
             {timedTranscript.length > 0 ? (
-              timedTranscript.map((segment, index) => {
-                // 現在の再生位置に近いセグメントをハイライト
-                const segmentStartSec = timeStringToSeconds(segment.start_time);
-                const segmentEndSec = timeStringToSeconds(segment.end_time);
-                const isActive =
-                  currentTime >= segmentStartSec && currentTime < segmentEndSec;
-                const style: React.CSSProperties = {
-                  cursor: "pointer",
-                  backgroundColor: isActive || (cursorTime === segment.start_time) ? "#ffd700" : "transparent",
-                  padding: "2px 0",
-                };
-                return (
-                  <div
-                    key={index}
-                    style={style}
-                    onClick={() => handleSegmentClick(segment)}
-                    onDoubleClick={() => handleSegmentDoubleClick(segment)}
-                  >
-                    {showTimestamps && <span className="mr-2 text-blue-700">[{segment.start_time}]</span>}
-                    <span>{segment.text}</span>
-                  </div>
-                );
-              })
+              <div style={{ lineHeight: "1.8em" }}>
+                {timedTranscript.map((segment, index) => {
+                  const segmentStartSec = timeStringToSeconds(segment.start_time);
+                  const segmentEndSec = timeStringToSeconds(segment.end_time);
+                  const isActive =
+                    currentTime >= segmentStartSec && currentTime < segmentEndSec;
+                  const style: React.CSSProperties = {
+                    cursor: "pointer",
+                    backgroundColor: isActive || (cursorTime === segment.start_time)
+                      ? "#ffd700"
+                      : "transparent",
+                    padding: "0 2px",
+                    marginRight: "2px"
+                  };
+                  return (
+                    <span
+                      key={index}
+                      style={style}
+                      onClick={() => handleSegmentClick(segment)}
+                      onDoubleClick={() => handleSegmentDoubleClick(segment)}
+                    >
+                      {showTimestamps && (
+                        <span className="mr-1 text-blue-700">
+                          [{segment.start_time}]
+                        </span>
+                      )}
+                      {segment.text}
+                    </span>
+                  );
+                })}
+              </div>
             ) : (
               <textarea value={outputText} readOnly className="w-full p-2 text-black" rows={6} />
             )}
