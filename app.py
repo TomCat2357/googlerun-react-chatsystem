@@ -365,7 +365,7 @@ def latlng2query(decoded_token: Dict) -> Response:
                     "location_type": "",
                     "place_id": "",
                     "types": "",
-                    "error": "無効な形式"
+                    "error": "無効な形式",
                 }
             else:
                 try:
@@ -381,7 +381,7 @@ def latlng2query(decoded_token: Dict) -> Response:
                         "location_type": "",
                         "place_id": "",
                         "types": "",
-                        "error": "数値変換エラー"
+                        "error": "数値変換エラー",
                     }
                     continue
                 if lat < -90 or lat > 90 or lng < -180 or lng > 180:
@@ -394,7 +394,7 @@ def latlng2query(decoded_token: Dict) -> Response:
                         "location_type": "",
                         "place_id": "",
                         "types": "",
-                        "error": "範囲外"
+                        "error": "範囲外",
                     }
                     continue
                 geocode_data = get_address(google_maps_api_key, lat, lng)
@@ -410,7 +410,7 @@ def latlng2query(decoded_token: Dict) -> Response:
                         "location_type": result["geometry"].get("location_type", ""),
                         "place_id": result.get("place_id", ""),
                         "types": ", ".join(result.get("types", [])),
-                        "error": ""
+                        "error": "",
                     }
                 else:
                     unique_lines[line] = {
@@ -422,7 +422,7 @@ def latlng2query(decoded_token: Dict) -> Response:
                         "location_type": "",
                         "place_id": "",
                         "types": "",
-                        "error": geocode_data.get("status", "エラー")
+                        "error": geocode_data.get("status", "エラー"),
                     }
         results = []
         for line in lines:
@@ -430,7 +430,9 @@ def latlng2query(decoded_token: Dict) -> Response:
             if not query:
                 continue
             results.append(unique_lines[query])
-        response: Response = make_response(jsonify({"status": "success", "results": results}))
+        response: Response = make_response(
+            jsonify({"status": "success", "results": results})
+        )
         response.status_code = 200
         return response
     except Exception as e:
@@ -451,6 +453,7 @@ def logout() -> Response:
     except Exception as e:
         logger.error("ログアウト処理中にエラーが発生: %s", str(e), exc_info=True)
         return jsonify({"error": str(e)}), 401
+
 
 @app.route("/backend/static-map", methods=["GET"])
 @require_auth
@@ -476,7 +479,7 @@ def get_static_map_image(decoded_token: Dict) -> Response:
             longitude,
             zoom=zoom,
             size=(width, height),
-            map_type=map_type
+            map_type=map_type,
         )
 
         if not response.ok:
@@ -487,12 +490,13 @@ def get_static_map_image(decoded_token: Dict) -> Response:
             mimetype="image/jpeg",
             headers={
                 "Cache-Control": "public, max-age=31536000",
-                "Content-Type": "image/jpeg"
-            }
+                "Content-Type": "image/jpeg",
+            },
         )
     except Exception as e:
         logger.error("静的地図取得エラー: %s", str(e), exc_info=True)
         return jsonify({"error": str(e)}), 500
+
 
 @app.route("/backend/street-view", methods=["GET"])
 @require_auth
@@ -524,7 +528,7 @@ def get_street_view_image(decoded_token: Dict) -> Response:
             size=(width, height),
             heading=heading,
             pitch=pitch,
-            fov=fov
+            fov=fov,
         )
 
         if not response.ok:
@@ -535,12 +539,44 @@ def get_street_view_image(decoded_token: Dict) -> Response:
             mimetype="image/jpeg",
             headers={
                 "Cache-Control": "public, max-age=31536000",
-                "Content-Type": "image/jpeg"
-            }
+                "Content-Type": "image/jpeg",
+            },
         )
     except Exception as e:
         logger.error("ストリートビュー取得エラー: %s", str(e), exc_info=True)
         return jsonify({"error": str(e)}), 500
+
+
+@app.route("/backend/speech2text", methods=["POST"])
+@require_auth
+def speech2text(decoded_token: dict) -> Response:
+    try:
+        data = request.get_json() or {}
+        audio_data = data.get("audio_data", "")
+        if not audio_data:
+            raise ValueError("音声データが提供されていません")
+
+        # "data:audio/～;base64,..."形式の場合はヘッダー部分を除去
+        if audio_data.startswith("data:"):
+            _, audio_data = audio_data.split(",", 1)
+
+        # base64デコードしてバイト列に変換
+        audio_bytes = base64.b64decode(audio_data)
+
+        # 音声文字起こしを実行（日本語認識の場合）
+        responses = transcribe_streaming_v2(audio_bytes, language_codes=["ja-JP"])
+
+        # 各レスポンスの文字起こし結果を連結
+        transcript = ""
+        for response in responses:
+            for result in response.results:
+                transcript += result.alternatives[0].transcript + "\n"
+
+        return jsonify({"transcription": transcript})
+    except Exception as e:
+        logger.error(f"音声文字起こしエラー: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
 
 # ======= フロントエンド配信用（DEBUG以外） =======
 if not int(os.getenv("DEBUG", 0)):

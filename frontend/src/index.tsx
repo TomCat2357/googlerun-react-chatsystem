@@ -1,3 +1,5 @@
+// frontend/src/index.tsx
+
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import {
@@ -14,6 +16,7 @@ import ChatPage from "./components/Chat/ChatPage";
 import Header from "./components/Header/Header";
 import "./index.css";
 import GeocodingPage from "./components/Geocoding/GeocodingPage";
+import SpeechToTextPage from "./components/SpeechToText/SpeechToTextPage";
 
 function App() {
   return (
@@ -35,6 +38,7 @@ function App() {
                       <Route path="main" element={<MainPage />} />
                       <Route path="chat" element={<ChatPage />} />
                       <Route path="geocoding" element={<GeocodingPage />} />
+                      <Route path="speechtotext" element={<SpeechToTextPage />} />
                     </Routes>
                   </>
                 </ProtectedRoute>
