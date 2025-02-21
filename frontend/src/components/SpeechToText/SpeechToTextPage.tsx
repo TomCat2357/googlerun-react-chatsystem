@@ -57,7 +57,7 @@ const SpeechToTextPage = () => {
   const [description, setDescription] = useState("");
   const [recordingDate, setRecordingDate] = useState("");
 
-  // ---------- 文字起こし結果 ----------
+  // ---------- 文字起こし結果（単語 or フレーズ単位） ----------
   const [timedTranscript, setTimedTranscript] = useState<TimedSegment[]>([]);
 
   // ---------- 再生コントロール ----------
@@ -69,7 +69,7 @@ const SpeechToTextPage = () => {
   // ---------- UI制御 ----------
   const [cursorTime, setCursorTime] = useState<string | null>(null);
   const [showTimestamps, setShowTimestamps] = useState(false);
-  const [isSending, setIsSending] = useState(false);
+  const [isSending, setIsSending] = useState(false); // 処理中フラグ（ボタンの「処理中」表示切り替えなど）
 
   // ===========================================================
   //  ファイル選択 / Base64 貼り付け
@@ -271,10 +271,8 @@ const SpeechToTextPage = () => {
       if (response.ok) {
         const data = await response.json();
         if (data.error) {
-          // エラー
           console.error("Speech2Text error:", data.error);
         } else {
-          // 文字起こし結果
           if (data.timed_transcription) {
             setTimedTranscript(data.timed_transcription);
           } else {
@@ -375,15 +373,18 @@ const SpeechToTextPage = () => {
   };
 
   // ===========================================================
-  //  テキストダウンロード (UTF-8 / Shift-JIS)
+  //  テキストのダウンロード & クリップボードコピー
   // ===========================================================
-  const [selectedEncoding, setSelectedEncoding] = useState("utf8");
-  const handleDownload = () => {
-    // timedTranscript をテキスト化してダウンロードする
-    // (必要に応じて整形します)
-    const lines: string[] = timedTranscript.map((seg) => seg.text);
-    const textContent = lines.join("\n");
+  // 単語(フレーズ)をスペース区切りで連結し、1行テキストを作成
+  const getJoinedText = (): string => {
+    return timedTranscript.map((seg) => seg.text).join(" ");
+  };
 
+  const [selectedEncoding, setSelectedEncoding] = useState("utf8");
+
+  // ダウンロード時に改行ではなく、スペース区切りの1行テキストを出力
+  const handleDownload = () => {
+    const textContent = getJoinedText();
     let blob;
     let filename = "transcription.txt";
     if (selectedEncoding === "utf8") {
@@ -406,6 +407,23 @@ const SpeechToTextPage = () => {
     a.click();
     document.body.removeChild(a);
     window.URL.revokeObjectURL(url);
+  };
+
+  // 「コピー」ボタンをクリックした際に一時的にボタンがピコピコ動くためのステート
+  const [copied, setCopied] = useState(false);
+
+  // クリップボードコピー
+  const handleCopyToClipboard = async () => {
+    const textContent = getJoinedText();
+    try {
+      await navigator.clipboard.writeText(textContent);
+      // ボタンにアニメーションを付与
+      setCopied(true);
+      // 0.5秒後に元に戻す
+      setTimeout(() => setCopied(false), 500);
+    } catch (error) {
+      alert("コピーに失敗しました: " + error);
+    }
   };
 
   // ===========================================================
@@ -723,37 +741,50 @@ const SpeechToTextPage = () => {
         )}
       </div>
 
-      {/* ダウンロード & エンコーディング選択 */}
-      <div className="mt-6 flex items-center space-x-4">
-        <button
-          onClick={handleDownload}
-          className="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded"
-        >
-          ダウンロード
-        </button>
-        <div className="flex items-center space-x-2">
-          <label className="text-gray-200">
-            <input
-              type="radio"
-              name="encoding"
-              value="utf8"
-              checked={selectedEncoding === "utf8"}
-              onChange={() => setSelectedEncoding("utf8")}
-            />{" "}
-            UTF-8
-          </label>
-          <label className="text-gray-200">
-            <input
-              type="radio"
-              name="encoding"
-              value="shift-jis"
-              checked={selectedEncoding === "shift-jis"}
-              onChange={() => setSelectedEncoding("shift-jis")}
-            />{" "}
-            Shift-JIS
-          </label>
+      {/* ダウンロード & コピー & エンコーディング選択 */}
+      {timedTranscript.length > 0 && (
+        <div className="mt-6 flex items-center space-x-4">
+          <button
+            onClick={handleDownload}
+            className="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded"
+          >
+            ダウンロード
+          </button>
+
+          {/* ピコピコアニメーション用のクラスを、copied状態によって付け替え */}
+          <button
+            onClick={handleCopyToClipboard}
+            className={`bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded ${
+              copied ? "animate-bounce" : ""
+            }`}
+          >
+            クリップボードにコピー
+          </button>
+
+          <div className="flex items-center space-x-2">
+            <label className="text-gray-200">
+              <input
+                type="radio"
+                name="encoding"
+                value="utf8"
+                checked={selectedEncoding === "utf8"}
+                onChange={() => setSelectedEncoding("utf8")}
+              />{" "}
+              UTF-8
+            </label>
+            <label className="text-gray-200">
+              <input
+                type="radio"
+                name="encoding"
+                value="shift-jis"
+                checked={selectedEncoding === "shift-jis"}
+                onChange={() => setSelectedEncoding("shift-jis")}
+              />{" "}
+              Shift-JIS
+            </label>
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 };
