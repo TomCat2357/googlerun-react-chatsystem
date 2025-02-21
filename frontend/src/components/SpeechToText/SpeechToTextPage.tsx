@@ -69,7 +69,7 @@ const SpeechToTextPage = () => {
   // ---------- UI制御 ----------
   const [cursorTime, setCursorTime] = useState<string | null>(null);
   const [showTimestamps, setShowTimestamps] = useState(false);
-  const [isSending, setIsSending] = useState(false); // 処理中フラグ（ボタンの「処理中」表示切り替えなど）
+  const [isSending, setIsSending] = useState(false); // 処理中フラグ
 
   // ===========================================================
   //  ファイル選択 / Base64 貼り付け
@@ -345,7 +345,16 @@ const SpeechToTextPage = () => {
     window.URL.revokeObjectURL(url);
   };
 
+  // ※ ここがポイント：ファイル選択ダイアログを開く前に value="" をセットし、二重呼び出しを回避
   const fileInputSessionRef = useRef<HTMLInputElement>(null);
+  const openSessionFileDialog = () => {
+    if (!fileInputSessionRef.current) return;
+    // 連続で同じファイルを選択した場合でも onChange が発火するようにする
+    fileInputSessionRef.current.value = "";
+    // ダイアログを開く
+    fileInputSessionRef.current.click();
+  };
+
   const handleLoadSession = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -382,7 +391,6 @@ const SpeechToTextPage = () => {
 
   const [selectedEncoding, setSelectedEncoding] = useState("utf8");
 
-  // ダウンロード時に改行ではなく、スペース区切りの1行テキストを出力
   const handleDownload = () => {
     const textContent = getJoinedText();
     let blob;
@@ -409,17 +417,12 @@ const SpeechToTextPage = () => {
     window.URL.revokeObjectURL(url);
   };
 
-  // 「コピー」ボタンをクリックした際に一時的にボタンがピコピコ動くためのステート
   const [copied, setCopied] = useState(false);
-
-  // クリップボードコピー
   const handleCopyToClipboard = async () => {
     const textContent = getJoinedText();
     try {
       await navigator.clipboard.writeText(textContent);
-      // ボタンにアニメーションを付与
       setCopied(true);
-      // 0.5秒後に元に戻す
       setTimeout(() => setCopied(false), 500);
     } catch (error) {
       alert("コピーに失敗しました: " + error);
@@ -477,21 +480,20 @@ const SpeechToTextPage = () => {
         >
           セッション保存
         </button>
-        <label>
-          <input
-            type="file"
-            accept=".bin"
-            onChange={handleLoadSession}
-            ref={fileInputSessionRef}
-            className="hidden"
-          />
-          <span
-            onClick={() => fileInputSessionRef.current?.click()}
-            className="block bg-indigo-500 hover:bg-indigo-600 text-white font-bold py-2 px-4 rounded cursor-pointer"
-          >
-            セッション読込
-          </span>
-        </label>
+        {/* ボタンを押すとダイアログを開く → onChangeで読込 */}
+        <button
+          onClick={openSessionFileDialog}
+          className="bg-indigo-500 hover:bg-indigo-600 text-white font-bold py-2 px-4 rounded"
+        >
+          セッション読込
+        </button>
+        <input
+          type="file"
+          accept=".bin"
+          ref={fileInputSessionRef}
+          style={{ display: "none" }}
+          onChange={handleLoadSession}
+        />
       </div>
 
       {/* 説明・録音日 */}
@@ -751,7 +753,6 @@ const SpeechToTextPage = () => {
             ダウンロード
           </button>
 
-          {/* ピコピコアニメーション用のクラスを、copied状態によって付け替え */}
           <button
             onClick={handleCopyToClipboard}
             className={`bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded ${
