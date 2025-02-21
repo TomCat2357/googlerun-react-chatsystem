@@ -369,10 +369,23 @@ const SpeechToTextPage = () => {
           if (session.audioData) {
             setFileBase64Data(session.audioData);
             setPastedBase64Data("");
+            // ここでaudioDataからメタ情報を取得して再生コントロールを表示
+            const audio = new Audio();
+            audio.src = session.audioData;
+            audio.onloadedmetadata = () => {
+              setAudioInfo({
+                duration: audio.duration,
+                fileName: session.description || "Session Audio",
+                fileSize: null,
+                mimeType: audio.src.substring(5, audio.src.indexOf(";")),
+              });
+              setSliderValue(0);
+            };
           }
           setDescription(session.description || "");
           setRecordingDate(session.recordingDate || "");
           setTimedTranscript(session.timedTranscript || []);
+          setCursorTime(null);
         } catch (e) {
           alert("セッション読込エラー: " + e);
         }
