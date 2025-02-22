@@ -36,6 +36,55 @@ const secondsToTimeString = (seconds: number): string => {
     .padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
 };
 
+/**
+ * 編集モード時のセグメントコンポーネント  
+ * 初回マウント時に初期値を設定し、その後はユーザーの編集状態（DOM側）を維持する。
+ */
+interface EditableSegmentProps {
+  initialText: string;
+  index: number;
+  onFinalize: (
+    e: React.FocusEvent<HTMLSpanElement> | React.CompositionEvent<HTMLSpanElement>,
+    index: number
+  ) => void;
+  onClick: () => void;
+  onDoubleClick: () => void;
+  style: React.CSSProperties;
+}
+
+const EditableSegment: React.FC<EditableSegmentProps> = ({
+  initialText,
+  index,
+  onFinalize,
+  onClick,
+  onDoubleClick,
+  style,
+}) => {
+  const spanRef = useRef<HTMLSpanElement>(null);
+
+  // 初回マウント時に初期値を設定（以降はDOM上の値を編集中に保持）
+  useEffect(() => {
+    if (spanRef.current) {
+      spanRef.current.innerText = initialText;
+    }
+    // 初回のみ実行
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return (
+    <span
+      ref={spanRef}
+      contentEditable
+      suppressContentEditableWarning
+      style={style}
+      onBlur={(e) => onFinalize(e, index)}
+      onCompositionEnd={(e) => onFinalize(e, index)}
+      onClick={onClick}
+      onDoubleClick={onDoubleClick}
+    />
+  );
+};
+
 const SpeechToTextPage = () => {
   const token = useToken();
   const API_BASE_URL: string = Config.API_BASE_URL;
@@ -58,6 +107,10 @@ const SpeechToTextPage = () => {
   // ---------- 文字起こし結果関連 ----------
   const [serverTimedTranscript, setServerTimedTranscript] = useState<TimedSegment[]>([]);
   const [serverTranscript, setServerTranscript] = useState("");
+  /**
+   * 修正モードで編集されたテキストを保持する配列。
+   * インデックスは `serverTimedTranscript` に対応。
+   */
   const [editedTranscriptSegments, setEditedTranscriptSegments] = useState<string[]>([]);
 
   // ---------- 再生コントロール ----------
@@ -70,11 +123,11 @@ const SpeechToTextPage = () => {
   const [cursorTime, setCursorTime] = useState<string | null>(null);
   const [showTimestamps, setShowTimestamps] = useState(false);
   const [isSending, setIsSending] = useState(false);
+  // 複数チャンク送信時の進捗
   const [progress, setProgress] = useState<{ current: number; total: number }>({ current: 0, total: 0 });
 
-  // ---------- 修正モード & IME制御 ----------
+  // ---------- 修正モード ----------
   const [isEditMode, setIsEditMode] = useState(false);
-  const [isComposing, setIsComposing] = useState(false); // IME変換中かどうか
 
   // ===========================================================
   //  ファイル選択 / Base64 貼り付け
@@ -133,7 +186,6 @@ const SpeechToTextPage = () => {
     setEditedTranscriptSegments([]);
     setCursorTime(null);
 
-    // 説明・録音日を自動設定
     setDescription(file.name);
     setRecordingDate(formatDate(file.lastModified));
   };
@@ -212,7 +264,7 @@ const SpeechToTextPage = () => {
   };
 
   // ===========================================================
-  //  再生・スライダー連動
+  //  再生コントロール
   // ===========================================================
   const handlePlayPause = () => {
     if (!audioRef.current) return;
@@ -250,7 +302,7 @@ const SpeechToTextPage = () => {
   };
 
   // ===========================================================
-  //  文字起こし送信処理（チャンク分割）
+  //  文字起こし送信処理（チャンク分割対応）
   // ===========================================================
   const handleSend = async () => {
     if (!audioData) {
@@ -348,7 +400,7 @@ const SpeechToTextPage = () => {
     setServerTranscript(transcriptionAccumulator.trim());
     setServerTimedTranscript(timedTranscriptionAccumulator);
 
-    // 初期化（まだ何も編集配列がなければコピー）
+    // まだ編集配列が空であれば初期化
     if (editedTranscriptSegments.length === 0 && timedTranscriptionAccumulator.length > 0) {
       const newSegments = timedTranscriptionAccumulator.map(seg => seg.text.trim() || " ");
       setEditedTranscriptSegments(newSegments);
@@ -522,6 +574,29 @@ const SpeechToTextPage = () => {
   };
 
   // ===========================================================
+  //  「入力途中の文字列」は即座に state へ反映せず、確定時のみ反映
+  // ===========================================================
+  /**
+   * フォーカスが外れた or Composition が終了したタイミングで
+   * DOMのテキストを読み取り、editedTranscriptSegments に反映。
+   */
+  const handleSegmentFinalize = (
+    e: React.FocusEvent<HTMLSpanElement> | React.CompositionEvent<HTMLSpanElement>,
+    index: number
+  ) => {
+    // 修正モードでなければ何もしない
+    if (!isEditMode) return;
+
+    let newText = e.currentTarget.innerText;
+    if (!newText.trim()) {
+      newText = " ";
+    }
+    const newSegments = [...editedTranscriptSegments];
+    newSegments[index] = newText;
+    setEditedTranscriptSegments(newSegments);
+  };
+
+  // ===========================================================
   //  文字起こしテキスト中の再生コントロール
   // ===========================================================
   const handleSegmentClick = (segment: TimedSegment) => {
@@ -551,50 +626,15 @@ const SpeechToTextPage = () => {
   };
 
   // ===========================================================
-  //  修正モードでの入力: Composition イベント対応
+  //  同じタイムスタンプを連続表示しないための処理
   // ===========================================================
-  const handleSegmentCompositionStart = () => {
-    setIsComposing(true);
-  };
-
-  const handleSegmentCompositionEnd = (
-    e: React.CompositionEvent<HTMLSpanElement>,
-    index: number
-  ) => {
-    setIsComposing(false);
-    let newText = e.currentTarget.innerText;
-    if (!newText.trim()) {
-      newText = " ";
-    }
-    const newSegments = [...editedTranscriptSegments];
-    newSegments[index] = newText;
-    setEditedTranscriptSegments(newSegments);
-  };
-
-  const handleSegmentInput = (
-    e: React.FormEvent<HTMLSpanElement>,
-    index: number
-  ) => {
-    // 日本語IME変換中は確定前に state を更新しない
-    if (isComposing) return;
-
-    let newText = e.currentTarget.innerText;
-    if (!newText.trim()) {
-      newText = " ";
-    }
-    const newSegments = [...editedTranscriptSegments];
-    newSegments[index] = newText;
-    setEditedTranscriptSegments(newSegments);
-  };
-
-  // 同じタイムスタンプを連続表示しないため
   let lastShownTimestamp: string | null = null;
 
   return (
     <div className="p-4 overflow-y-auto bg-dark-primary text-white min-h-screen">
       <h1 className="text-3xl font-bold mb-4">音声文字起こし</h1>
 
-      {/* セッション保存／読込とクリア */}
+      {/* セッション保存／読込とクリアボタン */}
       <div className="flex justify-between items-center mb-6">
         <div className="flex space-x-4">
           <button
@@ -686,7 +726,8 @@ const SpeechToTextPage = () => {
 
         <div className="mb-4">
           <p className="text-sm">
-            アップロードされたデータの先頭: <span className="text-green-300">{preview}</span>
+            アップロードされたデータの先頭:{" "}
+            <span className="text-green-300">{preview}</span>
           </p>
         </div>
 
@@ -695,8 +736,10 @@ const SpeechToTextPage = () => {
             <p className="text-sm">
               音声情報:{" "}
               {audioInfo.fileName && `ファイル名: ${audioInfo.fileName}, `}
-              {audioInfo.duration !== undefined && `再生時間: ${audioInfo.duration.toFixed(2)}秒, `}
-              {audioInfo.fileSize !== null && audioInfo.fileSize !== undefined && 
+              {audioInfo.duration !== undefined &&
+                `再生時間: ${audioInfo.duration.toFixed(2)}秒, `}
+              {audioInfo.fileSize !== null &&
+                audioInfo.fileSize !== undefined &&
                 `ファイルサイズ: ${(audioInfo.fileSize / 1024).toFixed(1)}KB, `}
               {audioInfo.mimeType && `MIMEタイプ: ${audioInfo.mimeType}`}
             </p>
@@ -704,7 +747,7 @@ const SpeechToTextPage = () => {
         )}
       </div>
 
-      {/* 説明・録音日・送信 */}
+      {/* サイドバー：説明・録音日と送信ボタン */}
       <div className="border border-gray-400 rounded p-4 mb-6 flex flex-col justify-end" style={{ minHeight: "150px" }}>
         <div className="mb-4">
           <label className="block text-sm font-medium text-gray-200">説明</label>
@@ -767,6 +810,7 @@ const SpeechToTextPage = () => {
               <option value={2}>2x</option>
             </select>
 
+            {/* タイムスタンプ表示ボタン */}
             <label className="ml-4 text-gray-200">
               <input
                 type="checkbox"
@@ -777,7 +821,9 @@ const SpeechToTextPage = () => {
             </label>
           </div>
           <div className="flex items-center space-x-2">
-            <span className="w-16 text-right">{secondsToTimeString(sliderValue)}</span>
+            <span className="w-16 text-right">
+              {secondsToTimeString(sliderValue)}
+            </span>
             <input
               type="range"
               min={0}
@@ -788,13 +834,17 @@ const SpeechToTextPage = () => {
               className="flex-1"
             />
             <span className="w-16">
-              {audioInfo.duration ? secondsToTimeString(audioInfo.duration) : "00:00:00"}
+              {audioInfo.duration
+                ? secondsToTimeString(audioInfo.duration)
+                : "00:00:00"}
             </span>
           </div>
         </div>
       )}
 
-      {audioData && <audio ref={audioRef} src={audioData} onTimeUpdate={handleTimeUpdate} />}
+      {audioData && (
+        <audio ref={audioRef} src={audioData} onTimeUpdate={handleTimeUpdate} />
+      )}
 
       {/* 文字起こし結果ヘッダー */}
       <div className="mt-6">
@@ -823,7 +873,9 @@ const SpeechToTextPage = () => {
             <button
               onClick={handleCopyToClipboard}
               className={`font-bold py-2 px-4 rounded transition-colors duration-300 ${
-                copied ? "bg-white text-black" : "bg-gray-500 hover:bg-gray-600 text-white"
+                copied
+                  ? "bg-white text-black"
+                  : "bg-gray-500 hover:bg-gray-600 text-white"
               }`}
             >
               クリップボードにコピー
@@ -862,7 +914,8 @@ const SpeechToTextPage = () => {
             {serverTimedTranscript.map((segment, index) => {
               const segmentStartSec = timeStringToSeconds(segment.start_time);
               const segmentEndSec = timeStringToSeconds(segment.end_time);
-              const isActive = currentTime >= segmentStartSec && currentTime < segmentEndSec;
+              const isActive =
+                currentTime >= segmentStartSec && currentTime < segmentEndSec;
 
               // タイムスタンプを出すかどうか
               let displayTimestamp = false;
@@ -873,13 +926,11 @@ const SpeechToTextPage = () => {
                 }
               }
 
-              // 修正モード中は editedTranscriptSegments を参照（未定義ならオリジナルを表示）
-              const displayText = isEditMode
-                ? editedTranscriptSegments[index] ?? segment.text
-                : segment.text;
-
               const highlightStyle: React.CSSProperties = {
-                backgroundColor: isActive || (cursorTime === segment.start_time) ? "#ffd700" : "#fff8b3",
+                backgroundColor:
+                  isActive || (cursorTime === segment.start_time)
+                    ? "#ffd700"
+                    : "#fff8b3",
                 marginRight: "4px",
                 padding: "2px 4px",
                 borderRadius: "4px",
@@ -891,20 +942,28 @@ const SpeechToTextPage = () => {
               return (
                 <React.Fragment key={index}>
                   {displayTimestamp && (
-                    <span className="mr-1 text-blue-700">[{segment.start_time}]</span>
+                    <span className="mr-1 text-blue-700">
+                      [{segment.start_time}]
+                    </span>
                   )}
-                  <span
-                    style={highlightStyle}
-                    contentEditable={isEditMode}
-                    suppressContentEditableWarning={true}
-                    onCompositionStart={handleSegmentCompositionStart}
-                    onCompositionEnd={(ev) => handleSegmentCompositionEnd(ev, index)}
-                    onInput={(ev) => handleSegmentInput(ev, index)}
-                    onClick={() => handleSegmentClick(segment)}
-                    onDoubleClick={() => handleSegmentDoubleClick(segment)}
-                  >
-                    {displayText}
-                  </span>
+                  {isEditMode ? (
+                    <EditableSegment
+                      index={index}
+                      initialText={editedTranscriptSegments[index] ?? segment.text}
+                      onFinalize={handleSegmentFinalize}
+                      onClick={() => handleSegmentClick(segment)}
+                      onDoubleClick={() => handleSegmentDoubleClick(segment)}
+                      style={highlightStyle}
+                    />
+                  ) : (
+                    <span
+                      style={highlightStyle}
+                      onClick={() => handleSegmentClick(segment)}
+                      onDoubleClick={() => handleSegmentDoubleClick(segment)}
+                    >
+                      {segment.text}
+                    </span>
+                  )}
                 </React.Fragment>
               );
             })}
