@@ -307,7 +307,7 @@ const SpeechToTextPage = () => {
   };
 
   // ===========================================================
-  //  文字起こし送信処理（チャンク分割対応）
+  //  文字起こし送信処理（チャンク分割対応 + タイムスタンプ補正）
   // ===========================================================
   const handleSend = async () => {
     if (!audioData) {
@@ -320,6 +320,7 @@ const SpeechToTextPage = () => {
     let timedTranscriptionAccumulator: TimedSegment[] = [];
 
     const rawChunkSize = Config.SPEECH_CHUNK_SIZE || 524288000; // 500MBデフォルト
+    // 25KB(=25600バイト)の倍数に調整
     const chunkSize = Math.floor(rawChunkSize / 25600) * 25600;
 
     let header = "";
@@ -334,6 +335,10 @@ const SpeechToTextPage = () => {
     const totalChunks = Math.ceil(totalBytes / chunkSize);
     setProgress({ current: 0, total: totalChunks });
 
+    // タイムスタンプを連続させるためのオフセット（秒）
+    let chunkTimeOffsetSec = 0;
+
+    // チャンクが1個しかない場合（SPEECH_CHUNK_SIZE以下）
     if (totalChunks <= 1) {
       try {
         const response = await fetch(`${API_BASE_URL}/backend/speech2text`, {
@@ -363,6 +368,7 @@ const SpeechToTextPage = () => {
         console.error(error);
       }
     } else {
+      // 複数チャンクに分割
       for (let i = 0; i < totalChunks; i++) {
         const start = i * chunkSize;
         const end = Math.min(start + chunkSize, totalBytes);
@@ -370,6 +376,7 @@ const SpeechToTextPage = () => {
         const chunkBase64 = btoa(chunkBinary);
         const chunkDataUrl = header + chunkBase64;
 
+        // 進捗表示用
         setProgress({ current: i + 1, total: totalChunks });
 
         try {
@@ -388,7 +395,21 @@ const SpeechToTextPage = () => {
                 transcriptionAccumulator += data.transcription.trim() + "\n";
               }
               if (data.timed_transcription) {
-                timedTranscriptionAccumulator = timedTranscriptionAccumulator.concat(data.timed_transcription);
+                // 取得したタイムスタンプをチャンクオフセット分ずらす
+                for (let j = 0; j < data.timed_transcription.length; j++) {
+                  const w = data.timed_transcription[j];
+                  const stSec = timeStringToSeconds(w.start_time) + chunkTimeOffsetSec;
+                  const edSec = timeStringToSeconds(w.end_time) + chunkTimeOffsetSec;
+                  w.start_time = secondsToTimeString(stSec);
+                  w.end_time = secondsToTimeString(edSec);
+                }
+                timedTranscriptionAccumulator = timedTranscriptionAccumulator.concat(
+                  data.timed_transcription
+                );
+
+                // 今回のチャンクの最後のタイムスタンプを元に次チャンクのオフセットを更新
+                const last = data.timed_transcription[data.timed_transcription.length - 1];
+                chunkTimeOffsetSec = timeStringToSeconds(last.end_time);
               }
             } else {
               console.error("Speech2Text error:", data.error);
@@ -781,7 +802,7 @@ const SpeechToTextPage = () => {
           className="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded"
         >
           {isSending && progress.total > 1
-            ? `処理中 ${progress.current}/${progress.total}`
+            ? `処理中(${progress.current}/${progress.total})`
             : isSending
             ? "処理中..."
             : "送信"}
@@ -932,8 +953,8 @@ const SpeechToTextPage = () => {
               }
 
               // 【改善箇所】修正モード / 非修正モードに応じたハイライト色を設定
-              const activeColor = isEditMode ? "#32CD32" : "#ffd700";     // 修正モード：さらに薄い緑 (#228B22 → #32CD32)
-              const inactiveColor = isEditMode ? "#B0E57C" : "#fff8b3";   // 修正モード：さらに薄い緑 (#98FB98 → #B0E57C)
+              const activeColor = isEditMode ? "#32CD32" : "#ffd700";     // 修正モード時: 薄い緑
+              const inactiveColor = isEditMode ? "#B0E57C" : "#fff8b3";   // 非修正モード時: 薄い黄色
               const highlightStyle: React.CSSProperties = {
                 backgroundColor:
                   isActive || (cursorTime === segment.start_time)

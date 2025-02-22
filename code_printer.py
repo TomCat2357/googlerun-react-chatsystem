@@ -95,7 +95,7 @@ def main():
             continue
 
         # 複数のパスが指定された場合、最初のパスのディレクトリをbase_dirとする
-        base_dir = os.path.dirname(os.path.abspath(args.path[0])) if os.path.isfile(os.path.abspath(args.path[0])) else os.path.abspath(args.path[0])
+        base_dir = os.getcwd()
         print_code(target, exts, base_dir, recursive=args.recursive, omit=args.omit)
 
 if __name__ == "__main__":
