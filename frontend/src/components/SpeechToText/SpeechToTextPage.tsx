@@ -931,11 +931,16 @@ const SpeechToTextPage = () => {
                 }
               }
 
+              // 【改善箇所】修正モード / 非修正モードに応じたハイライト色を設定
+              const activeColor = isEditMode ? "#32CD32" : "#ffd700";     // 修正モード：さらに薄い緑 (#228B22 → #32CD32)
+              const inactiveColor = isEditMode ? "#B0E57C" : "#fff8b3";   // 修正モード：さらに薄い緑 (#98FB98 → #B0E57C)
+              
+              
               const highlightStyle: React.CSSProperties = {
                 backgroundColor:
                   isActive || (cursorTime === segment.start_time)
-                    ? "#ffd700"
-                    : "#fff8b3",
+                    ? activeColor
+                    : inactiveColor,
                 marginRight: "4px",
                 padding: "2px 4px",
                 borderRadius: "4px",
