@@ -305,10 +305,7 @@ const GeocodingPage = () => {
       return;
     }
 
-    const confirmed = window.confirm(
-      `入力件数は${allLines.length}件です。実行しますか？`
-    );
-    if (!confirmed) return;
+
 
     setIsSending(true);
     const timestamp = Date.now();
