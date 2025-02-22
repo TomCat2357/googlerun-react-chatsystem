@@ -77,6 +77,11 @@ const EditableSegment: React.FC<EditableSegmentProps> = ({
       contentEditable
       suppressContentEditableWarning
       style={style}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+        }
+      }}
       onBlur={(e) => onFinalize(e, index)}
       onCompositionEnd={(e) => onFinalize(e, index)}
       onClick={onClick}
