@@ -12,7 +12,7 @@ interface AudioInfo {
   mimeType?: string;
 }
 
-interface TimedSegment {
+export interface TimedSegment {
   start_time: string; // "HH:MM:SS"
   end_time: string;   // "HH:MM:SS"
   text: string;
@@ -57,8 +57,13 @@ const SpeechToTextPage = () => {
   const [description, setDescription] = useState("");
   const [recordingDate, setRecordingDate] = useState("");
 
-  // ---------- 文字起こし結果（単語 or フレーズ単位） ----------
-  const [timedTranscript, setTimedTranscript] = useState<TimedSegment[]>([]);
+  // ---------- 文字起こし結果（サーバー起稿とユーザー修正済みの両方を保持） ----------
+  // サーバーから受信したタイムスタンプ付き文字起こし
+  const [serverTimedTranscript, setServerTimedTranscript] = useState<TimedSegment[]>([]);
+  // サーバー起稿文（結合済みテキスト）
+  const [serverTranscript, setServerTranscript] = useState("");
+  // ユーザーが修正した各セグメント（サーバーと同数・初期値はサーバー起稿文を単語分割したものなど）
+  const [editedTranscriptSegments, setEditedTranscriptSegments] = useState<string[]>([]);
 
   // ---------- 再生コントロール ----------
   const [isPlaying, setIsPlaying] = useState(false);
@@ -70,6 +75,9 @@ const SpeechToTextPage = () => {
   const [cursorTime, setCursorTime] = useState<string | null>(null);
   const [showTimestamps, setShowTimestamps] = useState(false);
   const [isSending, setIsSending] = useState(false); // 処理中フラグ
+
+  // ---------- 修正モード（編集モード）状態 ----------
+  const [isEditMode, setIsEditMode] = useState(false);
 
   // ===========================================================
   //  ファイル選択 / Base64 貼り付け
@@ -129,7 +137,9 @@ const SpeechToTextPage = () => {
     // UIリセット
     setFileBase64Data(fileData);
     setPastedBase64Data("");
-    setTimedTranscript([]);
+    setServerTimedTranscript([]);
+    setServerTranscript("");
+    setEditedTranscriptSegments([]);
     setCursorTime(null);
 
     // 説明・録音日を自動設定
@@ -194,7 +204,9 @@ const SpeechToTextPage = () => {
       setAudioInfo(null);
     };
     setPastedBase64Data(dataUrl);
-    setTimedTranscript([]);
+    setServerTimedTranscript([]);
+    setServerTranscript("");
+    setEditedTranscriptSegments([]);
     setCursorTime(null);
   };
 
@@ -251,7 +263,7 @@ const SpeechToTextPage = () => {
   };
 
   // ===========================================================
-  //  文字起こし
+  //  文字起こし送信処理
   // ===========================================================
   const handleSend = async () => {
     if (!audioData) {
@@ -273,10 +285,22 @@ const SpeechToTextPage = () => {
         if (data.error) {
           console.error("Speech2Text error:", data.error);
         } else {
+          // サーバー起稿の文字起こし（結合済みテキスト）
+          if (data.transcription) {
+            setServerTranscript(data.transcription.trim());
+          }
+          // タイムスタンプ付きの各セグメントを保持
           if (data.timed_transcription) {
-            setTimedTranscript(data.timed_transcription);
-          } else {
-            setTimedTranscript([]);
+            setServerTimedTranscript(data.timed_transcription);
+            // 編集用の各セグメントが未設定なら初期値としてサーバーの各単語をセット
+            if (editedTranscriptSegments.length === 0) {
+              // 例：timed_transcriptionのseg.textをそのまま配列に
+              const newSegments = data.timed_transcription.map((seg: TimedSegment) => {
+                const t = seg.text.trim();
+                return t === "" ? " " : t;
+              });
+              setEditedTranscriptSegments(newSegments);
+            }
           }
         }
       } else {
@@ -290,7 +314,7 @@ const SpeechToTextPage = () => {
   };
 
   // ===========================================================
-  //  セッションのバイナリ保存/読込
+  //  セッションの保存／読込（音声データ・メタ情報・文字起こし結果両方）
   // ===========================================================
   const handleClearBoth = () => {
     setFileBase64Data("");
@@ -298,7 +322,9 @@ const SpeechToTextPage = () => {
     setAudioInfo(null);
     setDescription("");
     setRecordingDate("");
-    setTimedTranscript([]);
+    setServerTimedTranscript([]);
+    setServerTranscript("");
+    setEditedTranscriptSegments([]);
     setCursorTime(null);
     setSliderValue(0);
     if (fileInputRef.current) {
@@ -320,7 +346,9 @@ const SpeechToTextPage = () => {
       audioData,
       description,
       recordingDate,
-      timedTranscript,
+      serverTimedTranscript,
+      serverTranscript,
+      editedTranscriptSegments,
     };
     const jsonString = JSON.stringify(session);
     const encoder = new TextEncoder();
@@ -345,13 +373,10 @@ const SpeechToTextPage = () => {
     window.URL.revokeObjectURL(url);
   };
 
-  // ※ ここがポイント：ファイル選択ダイアログを開く前に value="" をセットし、二重呼び出しを回避
   const fileInputSessionRef = useRef<HTMLInputElement>(null);
   const openSessionFileDialog = () => {
     if (!fileInputSessionRef.current) return;
-    // 連続で同じファイルを選択した場合でも onChange が発火するようにする
     fileInputSessionRef.current.value = "";
-    // ダイアログを開く
     fileInputSessionRef.current.click();
   };
 
@@ -369,7 +394,6 @@ const SpeechToTextPage = () => {
           if (session.audioData) {
             setFileBase64Data(session.audioData);
             setPastedBase64Data("");
-            // ここでaudioDataからメタ情報を取得して再生コントロールを表示
             const audio = new Audio();
             audio.src = session.audioData;
             audio.onloadedmetadata = () => {
@@ -384,7 +408,15 @@ const SpeechToTextPage = () => {
           }
           setDescription(session.description || "");
           setRecordingDate(session.recordingDate || "");
-          setTimedTranscript(session.timedTranscript || []);
+          if (session.serverTranscript) {
+            setServerTranscript(session.serverTranscript);
+          }
+          if (session.serverTimedTranscript) {
+            setServerTimedTranscript(session.serverTimedTranscript);
+          }
+          if (session.editedTranscriptSegments) {
+            setEditedTranscriptSegments(session.editedTranscriptSegments);
+          }
           setCursorTime(null);
         } catch (e) {
           alert("セッション読込エラー: " + e);
@@ -395,11 +427,16 @@ const SpeechToTextPage = () => {
   };
 
   // ===========================================================
-  //  テキストのダウンロード & クリップボードコピー
+  //  テキストダウンロード & クリップボードコピー
   // ===========================================================
-  // 単語(フレーズ)をスペース区切りで連結し、1行テキストを作成
+  // 表示されている文字起こしテキストを、修正モードなら編集後の各セグメント、非修正モードならサーバー起稿文から生成
   const getJoinedText = (): string => {
-    return timedTranscript.map((seg) => seg.text).join(" ");
+    if (isEditMode) {
+      // editedTranscriptSegments をスペース区切りで結合（余計な空白はtrim）
+      return editedTranscriptSegments.map(seg => seg.trim()).join(" ");
+    } else {
+      return serverTranscript.trim();
+    }
   };
 
   const [selectedEncoding, setSelectedEncoding] = useState("utf8");
@@ -443,11 +480,11 @@ const SpeechToTextPage = () => {
   };
 
   // ===========================================================
-  //  文字起こしテキスト中のカーソル連動
+  //  文字起こしテキスト中の再生コントロール
   // ===========================================================
-  // 単語(フレーズ)をクリックしたらその時間へ
   const handleSegmentClick = (segment: TimedSegment) => {
     if (audioRef.current) {
+      // シングルクリックで停止 + カーソル移動
       if (isPlaying) {
         audioRef.current.pause();
         setIsPlaying(false);
@@ -460,9 +497,9 @@ const SpeechToTextPage = () => {
     }
   };
 
-  // ダブルクリックでその時間から再生
   const handleSegmentDoubleClick = (segment: TimedSegment) => {
     if (audioRef.current) {
+      // ダブルクリックでそこから再生
       const stSec = timeStringToSeconds(segment.start_time);
       audioRef.current.currentTime = stSec;
       setSliderValue(stSec);
@@ -471,6 +508,23 @@ const SpeechToTextPage = () => {
       setIsPlaying(true);
       setCursorTime(segment.start_time);
     }
+  };
+
+  // ===========================================================
+  //  修正モード時のテキスト編集ハンドラ（contentEditable）
+  // ===========================================================
+  const handleSegmentInput = (
+    e: React.FormEvent<HTMLSpanElement>,
+    index: number
+  ) => {
+    let newText = e.currentTarget.innerText;
+    // 全部削除されたら1文字（半角スペース）だけ残す
+    if (!newText.trim()) {
+      newText = " ";
+    }
+    const newSegments = [...editedTranscriptSegments];
+    newSegments[index] = newText;
+    setEditedTranscriptSegments(newSegments);
   };
 
   return (
@@ -493,7 +547,6 @@ const SpeechToTextPage = () => {
         >
           セッション保存
         </button>
-        {/* ボタンを押すとダイアログを開く → onChangeで読込 */}
         <button
           onClick={openSessionFileDialog}
           className="bg-indigo-500 hover:bg-indigo-600 text-white font-bold py-2 px-4 rounded"
@@ -532,6 +585,19 @@ const SpeechToTextPage = () => {
             className="w-full p-2 text-black"
           />
         </div>
+      </div>
+
+      {/* 修正モード切替用チェックボックス */}
+      <div className="mb-4">
+        <label className="flex items-center">
+          <input
+            type="checkbox"
+            checked={isEditMode}
+            onChange={(e) => setIsEditMode(e.target.checked)}
+            className="mr-2"
+          />
+          修正モード
+        </label>
       </div>
 
       {/* アップロード */}
@@ -694,70 +760,76 @@ const SpeechToTextPage = () => {
         {isSending ? "処理中..." : "送信"}
       </button>
 
-      {/* 文字起こし結果（単語/フレーズごと） */}
+      {/* 文字起こし結果表示 */}
       <div className="mt-6">
         <h2 className="text-xl font-bold mb-2">文字起こし結果</h2>
 
-        {timedTranscript.length > 0 && (
+        {serverTimedTranscript.length > 0 && (
           <div
             className="p-2 bg-white text-black rounded"
             style={{ lineHeight: "1.8em", maxHeight: "300px", overflowY: "auto" }}
           >
-            {/* すでに表示したタイムスタンプ秒数を記憶して、重複を避ける */}
-            {(() => {
-              let lastTimestampSec = -1;
-              return timedTranscript.map((segment, index) => {
-                const segmentStartSec = timeStringToSeconds(segment.start_time);
-                const segmentEndSec = timeStringToSeconds(segment.end_time);
+            {serverTimedTranscript.map((segment, index) => {
+              // タイムスタンプの数値化
+              const segmentStartSec = timeStringToSeconds(segment.start_time);
+              const segmentEndSec = timeStringToSeconds(segment.end_time);
+              // 現在時間がこのセグメントの範囲内かどうか
+              const isActive =
+                currentTime >= segmentStartSec && currentTime < segmentEndSec;
 
-                // 現在時間がこのセグメントの範囲内かどうか
-                const isActive =
-                  currentTime >= segmentStartSec && currentTime < segmentEndSec;
+              // タイムスタンプ表示用
+              let showTimestamp = false;
+              if (showTimestamps && segmentStartSec % 60 === 0) {
+                showTimestamp = true;
+              }
 
-                const style: React.CSSProperties = {
-                  cursor: "pointer",
-                  backgroundColor:
-                    isActive || (cursorTime === segment.start_time)
-                      ? "#ffd700"
-                      : "transparent",
-                  padding: "0 2px",
-                  marginRight: "2px",
-                };
+              const highlightStyle: React.CSSProperties = {
+                backgroundColor:
+                  isActive || (cursorTime === segment.start_time)
+                    ? "#ffd700" // アクティブ時の色
+                    : "#fff8b3", // 通常時の薄黄色
+                marginRight: "4px",
+                padding: "2px 4px",
+                borderRadius: "4px",
+                cursor: "pointer",
+                // contentEditable時の見た目を整える
+                display: "inline-block",
+                whiteSpace: "pre", // 改行をそのまま扱う（余計な崩れ防止）
+              };
 
-                // タイムスタンプ表示の判定
-                let timestampSpan: JSX.Element | null = null;
-                if (
-                  showTimestamps &&
-                  segmentStartSec % 60 === 0 && // 1分毎
-                  segmentStartSec !== lastTimestampSec // 直前と同じなら表示しない
-                ) {
-                  timestampSpan = (
-                    <span className="mr-1 text-blue-700">
-                      [{segment.start_time}]
-                    </span>
-                  );
-                  lastTimestampSec = segmentStartSec;
-                }
+              // 表示テキスト（修正モードなら editedTranscriptSegments、非修正モードなら segment.text）
+              const displayText = isEditMode
+                ? editedTranscriptSegments[index] || " "
+                : segment.text;
 
-                return (
+              return (
+                <React.Fragment key={index}>
+                  {/* タイムスタンプ表示（1分おきなどに表示したい場合） */}
+                  {showTimestamp && (
+                    <span className="mr-1 text-blue-700">[{segment.start_time}]</span>
+                  )}
+
+                  {/* contentEditableな <span> */}
                   <span
-                    key={index}
-                    style={style}
+                    style={highlightStyle}
+                    // 修正モードのみ編集可
+                    contentEditable={isEditMode}
+                    suppressContentEditableWarning={true}
+                    onInput={(e) => handleSegmentInput(e, index)}
                     onClick={() => handleSegmentClick(segment)}
                     onDoubleClick={() => handleSegmentDoubleClick(segment)}
                   >
-                    {timestampSpan}
-                    {segment.text}
+                    {displayText}
                   </span>
-                );
-              });
-            })()}
+                </React.Fragment>
+              );
+            })}
           </div>
         )}
       </div>
 
       {/* ダウンロード & コピー & エンコーディング選択 */}
-      {timedTranscript.length > 0 && (
+      {serverTimedTranscript.length > 0 && (
         <div className="mt-6 flex items-center space-x-4">
           <button
             onClick={handleDownload}
