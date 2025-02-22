@@ -651,11 +651,6 @@ const SpeechToTextPage = () => {
     }
   };
 
-  // ===========================================================
-  //  同じタイムスタンプを連続表示しないための処理
-  // ===========================================================
-  let lastShownTimestamp: string | null = null;
-
   return (
     <div className="p-4 overflow-y-auto bg-dark-primary text-white min-h-screen">
       <h1 className="text-3xl font-bold mb-4">音声文字起こし</h1>
@@ -705,7 +700,8 @@ const SpeechToTextPage = () => {
                 setUploadMode("file");
                 handleClearBoth();
               }}
-            /> ファイル選択
+            />{" "}
+            ファイル選択
           </label>
           <label className="text-gray-200">
             <input
@@ -717,7 +713,8 @@ const SpeechToTextPage = () => {
                 setUploadMode("base64");
                 handleClearBoth();
               }}
-            /> Base64貼り付け
+            />{" "}
+            Base64貼り付け
           </label>
         </div>
 
@@ -937,65 +934,75 @@ const SpeechToTextPage = () => {
             className="p-2 bg-white text-black rounded"
             style={{ lineHeight: "1.8em", maxHeight: "300px", overflowY: "auto" }}
           >
-            {serverTimedTranscript.map((segment, index) => {
-              const segmentStartSec = timeStringToSeconds(segment.start_time);
-              const segmentEndSec = timeStringToSeconds(segment.end_time);
-              const isActive =
-                currentTime >= segmentStartSec && currentTime < segmentEndSec;
+            {(() => {
+              // ここで閾値（例：5分）を設定
+              const thresholdMinutes = 1; // 例：5分
+              let nextThresholdSec = thresholdMinutes * 60; // 次に挿入するタイムスタンプの秒数
 
-              // タイムスタンプを出すかどうか
-              let displayTimestamp = false;
-              if (showTimestamps && segmentStartSec % 60 === 0) {
-                if (segment.start_time !== lastShownTimestamp) {
-                  displayTimestamp = true;
-                  lastShownTimestamp = segment.start_time;
+              return serverTimedTranscript.map((segment, index) => {
+                const segmentStartSec = timeStringToSeconds(segment.start_time);
+                const segmentEndSec = timeStringToSeconds(segment.end_time);
+                const isActive =
+                  currentTime >= segmentStartSec && currentTime < segmentEndSec;
+
+                // タイムスタンプマーカーの挿入（指定分数を超えた最初のチャンクにマーカーを付与）
+                const markerElements = [];
+                if (showTimestamps) {
+                  // もし1セグメントが複数の閾値をまたぐ場合にも対応
+                  while (segmentStartSec >= nextThresholdSec) {
+                    markerElements.push(
+                      <span
+                        key={`marker-${index}-${nextThresholdSec}`}
+                        className="mr-1 text-blue-700"
+                      >
+                        {`{${secondsToTimeString(nextThresholdSec)}}`}
+                      </span>
+                    );
+                    nextThresholdSec += thresholdMinutes * 60;
+                  }
                 }
-              }
 
-              // 【改善箇所】修正モード / 非修正モードに応じたハイライト色を設定
-              const activeColor = isEditMode ? "#32CD32" : "#ffd700";     // 修正モード時: 薄い緑
-              const inactiveColor = isEditMode ? "#B0E57C" : "#fff8b3";   // 非修正モード時: 薄い黄色
-              const highlightStyle: React.CSSProperties = {
-                backgroundColor:
-                  isActive || (cursorTime === segment.start_time)
-                    ? activeColor
-                    : inactiveColor,
-                marginRight: "4px",
-                padding: "2px 4px",
-                borderRadius: "4px",
-                cursor: "pointer",
-                display: "inline-block",
-                whiteSpace: "pre",
-              };
+                // 修正モード/非修正モードに応じたハイライト色設定
+                const activeColor = isEditMode ? "#32CD32" : "#ffd700";
+                const inactiveColor = isEditMode ? "#B0E57C" : "#fff8b3";
+                const highlightStyle: React.CSSProperties = {
+                  backgroundColor:
+                    isActive || (cursorTime === segment.start_time)
+                      ? activeColor
+                      : inactiveColor,
+                  marginRight: "4px",
+                  padding: "2px 4px",
+                  borderRadius: "4px",
+                  cursor: "pointer",
+                  display: "inline-block",
+                  whiteSpace: "pre",
+                };
 
-              return (
-                <React.Fragment key={index}>
-                  {displayTimestamp && (
-                    <span className="mr-1 text-blue-700">
-                      [{segment.start_time}]
-                    </span>
-                  )}
-                  {isEditMode ? (
-                    <EditableSegment
-                      index={index}
-                      initialText={editedTranscriptSegments[index] ?? segment.text}
-                      onFinalize={handleSegmentFinalize}
-                      onClick={() => handleSegmentClick(segment)}
-                      onDoubleClick={() => handleSegmentDoubleClick(segment)}
-                      style={highlightStyle}
-                    />
-                  ) : (
-                    <span
-                      style={highlightStyle}
-                      onClick={() => handleSegmentClick(segment)}
-                      onDoubleClick={() => handleSegmentDoubleClick(segment)}
-                    >
-                      {segment.text}
-                    </span>
-                  )}
-                </React.Fragment>
-              );
-            })}
+                return (
+                  <React.Fragment key={index}>
+                    {markerElements}
+                    {isEditMode ? (
+                      <EditableSegment
+                        index={index}
+                        initialText={editedTranscriptSegments[index] ?? segment.text}
+                        onFinalize={handleSegmentFinalize}
+                        onClick={() => handleSegmentClick(segment)}
+                        onDoubleClick={() => handleSegmentDoubleClick(segment)}
+                        style={highlightStyle}
+                      />
+                    ) : (
+                      <span
+                        style={highlightStyle}
+                        onClick={() => handleSegmentClick(segment)}
+                        onDoubleClick={() => handleSegmentDoubleClick(segment)}
+                      >
+                        {segment.text}
+                      </span>
+                    )}
+                  </React.Fragment>
+                );
+              });
+            })()}
           </div>
         )}
       </div>
