@@ -11,8 +11,11 @@ export const CACHE_TTL_MS: number = CACHE_TTL * 1000;
 export const NO_IMAGE_MAX_BATCH_SIZE: number = Number(import.meta.env.VITE_GEOCODING_NO_IMAGE_MAX_BATCH_SIZE);
 export const WITH_IMAGE_MAX_BATCH_SIZE: number = Number(import.meta.env.VITE_GEOCODING_WITH_IMAGE_MAX_BATCH_SIZE);
 
-
 // 画像アップロード関連の定数（chatpage.tsx用）
 export const MAX_IMAGES: number = Number(import.meta.env.VITE_MAX_IMAGES) || 5;
 export const MAX_LONG_EDGE: number = Number(import.meta.env.VITE_MAX_LONG_EDGE) || 1568;
 export const MAX_IMAGE_SIZE: number = Number(import.meta.env.VITE_MAX_IMAGE_SIZE) || 5 * 1024 * 1024;
+
+// 音声文字起こし用チャンクサイズ（バイト単位）
+// ※ 例：デフォルト500MB（524288000バイト）。この値は必ず25KB（25600バイト）の倍数になるように（足りなければ切り捨て）
+export const SPEECH_CHUNK_SIZE: number = Number(import.meta.env.VITE_SPEECH_CHUNK_SIZE) || 524288000;

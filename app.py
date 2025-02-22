@@ -558,6 +558,7 @@ def speech2text(decoded_token: dict) -> Response:
 
         # base64デコードしてバイト列に変換
         audio_bytes = base64.b64decode(audio_data)
+        logger.info("受信した音声チャンクサイズ: %d バイト", len(audio_bytes))
 
         # 音声文字起こしを実行（日本語認識の場合）
         responses = transcribe_streaming_v2(audio_bytes, language_codes=["ja-JP"])
