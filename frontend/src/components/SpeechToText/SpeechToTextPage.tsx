@@ -1,5 +1,3 @@
-// frontend/src/components/SpeechToText/SpeechToTextPage.tsx
-
 import React, { useState, useRef, useEffect } from "react";
 import { useToken } from "../../hooks/useToken";
 import * as Config from "../../config";
@@ -57,12 +55,9 @@ const SpeechToTextPage = () => {
   const [description, setDescription] = useState("");
   const [recordingDate, setRecordingDate] = useState("");
 
-  // ---------- 文字起こし結果（サーバー起稿とユーザー修正済みの両方を保持） ----------
-  // サーバーから受信したタイムスタンプ付き文字起こし
+  // ---------- 文字起こし結果関連 ----------
   const [serverTimedTranscript, setServerTimedTranscript] = useState<TimedSegment[]>([]);
-  // サーバー起稿文（結合済みテキスト）
   const [serverTranscript, setServerTranscript] = useState("");
-  // ユーザーが修正した各セグメント（サーバーと同数・初期値はサーバー起稿文を単語分割したものなど）
   const [editedTranscriptSegments, setEditedTranscriptSegments] = useState<string[]>([]);
 
   // ---------- 再生コントロール ----------
@@ -74,9 +69,9 @@ const SpeechToTextPage = () => {
   // ---------- UI制御 ----------
   const [cursorTime, setCursorTime] = useState<string | null>(null);
   const [showTimestamps, setShowTimestamps] = useState(false);
-  const [isSending, setIsSending] = useState(false); // 処理中フラグ
+  const [isSending, setIsSending] = useState(false);
 
-  // ---------- 修正モード（編集モード）状態 ----------
+  // ---------- 修正モード ----------
   const [isEditMode, setIsEditMode] = useState(false);
 
   // ===========================================================
@@ -289,12 +284,11 @@ const SpeechToTextPage = () => {
           if (data.transcription) {
             setServerTranscript(data.transcription.trim());
           }
-          // タイムスタンプ付きの各セグメントを保持
+          // タイムスタンプ付きの各セグメント
           if (data.timed_transcription) {
             setServerTimedTranscript(data.timed_transcription);
             // 編集用の各セグメントが未設定なら初期値としてサーバーの各単語をセット
             if (editedTranscriptSegments.length === 0) {
-              // 例：timed_transcriptionのseg.textをそのまま配列に
               const newSegments = data.timed_transcription.map((seg: TimedSegment) => {
                 const t = seg.text.trim();
                 return t === "" ? " " : t;
@@ -314,7 +308,7 @@ const SpeechToTextPage = () => {
   };
 
   // ===========================================================
-  //  セッションの保存／読込（音声データ・メタ情報・文字起こし結果両方）
+  //  セッションの保存／読込（音声データ・メタ情報・文字起こし結果）
   // ===========================================================
   const handleClearBoth = () => {
     setFileBase64Data("");
@@ -429,10 +423,9 @@ const SpeechToTextPage = () => {
   // ===========================================================
   //  テキストダウンロード & クリップボードコピー
   // ===========================================================
-  // 表示されている文字起こしテキストを、修正モードなら編集後の各セグメント、非修正モードならサーバー起稿文から生成
   const getJoinedText = (): string => {
     if (isEditMode) {
-      // editedTranscriptSegments をスペース区切りで結合（余計な空白はtrim）
+      // editedTranscriptSegments をスペース区切りで結合
       return editedTranscriptSegments.map(seg => seg.trim()).join(" ");
     } else {
       return serverTranscript.trim();
@@ -467,6 +460,7 @@ const SpeechToTextPage = () => {
     window.URL.revokeObjectURL(url);
   };
 
+  // クリップボードコピー時の色反転演出
   const [copied, setCopied] = useState(false);
   const handleCopyToClipboard = async () => {
     const textContent = getJoinedText();
@@ -527,10 +521,38 @@ const SpeechToTextPage = () => {
     setEditedTranscriptSegments(newSegments);
   };
 
+  // ===========================================================
+  //  同じタイムスタンプを連続表示しないための処理
+  // ===========================================================
+  let lastShownTimestamp: string | null = null;
+
   return (
     <div className="p-4 overflow-y-auto bg-dark-primary text-white min-h-screen">
-      <div className="flex justify-between items-center mb-8">
-        <h1 className="text-3xl font-bold">音声文字起こし</h1>
+      <h1 className="text-3xl font-bold mb-4">音声文字起こし</h1>
+
+      {/* セッション保存／読込とクリアボタン（同じ行・右端配置） */}
+      <div className="flex justify-between items-center mb-6">
+        <div className="flex space-x-4">
+          <button
+            onClick={handleSaveSession}
+            className="bg-indigo-500 hover:bg-indigo-600 text-white font-bold py-2 px-4 rounded"
+          >
+            セッション保存
+          </button>
+          <button
+            onClick={openSessionFileDialog}
+            className="bg-indigo-500 hover:bg-indigo-600 text-white font-bold py-2 px-4 rounded"
+          >
+            セッション読込
+          </button>
+          <input
+            type="file"
+            accept=".bin"
+            ref={fileInputSessionRef}
+            style={{ display: "none" }}
+            onChange={handleLoadSession}
+          />
+        </div>
         <button
           onClick={handleClearBoth}
           className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded"
@@ -539,102 +561,34 @@ const SpeechToTextPage = () => {
         </button>
       </div>
 
-      {/* セッション保存／読込 */}
-      <div className="flex space-x-4 mb-6">
-        <button
-          onClick={handleSaveSession}
-          className="bg-indigo-500 hover:bg-indigo-600 text-white font-bold py-2 px-4 rounded"
-        >
-          セッション保存
-        </button>
-        <button
-          onClick={openSessionFileDialog}
-          className="bg-indigo-500 hover:bg-indigo-600 text-white font-bold py-2 px-4 rounded"
-        >
-          セッション読込
-        </button>
-        <input
-          type="file"
-          accept=".bin"
-          ref={fileInputSessionRef}
-          style={{ display: "none" }}
-          onChange={handleLoadSession}
-        />
-      </div>
-
-      {/* 説明・録音日 */}
+      {/* 音声データのアップロード */}
       <div className="mb-6">
-        <div className="mb-4">
-          <label className="block text-sm font-medium text-gray-200">説明</label>
-          <input
-            type="text"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            maxLength={20}
-            placeholder="20文字以内"
-            className="w-full p-2 text-black"
-          />
-        </div>
-        <div className="mb-4">
-          <label className="block text-sm font-medium text-gray-200">録音日</label>
-          <input
-            type="text"
-            value={recordingDate}
-            onChange={(e) => setRecordingDate(e.target.value)}
-            placeholder="YYYY/mm/dd"
-            className="w-full p-2 text-black"
-          />
-        </div>
-      </div>
-
-      {/* 修正モード切替用チェックボックス */}
-      <div className="mb-4">
-        <label className="flex items-center">
-          <input
-            type="checkbox"
-            checked={isEditMode}
-            onChange={(e) => setIsEditMode(e.target.checked)}
-            className="mr-2"
-          />
-          修正モード
-        </label>
-      </div>
-
-      {/* アップロード */}
-      <div className="mb-6">
-        <h2 className="text-xl font-bold mb-2">音声データのアップロード方法</h2>
-        <div className="mb-4">
-          <label className="block text-sm font-medium text-gray-200 mb-2">
-            アップロード方法
+        <h2 className="text-xl font-bold mb-2">音声データのアップロード</h2>
+        <div>
+          <label className="mr-4 text-gray-200">
+            <input
+              type="radio"
+              name="uploadMode"
+              value="file"
+              checked={uploadMode === "file"}
+              onChange={() => {
+                setUploadMode("file");
+                handleClearBoth();
+              }}
+            /> ファイル選択
           </label>
-          <div>
-            <label className="mr-4 text-gray-200">
-              <input
-                type="radio"
-                name="uploadMode"
-                value="file"
-                checked={uploadMode === "file"}
-                onChange={() => {
-                  setUploadMode("file");
-                  handleClearBoth();
-                }}
-              />{" "}
-              ファイル選択
-            </label>
-            <label className="text-gray-200">
-              <input
-                type="radio"
-                name="uploadMode"
-                value="base64"
-                checked={uploadMode === "base64"}
-                onChange={() => {
-                  setUploadMode("base64");
-                  handleClearBoth();
-                }}
-              />{" "}
-              Base64貼り付け
-            </label>
-          </div>
+          <label className="text-gray-200">
+            <input
+              type="radio"
+              name="uploadMode"
+              value="base64"
+              checked={uploadMode === "base64"}
+              onChange={() => {
+                setUploadMode("base64");
+                handleClearBoth();
+              }}
+            /> Base64貼り付け
+          </label>
         </div>
 
         {uploadMode === "file" ? (
@@ -689,6 +643,38 @@ const SpeechToTextPage = () => {
         )}
       </div>
 
+      {/* サイドバー：説明・録音日と送信ボタン */}
+      <div className="border border-gray-400 rounded p-4 mb-6 flex flex-col justify-end" style={{ minHeight: "150px" }}>
+        <div className="mb-4">
+          <label className="block text-sm font-medium text-gray-200">説明</label>
+          <input
+            type="text"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            maxLength={20}
+            placeholder="20文字以内"
+            className="w-full p-2 text-black"
+          />
+        </div>
+        <div className="mb-4">
+          <label className="block text-sm font-medium text-gray-200">録音日</label>
+          <input
+            type="text"
+            value={recordingDate}
+            onChange={(e) => setRecordingDate(e.target.value)}
+            placeholder="YYYY/mm/dd"
+            className="w-full p-2 text-black"
+          />
+        </div>
+        <button
+          onClick={handleSend}
+          disabled={isSending}
+          className="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded"
+        >
+          {isSending ? "処理中..." : "送信"}
+        </button>
+      </div>
+
       {/* 再生コントロール */}
       {audioInfo && (
         <div className="mb-6">
@@ -715,7 +701,9 @@ const SpeechToTextPage = () => {
               <option value={1.5}>1.5x</option>
               <option value={2}>2x</option>
             </select>
-            <label className="ml-4">
+
+            {/* タイムスタンプ表示ボタン */}
+            <label className="ml-4 text-gray-200">
               <input
                 type="checkbox"
                 checked={showTimestamps}
@@ -724,7 +712,6 @@ const SpeechToTextPage = () => {
               タイムスタンプ表示
             </label>
           </div>
-
           <div className="flex items-center space-x-2">
             <span className="w-16 text-right">
               {secondsToTimeString(sliderValue)}
@@ -751,18 +738,64 @@ const SpeechToTextPage = () => {
         <audio ref={audioRef} src={audioData} onTimeUpdate={handleTimeUpdate} />
       )}
 
-      {/* 送信ボタン */}
-      <button
-        onClick={handleSend}
-        disabled={isSending}
-        className="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded"
-      >
-        {isSending ? "処理中..." : "送信"}
-      </button>
-
-      {/* 文字起こし結果表示 */}
+      {/* 文字起こし結果ヘッダー */}
       <div className="mt-6">
-        <h2 className="text-xl font-bold mb-2">文字起こし結果</h2>
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center">
+            <h2 className="text-xl font-bold mr-4">文字起こし結果</h2>
+            <label className="flex items-center text-gray-200">
+              <input
+                type="checkbox"
+                checked={isEditMode}
+                onChange={(e) => setIsEditMode(e.target.checked)}
+                className="mr-2"
+              />
+              修正モード
+            </label>
+          </div>
+
+          {/* ダウンロード & コピー & エンコーディング選択 */}
+          <div className="flex items-center space-x-4">
+            <button
+              onClick={handleDownload}
+              className="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded"
+            >
+              ダウンロード
+            </button>
+            <button
+              onClick={handleCopyToClipboard}
+              className={`font-bold py-2 px-4 rounded transition-colors duration-300 ${
+                copied
+                  ? "bg-white text-black"
+                  : "bg-gray-500 hover:bg-gray-600 text-white"
+              }`}
+            >
+              クリップボードにコピー
+            </button>
+            <div className="flex items-center space-x-2">
+              <label className="text-gray-200">
+                <input
+                  type="radio"
+                  name="encoding"
+                  value="utf8"
+                  checked={selectedEncoding === "utf8"}
+                  onChange={() => setSelectedEncoding("utf8")}
+                />{" "}
+                UTF-8
+              </label>
+              <label className="text-gray-200">
+                <input
+                  type="radio"
+                  name="encoding"
+                  value="shift-jis"
+                  checked={selectedEncoding === "shift-jis"}
+                  onChange={() => setSelectedEncoding("shift-jis")}
+                />{" "}
+                Shift-JIS
+              </label>
+            </div>
+          </div>
+        </div>
 
         {serverTimedTranscript.length > 0 && (
           <div
@@ -770,49 +803,47 @@ const SpeechToTextPage = () => {
             style={{ lineHeight: "1.8em", maxHeight: "300px", overflowY: "auto" }}
           >
             {serverTimedTranscript.map((segment, index) => {
-              // タイムスタンプの数値化
               const segmentStartSec = timeStringToSeconds(segment.start_time);
               const segmentEndSec = timeStringToSeconds(segment.end_time);
-              // 現在時間がこのセグメントの範囲内かどうか
               const isActive =
                 currentTime >= segmentStartSec && currentTime < segmentEndSec;
 
-              // タイムスタンプ表示用
-              let showTimestamp = false;
+              // タイムスタンプを出すかどうか
+              let displayTimestamp = false;
               if (showTimestamps && segmentStartSec % 60 === 0) {
-                showTimestamp = true;
+                // 前回表示したタイムスタンプと同じでなければ表示
+                if (segment.start_time !== lastShownTimestamp) {
+                  displayTimestamp = true;
+                  lastShownTimestamp = segment.start_time;
+                }
               }
 
               const highlightStyle: React.CSSProperties = {
                 backgroundColor:
                   isActive || (cursorTime === segment.start_time)
-                    ? "#ffd700" // アクティブ時の色
-                    : "#fff8b3", // 通常時の薄黄色
+                    ? "#ffd700"
+                    : "#fff8b3",
                 marginRight: "4px",
                 padding: "2px 4px",
                 borderRadius: "4px",
                 cursor: "pointer",
-                // contentEditable時の見た目を整える
                 display: "inline-block",
-                whiteSpace: "pre", // 改行をそのまま扱う（余計な崩れ防止）
+                whiteSpace: "pre",
               };
 
-              // 表示テキスト（修正モードなら editedTranscriptSegments、非修正モードなら segment.text）
               const displayText = isEditMode
                 ? editedTranscriptSegments[index] || " "
                 : segment.text;
 
               return (
                 <React.Fragment key={index}>
-                  {/* タイムスタンプ表示（1分おきなどに表示したい場合） */}
-                  {showTimestamp && (
-                    <span className="mr-1 text-blue-700">[{segment.start_time}]</span>
+                  {displayTimestamp && (
+                    <span className="mr-1 text-blue-700">
+                      [{segment.start_time}]
+                    </span>
                   )}
-
-                  {/* contentEditableな <span> */}
                   <span
                     style={highlightStyle}
-                    // 修正モードのみ編集可
                     contentEditable={isEditMode}
                     suppressContentEditableWarning={true}
                     onInput={(e) => handleSegmentInput(e, index)}
@@ -827,50 +858,6 @@ const SpeechToTextPage = () => {
           </div>
         )}
       </div>
-
-      {/* ダウンロード & コピー & エンコーディング選択 */}
-      {serverTimedTranscript.length > 0 && (
-        <div className="mt-6 flex items-center space-x-4">
-          <button
-            onClick={handleDownload}
-            className="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded"
-          >
-            ダウンロード
-          </button>
-
-          <button
-            onClick={handleCopyToClipboard}
-            className={`bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded ${
-              copied ? "animate-bounce" : ""
-            }`}
-          >
-            クリップボードにコピー
-          </button>
-
-          <div className="flex items-center space-x-2">
-            <label className="text-gray-200">
-              <input
-                type="radio"
-                name="encoding"
-                value="utf8"
-                checked={selectedEncoding === "utf8"}
-                onChange={() => setSelectedEncoding("utf8")}
-              />{" "}
-              UTF-8
-            </label>
-            <label className="text-gray-200">
-              <input
-                type="radio"
-                name="encoding"
-                value="shift-jis"
-                checked={selectedEncoding === "shift-jis"}
-                onChange={() => setSelectedEncoding("shift-jis")}
-              />{" "}
-              Shift-JIS
-            </label>
-          </div>
-        </div>
-      )}
     </div>
   );
 };
