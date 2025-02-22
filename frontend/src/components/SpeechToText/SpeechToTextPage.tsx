@@ -789,7 +789,7 @@ const SpeechToTextPage = () => {
             type="text"
             value={recordingDate}
             onChange={(e) => setRecordingDate(e.target.value)}
-            placeholder="YYYY/mm/dd"
+            placeholder="YYYY/MM/dd"
             className="w-full p-2 text-black"
           />
         </div>
