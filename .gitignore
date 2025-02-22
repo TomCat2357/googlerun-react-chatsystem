@@ -1,9 +1,13 @@
 *test*
+*.git*
 .env
 .env.local
 .env.*
 *.log
-!.env.example
+!example
+node_modules/
+public/
+*.log
 *.pyc
 *firebase*.json
 *service_account*.json

@@ -2,7 +2,7 @@ import os
 import sys
 import argparse
 
-def print_code(target_path, exts=None, base_dir=None, recursive=False):
+def print_code(target_path, exts=None, base_dir=None, recursive=False, omit=None):
     """
     target_path: 処理対象のファイルまたはディレクトリのパス
     exts: 対象とする拡張子のリスト（例: ['.py', '.txt']）。Noneの場合は全ファイル対象。
@@ -10,7 +10,12 @@ def print_code(target_path, exts=None, base_dir=None, recursive=False):
               指定がない場合は、最初に渡された target_path がファイルならそのディレクトリ、
               ディレクトリならそのディレクトリ自身が基準になります。
     recursive: Trueの場合、再帰的にサブディレクトリも探索します。
+    omit: 排除するファイル名やフォルダ名のリスト。指定がある場合はこれらの名前と一致するものを処理対象から除外します。
     """
+    # 排除対象のチェック（ファイル/ディレクトリ名のみ比較）
+    if omit and os.path.basename(target_path) in omit:
+        return
+
     if base_dir is None:
         base_dir = os.path.dirname(target_path) if os.path.isfile(target_path) else target_path
 
@@ -19,8 +24,6 @@ def print_code(target_path, exts=None, base_dir=None, recursive=False):
         if exts:
             _, file_ext = os.path.splitext(target_path)
             if file_ext.lower() not in exts:
-                # ルートで指定されたファイルの場合はメッセージを出して終了
-                #print(f"指定されたファイルの拡張子 '{file_ext}' はフィルタ対象外です。")
                 return
         # 基準ディレクトリからの相対パスを表示
         rel_path = os.path.relpath(target_path, base_dir)
@@ -36,7 +39,7 @@ def print_code(target_path, exts=None, base_dir=None, recursive=False):
             content = f"[読み込みエラー: {e}]"
         print(content)
         print()  # ファイル間の区切り用の空行
-        print(f"### End of file: {rel_path} ###") # 区切り線を追加
+        print(f"### End of file: {rel_path} ###")
         print()  # ファイル間の区切り用の空行
         
     elif os.path.isdir(target_path):
@@ -44,13 +47,13 @@ def print_code(target_path, exts=None, base_dir=None, recursive=False):
             # 再帰的に全てのサブディレクトリを探索
             for entry in sorted(os.listdir(target_path)):
                 entry_path = os.path.join(target_path, entry)
-                print_code(entry_path, exts, base_dir, recursive)
+                print_code(entry_path, exts, base_dir, recursive, omit)
         else:
             # 直下のファイルのみ処理（サブディレクトリは探索しない）
             for entry in sorted(os.listdir(target_path)):
                 entry_path = os.path.join(target_path, entry)
                 if os.path.isfile(entry_path):
-                    print_code(entry_path, exts, base_dir, recursive)
+                    print_code(entry_path, exts, base_dir, recursive, omit)
     else:
         print(f"エラー: '{target_path}' はファイルでもディレクトリでもありません。")
 
@@ -72,6 +75,13 @@ def main():
         action="store_true",
         help="このオプションを指定すると、ディレクトリ内を再帰的に探索します（デフォルトは直下のみ）。"
     )
+    parser.add_argument(
+        "-o",
+        "--omit",
+        nargs="*",
+        default=None,
+        help="排除するファイル名やフォルダ名のリスト。指定された名前と一致するファイル・フォルダは処理対象から除外されます。"
+    )
     args = parser.parse_args()
 
     # 拡張子フィルタ（小文字に統一）
@@ -86,7 +96,7 @@ def main():
 
         # 複数のパスが指定された場合、最初のパスのディレクトリをbase_dirとする
         base_dir = os.path.dirname(os.path.abspath(args.path[0])) if os.path.isfile(os.path.abspath(args.path[0])) else os.path.abspath(args.path[0])
-        print_code(target, exts, base_dir, recursive=args.recursive)
+        print_code(target, exts, base_dir, recursive=args.recursive, omit=args.omit)
 
 if __name__ == "__main__":
     main()
