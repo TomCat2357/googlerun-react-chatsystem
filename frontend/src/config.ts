@@ -19,3 +19,7 @@ export const MAX_IMAGE_SIZE: number = Number(import.meta.env.VITE_MAX_IMAGE_SIZE
 // 音声文字起こし用チャンクサイズ（バイト単位）
 // ※ 例：デフォルト500MB（524288000バイト）。この値は必ず25KB（25600バイト）の倍数になるように（足りなければ切り捨て）
 export const SPEECH_CHUNK_SIZE: number = Number(import.meta.env.VITE_SPEECH_CHUNK_SIZE) || 524288000;
+
+// 音声文字起こし用制限時間（秒） 基本３時間
+export const SPEECH_MAX_SECONDS: number = Number(import.meta.env.VITE_SPEECH_MAX_SECONDS) || 10800;
+

@@ -316,6 +316,12 @@ const SpeechToTextPage = () => {
       alert("送信するデータがありません");
       return;
     }
+    // ★ 追加: 音声ファイルの再生時間がSPEECH_MAX_SECONDSを超えている場合は送信を拒否
+    if (audioInfo && audioInfo.duration > Config.SPEECH_MAX_SECONDS) {
+      alert(`音声ファイルが長すぎます。${Math.floor(Config.SPEECH_MAX_SECONDS / 60)}分以内のファイルのみ送信可能です。分割してからアップロードしてください。`);
+      return;
+    }
+
     setIsSending(true);
 
     let transcriptionAccumulator = "";
@@ -1017,3 +1023,4 @@ const SpeechToTextPage = () => {
 };
 
 export default SpeechToTextPage;
+
