@@ -1,3 +1,5 @@
+// ### frontend/src/components/SpeechToText/SpeechToTextPage.tsx ###
+
 import React, { useState, useRef, useEffect } from "react";
 import { useToken } from "../../hooks/useToken";
 import * as Config from "../../config";
@@ -37,7 +39,7 @@ const secondsToTimeString = (seconds: number): string => {
 };
 
 /**
- * 編集モード時のセグメントコンポーネント  
+ * 編集モード時のセグメントコンポーネント
  * 初回マウント時に初期値を設定し、その後はユーザーの編集状態（DOM側）を維持する。
  */
 interface EditableSegmentProps {
@@ -551,10 +553,14 @@ const SpeechToTextPage = () => {
   // ===========================================================
   //  テキストダウンロード & クリップボードコピー
   // ===========================================================
+  // ★ 修正箇所: セグメント間のスペースをなくすため join("") に変更
   const getJoinedText = (): string => {
     if (isEditMode) {
-      return editedTranscriptSegments.map(seg => seg.trim()).join(" ");
+      // 空白をなくしたいので、セグメント同士を連結するときに "" を使用
+      return editedTranscriptSegments.map(seg => seg.trim()).join(""); // ★ 修正
     } else {
+      // 元の serverTranscript は好きなように整形してOK。例: 全部の空白を削除する場合は:
+      // return serverTranscript.replace(/\s+/g, "");
       return serverTranscript.trim();
     }
   };
