@@ -1,19 +1,29 @@
 import os
 import sys
 import argparse
+import fnmatch
+
+def should_omit(path, omit_patterns):
+    """
+    path: 対象のファイルまたはディレクトリのパス
+    omit_patterns: gitignore風のパターンのリスト。例: ['*.py', 'folder/']
+    
+    Returns True if the path should be omitted.
+    """
+    base_name = os.path.basename(path)
+    for pattern in omit_patterns:
+        # パターンが末尾に '/' を含む場合、ディレクトリ専用のルールとみなす
+        if pattern.endswith('/'):
+            if os.path.isdir(path) and fnmatch.fnmatch(base_name, pattern.rstrip('/')):
+                return True
+        else:
+            if fnmatch.fnmatch(base_name, pattern):
+                return True
+    return False
 
 def print_code(target_path, exts=None, base_dir=None, recursive=False, omit=None):
-    """
-    target_path: 処理対象のファイルまたはディレクトリのパス
-    exts: 対象とする拡張子のリスト（例: ['.py', '.txt']）。Noneの場合は全ファイル対象。
-    base_dir: ヘッダーで表示する相対パスの基準となるディレクトリ。
-              指定がない場合は、最初に渡された target_path がファイルならそのディレクトリ、
-              ディレクトリならそのディレクトリ自身が基準になります。
-    recursive: Trueの場合、再帰的にサブディレクトリも探索します。
-    omit: 排除するファイル名やフォルダ名のリスト。指定がある場合はこれらの名前と一致するものを処理対象から除外します。
-    """
-    # 排除対象のチェック（ファイル/ディレクトリ名のみ比較）
-    if omit and os.path.basename(target_path) in omit:
+    # Gitignoreルールに則った排除チェック
+    if omit and should_omit(target_path, omit):
         return
 
     if base_dir is None:
@@ -80,7 +90,7 @@ def main():
         "--omit",
         nargs="*",
         default=None,
-        help="排除するファイル名やフォルダ名のリスト。指定された名前と一致するファイル・フォルダは処理対象から除外されます。"
+        help="排除するファイル名やフォルダ名のリスト。gitignore風のパターン（例: *.py, folder/）で指定します。"
     )
     args = parser.parse_args()
 
@@ -94,7 +104,7 @@ def main():
             print(f"エラー: 指定されたパス '{target}' は存在しません。")
             continue
 
-        # 複数のパスが指定された場合、最初のパスのディレクトリをbase_dirとする
+        # 複数のパスが指定された場合、カレントディレクトリをbase_dirとする
         base_dir = os.getcwd()
         print_code(target, exts, base_dir, recursive=args.recursive, omit=args.omit)
 
