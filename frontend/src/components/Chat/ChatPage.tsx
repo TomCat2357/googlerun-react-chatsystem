@@ -201,7 +201,7 @@ const ChatPage: React.FC = () => {
         const histories = (e.target as IDBRequest).result as ChatHistory[];
         const sortedHistories = histories
           .sort(
-            (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
+            (a, b) => new Date(b.lastPromptDate).getTime() - new Date(a.lastPromptDate).getTime()
           )
           .slice(0, 30);
         setChatHistories(sortedHistories);

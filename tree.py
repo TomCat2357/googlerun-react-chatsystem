@@ -36,7 +36,7 @@ def parse_args():
         default=None
     )
     args = parser.parse_args()
-    return args.project_dir, args.exts, args.exclude, args.ignore
+    return args.project_dir, args.exts, args.omit, args.ignore
 
 def load_ignore_spec(ignore_file):
     if not pathspec:

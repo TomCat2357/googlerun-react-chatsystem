@@ -1,35 +1,35 @@
 // src/utils/imageCache.ts
 interface ImageCacheKey {
-    type: 'satellite' | 'streetview';
-    lat: number;
-    lng: number;
-    zoom?: number;
-    heading?: number;
-    pitch?: number;
-    fov?: number;
+  type: 'satellite' | 'streetview';
+  lat: number;
+  lng: number;
+  zoom?: number;
+  heading?: number | null;  // nullを許容するように修正
+  pitch?: number;
+  fov?: number;
+}
+
+class ImageCache {
+  private cache: Map<string, string> = new Map();
+
+  private generateKey(params: ImageCacheKey): string {
+    const keyObj = { ...params };
+    return JSON.stringify(keyObj);
   }
-  
-  class ImageCache {
-    private cache: Map<string, string> = new Map();
-  
-    private generateKey(params: ImageCacheKey): string {
-      const keyObj = { ...params };
-      return JSON.stringify(keyObj);
-    }
-  
-    set(params: ImageCacheKey, imageData: string) {
-      const key = this.generateKey(params);
-      this.cache.set(key, imageData);
-    }
-  
-    get(params: ImageCacheKey): string | undefined {
-      const key = this.generateKey(params);
-      return this.cache.get(key);
-    }
-  
-    clear() {
-      this.cache.clear();
-    }
+
+  set(params: ImageCacheKey, imageData: string) {
+    const key = this.generateKey(params);
+    this.cache.set(key, imageData);
   }
-  
-  export const imageCache = new ImageCache();
+
+  get(params: ImageCacheKey): string | undefined {
+    const key = this.generateKey(params);
+    return this.cache.get(key);
+  }
+
+  clear() {
+    this.cache.clear();
+  }
+}
+
+export const imageCache = new ImageCache();
