@@ -1,6 +1,4 @@
-// frontend/src/index.tsx
-
-import { StrictMode } from "react";
+import React, { StrictMode, Suspense } from "react";
 import { createRoot } from "react-dom/client";
 import {
   BrowserRouter as Router,
@@ -12,11 +10,20 @@ import { AuthProvider } from "./contexts/AuthContext";
 import ProtectedRoute from "./routing/ProtectedRoute";
 import LoginPage from "./components/Login/LoginPage";
 import MainPage from "./components/Main/MainPage";
-import ChatPage from "./components/Chat/ChatPage";
 import Header from "./components/Header/Header";
 import "./index.css";
-import GeocodingPage from "./components/Geocoding/GeocodingPage";
-import SpeechToTextPage from "./components/SpeechToText/SpeechToTextPage";
+
+// 遅延ロードするコンポーネント
+const ChatPage = React.lazy(() => import("./components/Chat/ChatPage"));
+const GeocodingPage = React.lazy(() => import("./components/Geocoding/GeocodingPage"));
+const SpeechToTextPage = React.lazy(() => import("./components/SpeechToText/SpeechToTextPage"));
+
+// ローディング表示用コンポーネント
+const LoadingFallback = () => (
+  <div className="flex items-center justify-center min-h-screen">
+    <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-500"></div>
+  </div>
+);
 
 function App() {
   return (
@@ -24,28 +31,27 @@ function App() {
       <AuthProvider>
         <div className="min-h-screen bg-dark-primary">
           <Routes>
-            {/* ログインページ - ヘッダーなし */}
             <Route path="/" element={<LoginPage />} />
-
-            {/* 認証が必要なルート - ヘッダーあり */}
+            
             <Route
               path="/app/*"
               element={
                 <ProtectedRoute>
                   <>
                     <Header />
-                    <Routes>
-                      <Route path="main" element={<MainPage />} />
-                      <Route path="chat" element={<ChatPage />} />
-                      <Route path="geocoding" element={<GeocodingPage />} />
-                      <Route path="speechtotext" element={<SpeechToTextPage />} />
-                    </Routes>
+                    <Suspense fallback={<LoadingFallback />}>
+                      <Routes>
+                        <Route path="main" element={<MainPage />} />
+                        <Route path="chat" element={<ChatPage />} />
+                        <Route path="geocoding" element={<GeocodingPage />} />
+                        <Route path="speechtotext" element={<SpeechToTextPage />} />
+                      </Routes>
+                    </Suspense>
                   </>
                 </ProtectedRoute>
               }
             />
 
-            {/* 無効なパスのリダイレクト */}
             <Route path="*" element={<Navigate to="/app/main" replace />} />
           </Routes>
         </div>

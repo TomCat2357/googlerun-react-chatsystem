@@ -5,7 +5,8 @@
 .env.*
 *.log
 !example
-
+node_modules
+public
 *.log
 *.pyc
 *firebase*.json
@@ -13,3 +14,4 @@
 FolderStructure.txt
 *.wav
 *.mp3
+node_modules
