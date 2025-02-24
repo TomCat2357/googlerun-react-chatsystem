@@ -21,6 +21,13 @@ MAX_IMAGES = int(os.getenv("MAX_IMAGES"))
 MAX_LONG_EDGE = int(os.getenv("MAX_LONG_EDGE"))
 MAX_IMAGE_SIZE = int(os.getenv("MAX_IMAGE_SIZE"))  # デフォルト5MB
 
+# 追加：その他の設定値
+GOOGLE_MAPS_API_CACHE_TTL = int(os.getenv("GOOGLE_MAPS_API_CACHE_TTL"))
+GEOCODING_NO_IMAGE_MAX_BATCH_SIZE = int(os.getenv("GEOCODING_NO_IMAGE_MAX_BATCH_SIZE"))
+GEOCODING_WITH_IMAGE_MAX_BATCH_SIZE = int(os.getenv("GEOCODING_WITH_IMAGE_MAX_BATCH_SIZE"))
+SPEECH_CHUNK_SIZE = int(os.getenv("SPEECH_CHUNK_SIZE"))
+SPEECH_MAX_SECONDS = int(os.getenv("SPEECH_MAX_SECONDS"))
+
 # Firebase Admin SDKの初期化
 firebase_admin.initialize_app(
     credentials.Certificate(os.getenv("GOOGLE_APPLICATION_CREDENTIALS"))
@@ -43,6 +50,8 @@ CORS(
     allow_headers=["Content-Type", "Authorization", "X-API-Key"],
     methods=["GET", "POST", "OPTIONS"],
 )
+
+
 
 
 def process_uploaded_image(image_data: str) -> str:
@@ -150,6 +159,31 @@ def require_auth(function: Callable) -> Callable:
 
 
 # ======= 各種エンドポイント =======
+
+@app.route("/backend/config", methods=["GET"])
+@require_auth
+def get_config(decoded_token: Dict) -> Response:
+    try:
+        config_values = {
+            "MAX_IMAGES": os.getenv("MAX_IMAGES"),
+            "MAX_LONG_EDGE": os.getenv("MAX_LONG_EDGE"),
+            "MAX_IMAGE_SIZE": os.getenv("MAX_IMAGE_SIZE"),
+            "GOOGLE_MAPS_API_CACHE_TTL": os.getenv("GOOGLE_MAPS_API_CACHE_TTL"),
+            "GEOCODING_NO_IMAGE_MAX_BATCH_SIZE": os.getenv("GEOCODING_NO_IMAGE_MAX_BATCH_SIZE"),
+            "GEOCODING_WITH_IMAGE_MAX_BATCH_SIZE": os.getenv("GEOCODING_WITH_IMAGE_MAX_BATCH_SIZE"),
+            "SPEECH_CHUNK_SIZE": os.getenv("SPEECH_CHUNK_SIZE"),
+            "SPEECH_MAX_SECONDS": os.getenv("SPEECH_MAX_SECONDS"),
+            "MODELS": os.getenv("MODELS", "")
+        }
+        response: Response = make_response(jsonify(config_values))
+        response.status_code = 200
+        return response
+    except Exception as e:
+        logger.error("Config取得エラー: %s", str(e), exc_info=True)
+        error_response: Response = make_response(jsonify({"error": str(e)}))
+        error_response.status_code = 500
+        return error_response
+
 
 @app.route("/backend/models", methods=["GET"])
 @require_auth

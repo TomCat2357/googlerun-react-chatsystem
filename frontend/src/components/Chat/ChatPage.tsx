@@ -1,4 +1,4 @@
-// src/pages/chatpage.tsx
+// frontend/src/components/Chat/ChatPage.tsx
 import React, { useState, useRef, useEffect, ChangeEvent } from "react";
 import { Message, ChatRequest, ChatHistory } from "../../types/apiTypes";
 import { useToken } from "../../hooks/useToken";
@@ -18,9 +18,7 @@ const ChatPage: React.FC = () => {
   const [chatHistories, setChatHistories] = useState<ChatHistory[]>([]);
   const messageContainerRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
-  const [selectedImagesBase64, setSelectedImagesBase64] = useState<string[]>(
-    []
-  );
+  const [selectedImagesBase64, setSelectedImagesBase64] = useState<string[]>([]);
   const [errorMessage, setErrorMessage] = useState<string>("");
   const token = useToken();
   const API_BASE_URL: string = Config.API_BASE_URL;
@@ -68,42 +66,25 @@ const ChatPage: React.FC = () => {
   }, [messages]);
 
   // ==========================
-  //  利用可能なAIモデル一覧の取得
+  //  利用可能なAIモデル一覧の取得（サーバー設定から取得）
   // ==========================
   useEffect(() => {
-    const fetchModels = async () => {
-      if (!token) return;
-      try {
-        const response = await fetch(`${API_BASE_URL}/backend/models`, {
-          method: "GET",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-        });
-
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
-
-        const data = await response.json();
-        if (Array.isArray(data.models)) {
-          setModels(data.models);
-          setSelectedModel(data.models[0]);
-        }
-      } catch (error) {
-        console.error("モデル一覧取得エラー:", error);
-      }
-    };
-    fetchModels();
-  }, [token]);
+    const config = Config.getServerConfig();
+    if (config.MODELS) {
+      const modelsArr = config.MODELS.split(",")
+        .map(m => m.trim())
+        .filter(m => m);
+      setModels(modelsArr);
+      setSelectedModel(modelsArr[0]);
+    }
+  }, []);
 
   // ==========================
   //  画像アップロード関連定数
   // ==========================
-  const MAX_IMAGES = Config.MAX_IMAGES;
-  const MAX_LONG_EDGE = Config.MAX_LONG_EDGE;
-  const MAX_IMAGE_SIZE = Config.MAX_IMAGE_SIZE;
+  const MAX_IMAGES = Config.getServerConfig().MAX_IMAGES || 5;
+  const MAX_LONG_EDGE = Config.getServerConfig().MAX_LONG_EDGE || 1568;
+  const MAX_IMAGE_SIZE = Config.getServerConfig().MAX_IMAGE_SIZE || 5242880;
 
   /**
    * processImageFile
