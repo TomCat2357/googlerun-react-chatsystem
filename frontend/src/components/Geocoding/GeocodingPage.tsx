@@ -74,7 +74,7 @@ const GeocodingPage = () => {
   const [streetViewFov, setStreetViewFov] = useState(90);
   const [isLoadingImages, setIsLoadingImages] = useState(false);
   // 追加: 「方角を指定しない」状態
-  const [streetViewNoHeading, setStreetViewNoHeading] = useState(false);
+  const [streetViewNoHeading, setStreetViewNoHeading] = useState(true);
 
   const token = useToken();
   const API_BASE_URL: string = Config.API_BASE_URL;
