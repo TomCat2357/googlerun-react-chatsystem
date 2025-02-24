@@ -5,6 +5,7 @@ import { useToken } from "../../hooks/useToken";
 import * as Config from "../../config";
 import Encoding from "encoding-japanese";
 import { sendChunkedRequest } from "../../utils/ChunkedUpload";
+import TranscriptDisplay from "./TranscriptDisplay"; // 新規コンポーネントをインポート
 
 interface AudioInfo {
   duration: number;
@@ -57,7 +58,7 @@ const EditableSegment: React.FC<EditableSegmentProps> = ({
     if (spanRef.current) {
       spanRef.current.innerText = initialText;
     }
-  }, []);
+  }, [initialText]);
 
   return (
     <span
@@ -759,63 +760,19 @@ const SpeechToTextPage = () => {
             </div>
           </div>
         </div>
+        {/* ここはTranscriptDisplayコンポーネントに切り出しました */}
         {serverTimedTranscript.length > 0 && (
-          <div className="p-2 bg-white text-black rounded" style={{ lineHeight: "1.8em", maxHeight: "300px", overflowY: "auto" }}>
-            {(() => {
-              const thresholdMinutes = 1;
-              let nextThresholdSec = thresholdMinutes * 60;
-              return serverTimedTranscript.map((segment, index) => {
-                const segmentStartSec = timeStringToSeconds(segment.start_time);
-                const segmentEndSec = timeStringToSeconds(segment.end_time);
-                const isActive = currentTime >= segmentStartSec && currentTime < segmentEndSec;
-                const markerElements = [];
-                if (showTimestamps) {
-                  while (segmentStartSec >= nextThresholdSec) {
-                    markerElements.push(
-                      <span key={`marker-${index}-${nextThresholdSec}`} className="mr-1 text-blue-700">
-                        {`{${secondsToTimeString(nextThresholdSec)}}`}
-                      </span>
-                    );
-                    nextThresholdSec += thresholdMinutes * 60;
-                  }
-                }
-                const activeColor = isEditMode ? "#32CD32" : "#ffd700";
-                const inactiveColor = isEditMode ? "#B0E57C" : "#fff8b3";
-                const highlightStyle: React.CSSProperties = {
-                  backgroundColor: isActive || (cursorTime === segment.start_time) ? activeColor : inactiveColor,
-                  marginRight: "4px",
-                  padding: "2px 4px",
-                  borderRadius: "4px",
-                  cursor: "pointer",
-                  display: "inline-block",
-                  whiteSpace: "pre",
-                };
-                return (
-                  <React.Fragment key={index}>
-                    {markerElements}
-                    {isEditMode ? (
-                      <EditableSegment
-                        index={index}
-                        initialText={editedTranscriptSegments[index] ?? segment.text}
-                        onFinalize={handleSegmentFinalize}
-                        onClick={() => handleSegmentClick(segment)}
-                        onDoubleClick={() => handleSegmentDoubleClick(segment)}
-                        style={highlightStyle}
-                      />
-                    ) : (
-                      <span
-                        style={highlightStyle}
-                        onClick={() => handleSegmentClick(segment)}
-                        onDoubleClick={() => handleSegmentDoubleClick(segment)}
-                      >
-                        {segment.text}
-                      </span>
-                    )}
-                  </React.Fragment>
-                );
-              });
-            })()}
-          </div>
+          <TranscriptDisplay 
+            segments={serverTimedTranscript}
+            isEditMode={isEditMode}
+            editedTranscriptSegments={editedTranscriptSegments}
+            onSegmentFinalize={handleSegmentFinalize}
+            onSegmentClick={handleSegmentClick}
+            onSegmentDoubleClick={handleSegmentDoubleClick}
+            currentTime={currentTime}
+            cursorTime={cursorTime}
+            showTimestamps={showTimestamps}
+          />
         )}
       </div>
     </div>
