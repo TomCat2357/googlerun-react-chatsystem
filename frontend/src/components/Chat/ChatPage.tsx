@@ -87,7 +87,8 @@ const ChatPage: React.FC = () => {
   const MAX_LONG_EDGE = Config.getServerConfig().MAX_LONG_EDGE || 1568;
   const MAX_IMAGE_SIZE = Config.getServerConfig().MAX_IMAGE_SIZE || 5242880;
   // 送信時のプロンプトサイズ上限（バイト数）
-  const MAX_PROMPT_SIZE = parseInt(Config.getServerConfig().MAX_PROMPT_SIZE || "500000", 10);
+  const MAX_PAYLOAD_SIZE = parseInt(Config.getServerConfig().MAX_PAYLOAD_SIZE || "500000", 10);
+  
 
   /**
    * processImageFile
@@ -366,11 +367,18 @@ const ChatPage: React.FC = () => {
       const encoder = new TextEncoder();
       const chatRequestBytes = encoder.encode(jsonStr);
 
+      // ① MAX_PAYLOAD_SIZEのログ出力
+      console.log(`MAX_PAYLOAD_SIZE: ${MAX_PAYLOAD_SIZE} bytes`);
+      // ② 送信前のプロンプトデータサイズのログ出力
+      console.log(`送信前のプロンプトデータサイズ: ${chatRequestBytes.length} bytes`);
+
       let response: Response;
-      if (chatRequestBytes.length > MAX_PROMPT_SIZE) {
-        console.log(`プロンプトサイズ ${chatRequestBytes.length} bytes は上限 ${MAX_PROMPT_SIZE} bytes を超えているため、チャンク送信します`);
-        response = await sendChunkedRequest(chatRequest, token, API_BASE_URL);
+      if (chatRequestBytes.length > MAX_PAYLOAD_SIZE) {
+        // ③ チャンク分割する旨のログ出力
+        console.log(`プロンプトサイズ ${chatRequestBytes.length} bytes は上限 ${MAX_PAYLOAD_SIZE} bytes を超えているため、チャンク送信します`);
+        response = await sendChunkedRequest(chatRequest, token, `${API_BASE_URL}/backend/chat`);
       } else {
+        console.log("チャンクに分けずに送信します");
         response = await fetch(`${API_BASE_URL}/backend/chat`, {
           method: "POST",
           headers: {

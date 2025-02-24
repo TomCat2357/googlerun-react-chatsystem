@@ -27,8 +27,8 @@ GEOCODING_NO_IMAGE_MAX_BATCH_SIZE = int(os.getenv("GEOCODING_NO_IMAGE_MAX_BATCH_
 GEOCODING_WITH_IMAGE_MAX_BATCH_SIZE = int(os.getenv("GEOCODING_WITH_IMAGE_MAX_BATCH_SIZE"))
 SPEECH_CHUNK_SIZE = int(os.getenv("SPEECH_CHUNK_SIZE"))
 SPEECH_MAX_SECONDS = int(os.getenv("SPEECH_MAX_SECONDS"))
-# ※ 新規：チャットプロンプトの最大サイズ（バイト数）を .env から取得（例：MAX_PROMPT_SIZE）
-MAX_PAYLOAD_SIZE = int(os.getenv("MAX_PAYLOAD_SIZE ", 128*1024**2))
+# ※ 新規：チャットプロンプトの最大サイズ（バイト数）を .env から取得（例：MAX_PAYLOAD_SIZE）
+MAX_PAYLOAD_SIZE = int(os.getenv("MAX_PAYLOAD_SIZE", 128*1024**2))
 
 # Firebase Admin SDKの初期化
 firebase_admin.initialize_app(
@@ -58,8 +58,10 @@ CORS(
 def handle_chunked_request(function: Callable) -> Callable:
     @wraps(function)
     def decorated_function(*args, **kwargs) -> Response:
+        logger.info('MAX_PAYLOAD_SIZE: %s', MAX_PAYLOAD_SIZE)
         data = request.get_json() or {}
         if data.get("chunked"):
+            logger.info('チャンクされたデータです')
             try:
                 chunk_id = data.get("chunkId")
                 chunk_index = data.get("chunkIndex")
@@ -90,6 +92,8 @@ def handle_chunked_request(function: Callable) -> Callable:
             except Exception as e:
                 logger.error("チャンク組み立てエラー: %s", str(e), exc_info=True)
                 return jsonify({"status": "error", "message": str(e)}), 500
+        else:
+            logger.info('チャンクされていないデータです')
         return function(*args, **kwargs)
     return decorated_function
 
@@ -207,7 +211,7 @@ def get_config(decoded_token: Dict) -> Response:
             "MAX_IMAGES": os.getenv("MAX_IMAGES"),
             "MAX_LONG_EDGE": os.getenv("MAX_LONG_EDGE"),
             "MAX_IMAGE_SIZE": os.getenv("MAX_IMAGE_SIZE"),
-            "MAX_PROMPT_SIZE": os.getenv("MAX_PROMPT_SIZE", "500000"),
+            "MAX_PAYLOAD_SIZE": os.getenv("MAX_PAYLOAD_SIZE", "500000"),
             "GOOGLE_MAPS_API_CACHE_TTL": os.getenv("GOOGLE_MAPS_API_CACHE_TTL"),
             "GEOCODING_NO_IMAGE_MAX_BATCH_SIZE": os.getenv("GEOCODING_NO_IMAGE_MAX_BATCH_SIZE"),
             "GEOCODING_WITH_IMAGE_MAX_BATCH_SIZE": os.getenv("GEOCODING_WITH_IMAGE_MAX_BATCH_SIZE"),
