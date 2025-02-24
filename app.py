@@ -27,6 +27,8 @@ GEOCODING_NO_IMAGE_MAX_BATCH_SIZE = int(os.getenv("GEOCODING_NO_IMAGE_MAX_BATCH_
 GEOCODING_WITH_IMAGE_MAX_BATCH_SIZE = int(os.getenv("GEOCODING_WITH_IMAGE_MAX_BATCH_SIZE"))
 SPEECH_CHUNK_SIZE = int(os.getenv("SPEECH_CHUNK_SIZE"))
 SPEECH_MAX_SECONDS = int(os.getenv("SPEECH_MAX_SECONDS"))
+# ※ 新規：チャットプロンプトの最大サイズ（バイト数）を .env から取得（例：MAX_PROMPT_SIZE）
+MAX_PAYLOAD_SIZE = int(os.getenv("MAX_PAYLOAD_SIZE ", 128*1024**2))
 
 # Firebase Admin SDKの初期化
 firebase_admin.initialize_app(
@@ -34,6 +36,9 @@ firebase_admin.initialize_app(
 )
 
 app = Flask(__name__)
+
+# グローバルなチャンク保存用辞書（チャンクID毎に受信済チャンクを保持）
+CHUNK_STORE = {}
 
 # CORSの設定 - 開発環境用
 origins = [
@@ -50,8 +55,6 @@ CORS(
     allow_headers=["Content-Type", "Authorization", "X-API-Key"],
     methods=["GET", "POST", "OPTIONS"],
 )
-
-
 
 
 def process_uploaded_image(image_data: str) -> str:
@@ -168,6 +171,7 @@ def get_config(decoded_token: Dict) -> Response:
             "MAX_IMAGES": os.getenv("MAX_IMAGES"),
             "MAX_LONG_EDGE": os.getenv("MAX_LONG_EDGE"),
             "MAX_IMAGE_SIZE": os.getenv("MAX_IMAGE_SIZE"),
+            "MAX_PROMPT_SIZE": os.getenv("MAX_PROMPT_SIZE", "500000"),
             "GOOGLE_MAPS_API_CACHE_TTL": os.getenv("GOOGLE_MAPS_API_CACHE_TTL"),
             "GEOCODING_NO_IMAGE_MAX_BATCH_SIZE": os.getenv("GEOCODING_NO_IMAGE_MAX_BATCH_SIZE"),
             "GEOCODING_WITH_IMAGE_MAX_BATCH_SIZE": os.getenv("GEOCODING_WITH_IMAGE_MAX_BATCH_SIZE"),
@@ -235,6 +239,30 @@ def chat(decoded_token: Dict) -> Response:
     logger.info("チャットリクエストを処理中")
     try:
         data = request.json
+        # チャンク分割されたプロンプトの場合の処理
+        if data.get("chunked"):
+            chunk_id = data.get("chunkId")
+            chunk_index = data.get("chunkIndex")
+            total_chunks = data.get("totalChunks")
+            chunk_data_b64 = data.get("chunkData")
+            if not chunk_id or chunk_index is None or not total_chunks or not chunk_data_b64:
+                raise ValueError("チャンク情報が不足しています")
+            # base64デコードしてバイナリ取得
+            chunk_data = base64.b64decode(chunk_data_b64)
+            if chunk_id not in CHUNK_STORE:
+                CHUNK_STORE[chunk_id] = {}
+            CHUNK_STORE[chunk_id][chunk_index] = chunk_data
+            logger.info("受信チャンク %s: %d/%d", chunk_id, chunk_index, total_chunks)
+            if len(CHUNK_STORE[chunk_id]) < total_chunks:
+                return jsonify({"status": "chunk_received", "chunkId": chunk_id, "received": len(CHUNK_STORE[chunk_id]), "total": total_chunks}), 200
+            # 全チャンク受信済みの場合、順次再構築
+            assembled_bytes = b"".join(CHUNK_STORE[chunk_id][i] for i in range(total_chunks))
+            del CHUNK_STORE[chunk_id]
+            assembled_str = assembled_bytes.decode("utf-8")
+            data = json.loads(assembled_str)
+            logger.info("チャンクの再構築完了: %s", chunk_id)
+        
+        # 以下、通常のチャット処理
         messages = data.get("messages", [])
         model = data.get("model")
         logger.info(f"モデル: {model}")
@@ -258,9 +286,7 @@ def chat(decoded_token: Dict) -> Response:
                 images_to_process = msg["images"][:MAX_IMAGES]
                 for image in images_to_process:
                     processed_image = process_uploaded_image(image)
-                    parts.append(
-                        {"type": "image_url", "image_url": {"url": processed_image}}
-                    )
+                    parts.append({"type": "image_url", "image_url": {"url": processed_image}})
                 msg["content"] = parts
                 msg.pop("images", None)
             transformed_messages.append(msg)

@@ -4,6 +4,7 @@ import { Message, ChatRequest, ChatHistory } from "../../types/apiTypes";
 import { useToken } from "../../hooks/useToken";
 import * as indexedDBUtils from "../../utils/indexedDBUtils";
 import * as Config from "../../config";
+import { sendChunkedRequest } from "../../utils/ChunkedUpload";
 
 const ChatPage: React.FC = () => {
   // ==========================
@@ -85,6 +86,8 @@ const ChatPage: React.FC = () => {
   const MAX_IMAGES = Config.getServerConfig().MAX_IMAGES || 5;
   const MAX_LONG_EDGE = Config.getServerConfig().MAX_LONG_EDGE || 1568;
   const MAX_IMAGE_SIZE = Config.getServerConfig().MAX_IMAGE_SIZE || 5242880;
+  // 送信時のプロンプトサイズ上限（バイト数）
+  const MAX_PROMPT_SIZE = parseInt(Config.getServerConfig().MAX_PROMPT_SIZE || "500000", 10);
 
   /**
    * processImageFile
@@ -358,16 +361,27 @@ const ChatPage: React.FC = () => {
         model: selectedModel,
       };
 
-      const response = await fetch(`${API_BASE_URL}/backend/chat`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "text/event-stream",
-          Authorization: `Bearer ${token}`,
-        },
-        signal,
-        body: JSON.stringify(chatRequest),
-      });
+      // 送信するリクエスト全体を JSON 化し、バイトサイズが上限を超えている場合はチャンク分割送信
+      const jsonStr = JSON.stringify(chatRequest);
+      const encoder = new TextEncoder();
+      const chatRequestBytes = encoder.encode(jsonStr);
+
+      let response: Response;
+      if (chatRequestBytes.length > MAX_PROMPT_SIZE) {
+        console.log(`プロンプトサイズ ${chatRequestBytes.length} bytes は上限 ${MAX_PROMPT_SIZE} bytes を超えているため、チャンク送信します`);
+        response = await sendChunkedRequest(chatRequest, token, API_BASE_URL);
+      } else {
+        response = await fetch(`${API_BASE_URL}/backend/chat`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "text/event-stream",
+            Authorization: `Bearer ${token}`,
+          },
+          signal,
+          body: jsonStr,
+        });
+      }
 
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
