@@ -1,5 +1,4 @@
 # app.py
-# %%
 from flask import Flask, request, Response, jsonify, make_response, send_from_directory
 from flask_cors import CORS
 from firebase_admin import auth, credentials
@@ -7,27 +6,24 @@ from dotenv import load_dotenv
 from functools import wraps
 import os, json, firebase_admin, io, base64
 from PIL import Image
-from typing import Dict, Union, Optional, Tuple, Callable, Any, List
-from litellm import completion, token_counter
+from typing import Dict, Optional, Callable, List
+from litellm import completion
 from backend.utils.logger import *
-from backend.utils.maps import *  # maps.py の関数群をインポート
+from backend.utils.maps import *
 from backend.utils.speech2text import transcribe_streaming_v2
 
 # .envファイルを読み込み
 load_dotenv("./backend/config/.env")
 
-# 環境変数から画像処理設定を読み込む
+# 環境変数から設定を読み込み
 MAX_IMAGES = int(os.getenv("MAX_IMAGES"))
 MAX_LONG_EDGE = int(os.getenv("MAX_LONG_EDGE"))
-MAX_IMAGE_SIZE = int(os.getenv("MAX_IMAGE_SIZE"))  # デフォルト5MB
-
-# 追加：その他の設定値
+MAX_IMAGE_SIZE = int(os.getenv("MAX_IMAGE_SIZE"))
 GOOGLE_MAPS_API_CACHE_TTL = int(os.getenv("GOOGLE_MAPS_API_CACHE_TTL"))
 GEOCODING_NO_IMAGE_MAX_BATCH_SIZE = int(os.getenv("GEOCODING_NO_IMAGE_MAX_BATCH_SIZE"))
 GEOCODING_WITH_IMAGE_MAX_BATCH_SIZE = int(os.getenv("GEOCODING_WITH_IMAGE_MAX_BATCH_SIZE"))
 SPEECH_CHUNK_SIZE = int(os.getenv("SPEECH_CHUNK_SIZE"))
 SPEECH_MAX_SECONDS = int(os.getenv("SPEECH_MAX_SECONDS"))
-# ※ 新規：チャットプロンプトの最大サイズ（バイト数）を .env から取得（例：MAX_PAYLOAD_SIZE）
 MAX_PAYLOAD_SIZE = int(os.getenv("MAX_PAYLOAD_SIZE", 128*1024**2))
 
 # Firebase Admin SDKの初期化
@@ -37,16 +33,13 @@ firebase_admin.initialize_app(
 
 app = Flask(__name__)
 
-# グローバルなチャンク保存用辞書（チャンクID毎に受信済チャンクを保持）
+# グローバルなチャンク保存用辞書
 CHUNK_STORE = {}
 
-# CORSの設定 - 開発環境用
-origins = [
-    f"http://localhost:{os.getenv('PORT', 8080)}",
-]
+# CORS設定
+origins = [f"http://localhost:{os.getenv('PORT', 8080)}"]
 if int(os.getenv("DEBUG", 0)):
-    origins.append("http://localhost:5173")  # DEBUGモードの場合
-
+    origins.append("http://localhost:5173")
 CORS(
     app,
     origins=origins,
@@ -55,6 +48,7 @@ CORS(
     allow_headers=["Content-Type", "Authorization", "X-API-Key"],
     methods=["GET", "POST", "OPTIONS"],
 )
+
 def handle_chunked_request(function: Callable) -> Callable:
     @wraps(function)
     def decorated_function(*args, **kwargs) -> Response:
@@ -98,10 +92,6 @@ def handle_chunked_request(function: Callable) -> Callable:
     return decorated_function
 
 def process_uploaded_image(image_data: str) -> str:
-    """
-    アップロードされた画像データをリサイズおよび圧縮し、
-    適切な「data:image/～;base64,」形式の文字列を返す関数。
-    """
     try:
         header = None
         if image_data.startswith("data:"):
@@ -111,12 +101,7 @@ def process_uploaded_image(image_data: str) -> str:
         if image.mode not in ("RGB", "RGBA"):
             image = image.convert("RGB")
         width, height = image.size
-        logger.info(
-            "元の画像サイズ: %dx%dpx, 容量: %.1fKB",
-            width,
-            height,
-            len(image_bytes) / 1024,
-        )
+        logger.info("元の画像サイズ: %dx%dpx, 容量: %.1fKB", width, height, len(image_bytes) / 1024)
         if max(width, height) > MAX_LONG_EDGE:
             scale = MAX_LONG_EDGE / max(width, height)
             new_width = int(width * scale)
@@ -135,73 +120,54 @@ def process_uploaded_image(image_data: str) -> str:
             image = image.convert("RGB")
             image.save(output, format=output_format, quality=quality, optimize=True)
         output_data = output.getvalue()
-        logger.info(
-            "圧縮後の容量: %.1fKB (quality=%d)", len(output_data) / 1024, quality
-        )
+        logger.info("圧縮後の容量: %.1fKB (quality=%d)", len(output_data) / 1024, quality)
         while len(output_data) > MAX_IMAGE_SIZE and quality > 30:
             quality -= 10
             output = io.BytesIO()
             image.save(output, format=output_format, quality=quality, optimize=True)
             output_data = output.getvalue()
-            logger.info(
-                "再圧縮後の容量: %.1fKB (quality=%d)", len(output_data) / 1024, quality
-            )
+            logger.info("再圧縮後の容量: %.1fKB (quality=%d)", len(output_data) / 1024, quality)
         processed_base64 = base64.b64encode(output_data).decode("utf-8")
         return f"data:{mime_type};base64,{processed_base64}"
     except Exception as e:
         logger.error("画像処理エラー: %s", str(e), exc_info=True)
         return image_data
 
-
 def get_api_key_for_model(model: str) -> Optional[str]:
     source = model.split("/")[0] if "/" in model else model
     return json.loads(os.getenv("MODEL_API_KEYS", "{}")).get(source, "")
 
-
-def common_message_function(
-    *, model: str, messages: List, stream: bool = False, **kwargs
-):
+def common_message_function(*, model: str, messages: List, stream: bool = False, **kwargs):
     if stream:
-
         def chat_stream():
-            for i, text in enumerate(
-                completion(messages=messages, model=model, stream=True, **kwargs)
-            ):
+            for i, text in enumerate(completion(messages=messages, model=model, stream=True, **kwargs)):
                 if not i:
                     yield
                 yield text["choices"][0]["delta"].get("content", "") or ""
-
         cs = chat_stream()
         cs.__next__()
         return cs
     else:
-        return completion(messages=messages, model=model, stream=False, **kwargs)[
-            "choices"
-        ][0]["message"]["content"]
-
+        return completion(messages=messages, model=model, stream=False, **kwargs)["choices"][0]["message"]["content"]
 
 def require_auth(function: Callable) -> Callable:
     @wraps(function)
     def decorated_function(*args, **kwargs) -> Response:
         try:
-            auth_header: Optional[str] = request.headers.get("Authorization")
+            auth_header = request.headers.get("Authorization")
             if not auth_header or not auth_header.startswith("Bearer "):
                 logger.warning("トークンが見つかりません")
                 return jsonify({"error": "認証が必要です"}), 401
-            token: str = auth_header.split("Bearer ")[1]
+            token = auth_header.split("Bearer ")[1]
             decoded_token: Dict = auth.verify_id_token(token, clock_skew_seconds=60)
             response: Response = function(decoded_token, *args, **kwargs)
             return response
         except Exception as e:
             logger.error("認証エラー: %s", str(e), exc_info=True)
-            response: Response = make_response(jsonify({"error": str(e)}))
+            response = make_response(jsonify({"error": str(e)}))
             response.status_code = 401
             return response
-
     return decorated_function
-
-
-# ======= 各種エンドポイント =======
 
 @app.route("/backend/config", methods=["GET"])
 @require_auth
@@ -219,15 +185,14 @@ def get_config(decoded_token: Dict) -> Response:
             "SPEECH_MAX_SECONDS": os.getenv("SPEECH_MAX_SECONDS"),
             "MODELS": os.getenv("MODELS", "")
         }
-        response: Response = make_response(jsonify(config_values))
+        response = make_response(jsonify(config_values))
         response.status_code = 200
         return response
     except Exception as e:
         logger.error("Config取得エラー: %s", str(e), exc_info=True)
-        error_response: Response = make_response(jsonify({"error": str(e)}))
+        error_response = make_response(jsonify({"error": str(e)}))
         error_response.status_code = 500
         return error_response
-
 
 @app.route("/backend/models", methods=["GET"])
 @require_auth
@@ -238,15 +203,14 @@ def get_models(decoded_token: Dict) -> Response:
         logger.info(f"環境変数 MODELS の値: {raw_models}")
         model_list = [m.strip() for m in raw_models.split(",") if m.strip()]
         logger.info(f"モデル一覧: {model_list}")
-        response: Response = make_response(jsonify({"models": model_list}))
+        response = make_response(jsonify({"models": model_list}))
         response.status_code = 200
         return response
     except Exception as e:
         logger.error(f"モデル一覧取得中にエラーが発生しました: {e}", exc_info=True)
-        error_response: Response = make_response(jsonify({"error": str(e)}))
+        error_response = make_response(jsonify({"error": str(e)}))
         error_response.status_code = 500
         return error_response
-
 
 @app.route("/backend/verify-auth", methods=["GET"])
 @require_auth
@@ -263,15 +227,14 @@ def verify_auth(decoded_token: Dict) -> Response:
             "expire_time": decoded_token.get("exp"),
         }
         logger.info("認証検証完了")
-        response: Response = make_response(jsonify(response_data))
+        response = make_response(jsonify(response_data))
         response.status_code = 200
         return response
     except Exception as e:
         logger.error("認証エラー: %s", str(e), exc_info=True)
-        response: Response = make_response(jsonify({"error": str(e)}))
+        response = make_response(jsonify({"error": str(e)}))
         response.status_code = 401
         return response
-
 
 @app.route("/backend/chat", methods=["POST"])
 @require_auth
@@ -329,15 +292,9 @@ def chat(decoded_token: Dict, assembled_data=None) -> Response:
         error_response.status_code = 500
         return error_response
 
-
 @app.route("/backend/address2coordinates", methods=["POST"])
 @require_auth
 def query2coordinates(decoded_token: Dict) -> Response:
-    """
-    フロントエンドから送られてきた各行（クエリー）を用いてジオコーディングを行い、
-    Maps API の詳細なレスポンス情報を含む JSON を返却するエンドポイント。
-    ※ 同一のクエリーは１回の API 呼び出しで処理し、その結果を全ての出現箇所に展開します。
-    """
     try:
         data = request.get_json() or {}
         lines = data.get("lines", [])
@@ -390,9 +347,7 @@ def query2coordinates(decoded_token: Dict) -> Response:
             if not query:
                 continue
             results.append(unique_queries[query])
-        response: Response = make_response(
-            jsonify({"status": "success", "results": results})
-        )
+        response = make_response(jsonify({"status": "success", "results": results}))
         response.status_code = 200
         return response
     except Exception as e:
@@ -401,14 +356,9 @@ def query2coordinates(decoded_token: Dict) -> Response:
         error_response.status_code = 500
         return error_response
 
-
 @app.route("/backend/latlng2query", methods=["POST"])
 @require_auth
 def latlng2query(decoded_token: Dict) -> Response:
-    """
-    フロントエンドから送られてきた各行（緯度,経度）を用いてリバースジオコーディングを行い、
-    Maps API の詳細なレスポンス情報を含む JSON を返却するエンドポイント。
-    """
     try:
         data = request.get_json() or {}
         lines = data.get("lines", [])
@@ -502,9 +452,7 @@ def latlng2query(decoded_token: Dict) -> Response:
             if not query:
                 continue
             results.append(unique_lines[query])
-        response: Response = make_response(
-            jsonify({"status": "success", "results": results})
-        )
+        response = make_response(jsonify({"status": "success", "results": results}))
         response.status_code = 200
         return response
     except Exception as e:
@@ -513,26 +461,19 @@ def latlng2query(decoded_token: Dict) -> Response:
         error_response.status_code = 500
         return error_response
 
-
 @app.route("/backend/logout", methods=["POST"])
 def logout() -> Response:
     try:
         logger.info("ログアウト処理開始")
-        response: Response = make_response(
-            jsonify({"status": "success", "message": "ログアウトに成功しました"})
-        )
+        response = make_response(jsonify({"status": "success", "message": "ログアウトに成功しました"}))
         return response, 200
     except Exception as e:
         logger.error("ログアウト処理中にエラーが発生: %s", str(e), exc_info=True)
         return jsonify({"error": str(e)}), 401
 
-
 @app.route("/backend/static-map", methods=["GET"])
 @require_auth
 def get_static_map_image(decoded_token: Dict) -> Response:
-    """
-    指定された緯度経度の静的地図（衛星写真）を取得するエンドポイント
-    """
     try:
         latitude = float(request.args.get("latitude"))
         longitude = float(request.args.get("longitude"))
@@ -560,22 +501,15 @@ def get_static_map_image(decoded_token: Dict) -> Response:
         return Response(
             response.content,
             mimetype="image/jpeg",
-            headers={
-                "Cache-Control": "public, max-age=31536000",
-                "Content-Type": "image/jpeg",
-            },
+            headers={"Cache-Control": "public, max-age=31536000", "Content-Type": "image/jpeg"},
         )
     except Exception as e:
         logger.error("静的地図取得エラー: %s", str(e), exc_info=True)
         return jsonify({"error": str(e)}), 500
 
-
 @app.route("/backend/street-view", methods=["GET"])
 @require_auth
 def get_street_view_image(decoded_token: Dict) -> Response:
-    """
-    指定された緯度経度のストリートビュー画像を取得するエンドポイント
-    """
     try:
         latitude = float(request.args.get("latitude"))
         longitude = float(request.args.get("longitude"))
@@ -609,42 +543,33 @@ def get_street_view_image(decoded_token: Dict) -> Response:
         return Response(
             response.content,
             mimetype="image/jpeg",
-            headers={
-                "Cache-Control": "public, max-age=31536000",
-                "Content-Type": "image/jpeg",
-            },
+            headers={"Cache-Control": "public, max-age=31536000", "Content-Type": "image/jpeg"},
         )
     except Exception as e:
         logger.error("ストリートビュー取得エラー: %s", str(e), exc_info=True)
         return jsonify({"error": str(e)}), 500
 
-
+# ======= 音声認識エンドポイント（チャンクアップロード対応） =======
 @app.route("/backend/speech2text", methods=["POST"])
 @require_auth
-def speech2text(decoded_token: dict) -> Response:
+@handle_chunked_request
+def speech2text(decoded_token: dict, assembled_data=None) -> Response:
     logger.info("音声認識処理開始")
     try:
-        data = request.get_json() or {}
+        data = assembled_data if assembled_data is not None else request.get_json() or {}
         audio_data = data.get("audio_data", "")
         if not audio_data:
             raise ValueError("音声データが提供されていません")
 
-        # "data:audio/～;base64,..."形式の場合はヘッダー部分を除去
+        # ヘッダー除去（"data:audio/～;base64,..."形式の場合）
         if audio_data.startswith("data:"):
             _, audio_data = audio_data.split(",", 1)
 
-        # base64デコードしてバイト列に変換
         audio_bytes = base64.b64decode(audio_data)
-        logger.info("受信した音声チャンクサイズ: %d バイト", len(audio_bytes))
+        logger.info("受信した音声サイズ: %d バイト", len(audio_bytes))
         
-        # 音声のチャンクサイズを読み取り、チャンクサイズが指定されたサイズを超えているか確認
-        SPEECH_CHUNK_SIZE = int(os.getenv("SPEECH_CHUNK_SIZE"))
-        if len(audio_bytes) > SPEECH_CHUNK_SIZE:
-            raise ValueError(
-                f"音声チャンクサイズが指定されたサイズを超えています: {len(audio_bytes)} > {SPEECH_CHUNK_SIZE} バイト"
-            )
+        # チャンクアップロードを利用するため、SPEECH_CHUNK_SIZEの制限は解除
 
-        # 音声文字起こしを実行（日本語認識の場合）
         responses = transcribe_streaming_v2(audio_bytes, language_codes=["ja-JP"])
 
         full_transcript = ""
@@ -662,7 +587,6 @@ def speech2text(decoded_token: dict) -> Response:
                 alternative = result.alternatives[0]
                 full_transcript += alternative.transcript + "\n"
                 if alternative.words:
-                    # 各単語ごとにセグメントを作成
                     for w in alternative.words:
                         start_time_str = format_time(w.start_offset)
                         end_time_str   = format_time(w.end_offset)
@@ -686,7 +610,6 @@ def speech2text(decoded_token: dict) -> Response:
         logger.error(f"音声文字起こしエラー: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
-
 # ======= フロントエンド配信用（DEBUG以外） =======
 if not int(os.getenv("DEBUG", 0)):
     FRONTEND_PATH = "./frontend/dist"
@@ -699,9 +622,6 @@ if not int(os.getenv("DEBUG", 0)):
     def static_file(path):
         return send_from_directory(FRONTEND_PATH, path)
 
-
-# %%
 if __name__ == "__main__":
     logger.info("Flaskアプリを起動します DEBUG: %s", bool(int(os.getenv("DEBUG", 0))))
     app.run(port=int(os.getenv("PORT", "8080")), debug=bool(int(os.getenv("DEBUG", 0))))
-# %%
