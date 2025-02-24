@@ -55,7 +55,43 @@ CORS(
     allow_headers=["Content-Type", "Authorization", "X-API-Key"],
     methods=["GET", "POST", "OPTIONS"],
 )
-
+def handle_chunked_request(function: Callable) -> Callable:
+    @wraps(function)
+    def decorated_function(*args, **kwargs) -> Response:
+        data = request.get_json() or {}
+        if data.get("chunked"):
+            try:
+                chunk_id = data.get("chunkId")
+                chunk_index = data.get("chunkIndex")
+                total_chunks = data.get("totalChunks")
+                chunk_data_b64 = data.get("chunkData")
+                if not chunk_id or chunk_index is None or not total_chunks or not chunk_data_b64:
+                    raise ValueError("チャンク情報が不足しています")
+                # base64デコードしてバイナリ取得
+                chunk_data = base64.b64decode(chunk_data_b64)
+                if chunk_id not in CHUNK_STORE:
+                    CHUNK_STORE[chunk_id] = {}
+                CHUNK_STORE[chunk_id][chunk_index] = chunk_data
+                logger.info("チャンク受信: %s - インデックス %d/%d", chunk_id, chunk_index, total_chunks)
+                if len(CHUNK_STORE[chunk_id]) < total_chunks:
+                    return jsonify({
+                        "status": "chunk_received",
+                        "chunkId": chunk_id,
+                        "received": len(CHUNK_STORE[chunk_id]),
+                        "total": total_chunks
+                    }), 200
+                # 全チャンク受信済みの場合、順次再構築
+                assembled_bytes = b"".join(CHUNK_STORE[chunk_id][i] for i in range(total_chunks))
+                del CHUNK_STORE[chunk_id]
+                assembled_str = assembled_bytes.decode("utf-8")
+                data = json.loads(assembled_str)
+                logger.info("全チャンク受信完了: %s", chunk_id)
+                kwargs['assembled_data'] = data
+            except Exception as e:
+                logger.error("チャンク組み立てエラー: %s", str(e), exc_info=True)
+                return jsonify({"status": "error", "message": str(e)}), 500
+        return function(*args, **kwargs)
+    return decorated_function
 
 def process_uploaded_image(image_data: str) -> str:
     """
@@ -235,34 +271,11 @@ def verify_auth(decoded_token: Dict) -> Response:
 
 @app.route("/backend/chat", methods=["POST"])
 @require_auth
-def chat(decoded_token: Dict) -> Response:
+@handle_chunked_request
+def chat(decoded_token: Dict, assembled_data=None) -> Response:
     logger.info("チャットリクエストを処理中")
     try:
-        data = request.json
-        # チャンク分割されたプロンプトの場合の処理
-        if data.get("chunked"):
-            chunk_id = data.get("chunkId")
-            chunk_index = data.get("chunkIndex")
-            total_chunks = data.get("totalChunks")
-            chunk_data_b64 = data.get("chunkData")
-            if not chunk_id or chunk_index is None or not total_chunks or not chunk_data_b64:
-                raise ValueError("チャンク情報が不足しています")
-            # base64デコードしてバイナリ取得
-            chunk_data = base64.b64decode(chunk_data_b64)
-            if chunk_id not in CHUNK_STORE:
-                CHUNK_STORE[chunk_id] = {}
-            CHUNK_STORE[chunk_id][chunk_index] = chunk_data
-            logger.info("受信チャンク %s: %d/%d", chunk_id, chunk_index, total_chunks)
-            if len(CHUNK_STORE[chunk_id]) < total_chunks:
-                return jsonify({"status": "chunk_received", "chunkId": chunk_id, "received": len(CHUNK_STORE[chunk_id]), "total": total_chunks}), 200
-            # 全チャンク受信済みの場合、順次再構築
-            assembled_bytes = b"".join(CHUNK_STORE[chunk_id][i] for i in range(total_chunks))
-            del CHUNK_STORE[chunk_id]
-            assembled_str = assembled_bytes.decode("utf-8")
-            data = json.loads(assembled_str)
-            logger.info("チャンクの再構築完了: %s", chunk_id)
-        
-        # 以下、通常のチャット処理
+        data = assembled_data if assembled_data is not None else request.get_json() or {}
         messages = data.get("messages", [])
         model = data.get("model")
         logger.info(f"モデル: {model}")
@@ -282,7 +295,7 @@ def chat(decoded_token: Dict) -> Response:
                 parts = []
                 if msg.get("content"):
                     parts.append({"type": "text", "text": msg["content"]})
-                logger.info(f"画像の数: {len(msg['images'])}")
+                logger.info("チャンク内の画像数: %d", len(msg["images"]))
                 images_to_process = msg["images"][:MAX_IMAGES]
                 for image in images_to_process:
                     processed_image = process_uploaded_image(image)
@@ -307,7 +320,7 @@ def chat(decoded_token: Dict) -> Response:
         response.status_code = 200
         return response
     except Exception as e:
-        logger.error(f"チャットエラー: {e}", exc_info=True)
+        logger.error("チャットエラー: %s", e, exc_info=True)
         error_response = make_response(jsonify({"status": "error", "message": str(e)}))
         error_response.status_code = 500
         return error_response
