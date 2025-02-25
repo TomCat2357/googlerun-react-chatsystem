@@ -1,5 +1,5 @@
 // src/components/Geocoding/MapControls.tsx
-import React from 'react';
+import React from "react";
 
 interface SliderControlProps {
   label: string;

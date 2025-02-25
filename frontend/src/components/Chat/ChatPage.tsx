@@ -19,7 +19,9 @@ const ChatPage: React.FC = () => {
   const [chatHistories, setChatHistories] = useState<ChatHistory[]>([]);
   const messageContainerRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
-  const [selectedImagesBase64, setSelectedImagesBase64] = useState<string[]>([]);
+  const [selectedImagesBase64, setSelectedImagesBase64] = useState<string[]>(
+    []
+  );
   const [errorMessage, setErrorMessage] = useState<string>("");
   const token = useToken();
   const API_BASE_URL: string = Config.API_BASE_URL;
@@ -73,8 +75,8 @@ const ChatPage: React.FC = () => {
     const config = Config.getServerConfig();
     if (config.MODELS) {
       const modelsArr = config.MODELS.split(",")
-        .map(m => m.trim())
-        .filter(m => m);
+        .map((m) => m.trim())
+        .filter((m) => m);
       setModels(modelsArr);
       setSelectedModel(modelsArr[0]);
     }
@@ -87,8 +89,10 @@ const ChatPage: React.FC = () => {
   const MAX_LONG_EDGE = Config.getServerConfig().MAX_LONG_EDGE || 1568;
   const MAX_IMAGE_SIZE = Config.getServerConfig().MAX_IMAGE_SIZE || 5242880;
   // 送信時のプロンプトサイズ上限（バイト数）
-  const MAX_PAYLOAD_SIZE = parseInt(Config.getServerConfig().MAX_PAYLOAD_SIZE || "500000", 10);
-  
+  const MAX_PAYLOAD_SIZE = parseInt(
+    Config.getServerConfig().MAX_PAYLOAD_SIZE || "500000",
+    10
+  );
 
   /**
    * processImageFile
@@ -186,7 +190,9 @@ const ChatPage: React.FC = () => {
         const histories = (e.target as IDBRequest).result as ChatHistory[];
         const sortedHistories = histories
           .sort(
-            (a, b) => new Date(b.lastPromptDate).getTime() - new Date(a.lastPromptDate).getTime()
+            (a, b) =>
+              new Date(b.lastPromptDate).getTime() -
+              new Date(a.lastPromptDate).getTime()
           )
           .slice(0, 30);
         setChatHistories(sortedHistories);
@@ -370,13 +376,21 @@ const ChatPage: React.FC = () => {
       // ① MAX_PAYLOAD_SIZEのログ出力
       console.log(`MAX_PAYLOAD_SIZE: ${MAX_PAYLOAD_SIZE} bytes`);
       // ② 送信前のプロンプトデータサイズのログ出力
-      console.log(`送信前のプロンプトデータサイズ: ${chatRequestBytes.length} bytes`);
+      console.log(
+        `送信前のプロンプトデータサイズ: ${chatRequestBytes.length} bytes`
+      );
 
       let response: Response;
       if (chatRequestBytes.length > MAX_PAYLOAD_SIZE) {
         // ③ チャンク分割する旨のログ出力
-        console.log(`プロンプトサイズ ${chatRequestBytes.length} bytes は上限 ${MAX_PAYLOAD_SIZE} bytes を超えているため、チャンク送信します`);
-        response = await sendChunkedRequest(chatRequest, token, `${API_BASE_URL}/backend/chat`);
+        console.log(
+          `プロンプトサイズ ${chatRequestBytes.length} bytes は上限 ${MAX_PAYLOAD_SIZE} bytes を超えているため、チャンク送信します`
+        );
+        response = await sendChunkedRequest(
+          chatRequest,
+          token,
+          `${API_BASE_URL}/backend/chat`
+        );
       } else {
         console.log("チャンクに分けずに送信します");
         response = await fetch(`${API_BASE_URL}/backend/chat`, {

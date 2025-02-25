@@ -21,10 +21,11 @@ MAX_LONG_EDGE = int(os.getenv("MAX_LONG_EDGE"))
 MAX_IMAGE_SIZE = int(os.getenv("MAX_IMAGE_SIZE"))
 GOOGLE_MAPS_API_CACHE_TTL = int(os.getenv("GOOGLE_MAPS_API_CACHE_TTL"))
 GEOCODING_NO_IMAGE_MAX_BATCH_SIZE = int(os.getenv("GEOCODING_NO_IMAGE_MAX_BATCH_SIZE"))
-GEOCODING_WITH_IMAGE_MAX_BATCH_SIZE = int(os.getenv("GEOCODING_WITH_IMAGE_MAX_BATCH_SIZE"))
-SPEECH_CHUNK_SIZE = int(os.getenv("SPEECH_CHUNK_SIZE"))
+GEOCODING_WITH_IMAGE_MAX_BATCH_SIZE = int(
+    os.getenv("GEOCODING_WITH_IMAGE_MAX_BATCH_SIZE")
+)
 SPEECH_MAX_SECONDS = int(os.getenv("SPEECH_MAX_SECONDS"))
-MAX_PAYLOAD_SIZE = int(os.getenv("MAX_PAYLOAD_SIZE", 128*1024**2))
+MAX_PAYLOAD_SIZE = int(os.getenv("MAX_PAYLOAD_SIZE", 128 * 1024**2))
 
 # Firebase Admin SDKの初期化
 firebase_admin.initialize_app(
@@ -49,47 +50,67 @@ CORS(
     methods=["GET", "POST", "OPTIONS"],
 )
 
+
 def handle_chunked_request(function: Callable) -> Callable:
     @wraps(function)
     def decorated_function(*args, **kwargs) -> Response:
-        logger.info('MAX_PAYLOAD_SIZE: %s', MAX_PAYLOAD_SIZE)
+        logger.info("MAX_PAYLOAD_SIZE: %s", MAX_PAYLOAD_SIZE)
         data = request.get_json() or {}
         if data.get("chunked"):
-            logger.info('チャンクされたデータです')
+            logger.info("チャンクされたデータです")
             try:
                 chunk_id = data.get("chunkId")
                 chunk_index = data.get("chunkIndex")
                 total_chunks = data.get("totalChunks")
                 chunk_data_b64 = data.get("chunkData")
-                if not chunk_id or chunk_index is None or not total_chunks or not chunk_data_b64:
+                if (
+                    not chunk_id
+                    or chunk_index is None
+                    or not total_chunks
+                    or not chunk_data_b64
+                ):
                     raise ValueError("チャンク情報が不足しています")
                 # base64デコードしてバイナリ取得
                 chunk_data = base64.b64decode(chunk_data_b64)
                 if chunk_id not in CHUNK_STORE:
                     CHUNK_STORE[chunk_id] = {}
                 CHUNK_STORE[chunk_id][chunk_index] = chunk_data
-                logger.info("チャンク受信: %s - インデックス %d/%d", chunk_id, chunk_index, total_chunks)
+                logger.info(
+                    "チャンク受信: %s - インデックス %d/%d",
+                    chunk_id,
+                    chunk_index,
+                    total_chunks,
+                )
                 if len(CHUNK_STORE[chunk_id]) < total_chunks:
-                    return jsonify({
-                        "status": "chunk_received",
-                        "chunkId": chunk_id,
-                        "received": len(CHUNK_STORE[chunk_id]),
-                        "total": total_chunks
-                    }), 200
+                    return (
+                        jsonify(
+                            {
+                                "status": "chunk_received",
+                                "chunkId": chunk_id,
+                                "received": len(CHUNK_STORE[chunk_id]),
+                                "total": total_chunks,
+                            }
+                        ),
+                        200,
+                    )
                 # 全チャンク受信済みの場合、順次再構築
-                assembled_bytes = b"".join(CHUNK_STORE[chunk_id][i] for i in range(total_chunks))
+                assembled_bytes = b"".join(
+                    CHUNK_STORE[chunk_id][i] for i in range(total_chunks)
+                )
                 del CHUNK_STORE[chunk_id]
                 assembled_str = assembled_bytes.decode("utf-8")
                 data = json.loads(assembled_str)
                 logger.info("全チャンク受信完了: %s", chunk_id)
-                kwargs['assembled_data'] = data
+                kwargs["assembled_data"] = data
             except Exception as e:
                 logger.error("チャンク組み立てエラー: %s", str(e), exc_info=True)
                 return jsonify({"status": "error", "message": str(e)}), 500
         else:
-            logger.info('チャンクされていないデータです')
+            logger.info("チャンクされていないデータです")
         return function(*args, **kwargs)
+
     return decorated_function
+
 
 def process_uploaded_image(image_data: str) -> str:
     try:
@@ -101,7 +122,12 @@ def process_uploaded_image(image_data: str) -> str:
         if image.mode not in ("RGB", "RGBA"):
             image = image.convert("RGB")
         width, height = image.size
-        logger.info("元の画像サイズ: %dx%dpx, 容量: %.1fKB", width, height, len(image_bytes) / 1024)
+        logger.info(
+            "元の画像サイズ: %dx%dpx, 容量: %.1fKB",
+            width,
+            height,
+            len(image_bytes) / 1024,
+        )
         if max(width, height) > MAX_LONG_EDGE:
             scale = MAX_LONG_EDGE / max(width, height)
             new_width = int(width * scale)
@@ -120,35 +146,50 @@ def process_uploaded_image(image_data: str) -> str:
             image = image.convert("RGB")
             image.save(output, format=output_format, quality=quality, optimize=True)
         output_data = output.getvalue()
-        logger.info("圧縮後の容量: %.1fKB (quality=%d)", len(output_data) / 1024, quality)
+        logger.info(
+            "圧縮後の容量: %.1fKB (quality=%d)", len(output_data) / 1024, quality
+        )
         while len(output_data) > MAX_IMAGE_SIZE and quality > 30:
             quality -= 10
             output = io.BytesIO()
             image.save(output, format=output_format, quality=quality, optimize=True)
             output_data = output.getvalue()
-            logger.info("再圧縮後の容量: %.1fKB (quality=%d)", len(output_data) / 1024, quality)
+            logger.info(
+                "再圧縮後の容量: %.1fKB (quality=%d)", len(output_data) / 1024, quality
+            )
         processed_base64 = base64.b64encode(output_data).decode("utf-8")
         return f"data:{mime_type};base64,{processed_base64}"
     except Exception as e:
         logger.error("画像処理エラー: %s", str(e), exc_info=True)
         return image_data
 
+
 def get_api_key_for_model(model: str) -> Optional[str]:
     source = model.split("/")[0] if "/" in model else model
     return json.loads(os.getenv("MODEL_API_KEYS", "{}")).get(source, "")
 
-def common_message_function(*, model: str, messages: List, stream: bool = False, **kwargs):
+
+def common_message_function(
+    *, model: str, messages: List, stream: bool = False, **kwargs
+):
     if stream:
+
         def chat_stream():
-            for i, text in enumerate(completion(messages=messages, model=model, stream=True, **kwargs)):
+            for i, text in enumerate(
+                completion(messages=messages, model=model, stream=True, **kwargs)
+            ):
                 if not i:
                     yield
                 yield text["choices"][0]["delta"].get("content", "") or ""
+
         cs = chat_stream()
         cs.__next__()
         return cs
     else:
-        return completion(messages=messages, model=model, stream=False, **kwargs)["choices"][0]["message"]["content"]
+        return completion(messages=messages, model=model, stream=False, **kwargs)[
+            "choices"
+        ][0]["message"]["content"]
+
 
 def require_auth(function: Callable) -> Callable:
     @wraps(function)
@@ -167,7 +208,9 @@ def require_auth(function: Callable) -> Callable:
             response = make_response(jsonify({"error": str(e)}))
             response.status_code = 401
             return response
+
     return decorated_function
+
 
 @app.route("/backend/config", methods=["GET"])
 @require_auth
@@ -179,11 +222,15 @@ def get_config(decoded_token: Dict) -> Response:
             "MAX_IMAGE_SIZE": os.getenv("MAX_IMAGE_SIZE"),
             "MAX_PAYLOAD_SIZE": os.getenv("MAX_PAYLOAD_SIZE", "500000"),
             "GOOGLE_MAPS_API_CACHE_TTL": os.getenv("GOOGLE_MAPS_API_CACHE_TTL"),
-            "GEOCODING_NO_IMAGE_MAX_BATCH_SIZE": os.getenv("GEOCODING_NO_IMAGE_MAX_BATCH_SIZE"),
-            "GEOCODING_WITH_IMAGE_MAX_BATCH_SIZE": os.getenv("GEOCODING_WITH_IMAGE_MAX_BATCH_SIZE"),
+            "GEOCODING_NO_IMAGE_MAX_BATCH_SIZE": os.getenv(
+                "GEOCODING_NO_IMAGE_MAX_BATCH_SIZE"
+            ),
+            "GEOCODING_WITH_IMAGE_MAX_BATCH_SIZE": os.getenv(
+                "GEOCODING_WITH_IMAGE_MAX_BATCH_SIZE"
+            ),
             "SPEECH_CHUNK_SIZE": os.getenv("SPEECH_CHUNK_SIZE"),
             "SPEECH_MAX_SECONDS": os.getenv("SPEECH_MAX_SECONDS"),
-            "MODELS": os.getenv("MODELS", "")
+            "MODELS": os.getenv("MODELS", ""),
         }
         response = make_response(jsonify(config_values))
         response.status_code = 200
@@ -193,6 +240,7 @@ def get_config(decoded_token: Dict) -> Response:
         error_response = make_response(jsonify({"error": str(e)}))
         error_response.status_code = 500
         return error_response
+
 
 @app.route("/backend/models", methods=["GET"])
 @require_auth
@@ -211,6 +259,7 @@ def get_models(decoded_token: Dict) -> Response:
         error_response = make_response(jsonify({"error": str(e)}))
         error_response.status_code = 500
         return error_response
+
 
 @app.route("/backend/verify-auth", methods=["GET"])
 @require_auth
@@ -236,13 +285,16 @@ def verify_auth(decoded_token: Dict) -> Response:
         response.status_code = 401
         return response
 
+
 @app.route("/backend/chat", methods=["POST"])
 @require_auth
 @handle_chunked_request
 def chat(decoded_token: Dict, assembled_data=None) -> Response:
     logger.info("チャットリクエストを処理中")
     try:
-        data = assembled_data if assembled_data is not None else request.get_json() or {}
+        data = (
+            assembled_data if assembled_data is not None else request.get_json() or {}
+        )
         messages = data.get("messages", [])
         model = data.get("model")
         logger.info(f"モデル: {model}")
@@ -266,7 +318,9 @@ def chat(decoded_token: Dict, assembled_data=None) -> Response:
                 images_to_process = msg["images"][:MAX_IMAGES]
                 for image in images_to_process:
                     processed_image = process_uploaded_image(image)
-                    parts.append({"type": "image_url", "image_url": {"url": processed_image}})
+                    parts.append(
+                        {"type": "image_url", "image_url": {"url": processed_image}}
+                    )
                 msg["content"] = parts
                 msg.pop("images", None)
             transformed_messages.append(msg)
@@ -291,6 +345,7 @@ def chat(decoded_token: Dict, assembled_data=None) -> Response:
         error_response = make_response(jsonify({"status": "error", "message": str(e)}))
         error_response.status_code = 500
         return error_response
+
 
 @app.route("/backend/address2coordinates", methods=["POST"])
 @require_auth
@@ -355,6 +410,7 @@ def query2coordinates(decoded_token: Dict) -> Response:
         error_response = make_response(jsonify({"error": str(e)}))
         error_response.status_code = 500
         return error_response
+
 
 @app.route("/backend/latlng2query", methods=["POST"])
 @require_auth
@@ -461,15 +517,19 @@ def latlng2query(decoded_token: Dict) -> Response:
         error_response.status_code = 500
         return error_response
 
+
 @app.route("/backend/logout", methods=["POST"])
 def logout() -> Response:
     try:
         logger.info("ログアウト処理開始")
-        response = make_response(jsonify({"status": "success", "message": "ログアウトに成功しました"}))
+        response = make_response(
+            jsonify({"status": "success", "message": "ログアウトに成功しました"})
+        )
         return response, 200
     except Exception as e:
         logger.error("ログアウト処理中にエラーが発生: %s", str(e), exc_info=True)
         return jsonify({"error": str(e)}), 401
+
 
 @app.route("/backend/static-map", methods=["GET"])
 @require_auth
@@ -501,11 +561,15 @@ def get_static_map_image(decoded_token: Dict) -> Response:
         return Response(
             response.content,
             mimetype="image/jpeg",
-            headers={"Cache-Control": "public, max-age=31536000", "Content-Type": "image/jpeg"},
+            headers={
+                "Cache-Control": "public, max-age=31536000",
+                "Content-Type": "image/jpeg",
+            },
         )
     except Exception as e:
         logger.error("静的地図取得エラー: %s", str(e), exc_info=True)
         return jsonify({"error": str(e)}), 500
+
 
 @app.route("/backend/street-view", methods=["GET"])
 @require_auth
@@ -543,11 +607,15 @@ def get_street_view_image(decoded_token: Dict) -> Response:
         return Response(
             response.content,
             mimetype="image/jpeg",
-            headers={"Cache-Control": "public, max-age=31536000", "Content-Type": "image/jpeg"},
+            headers={
+                "Cache-Control": "public, max-age=31536000",
+                "Content-Type": "image/jpeg",
+            },
         )
     except Exception as e:
         logger.error("ストリートビュー取得エラー: %s", str(e), exc_info=True)
         return jsonify({"error": str(e)}), 500
+
 
 # ======= 音声認識エンドポイント（チャンクアップロード対応） =======
 @app.route("/backend/speech2text", methods=["POST"])
@@ -556,7 +624,9 @@ def get_street_view_image(decoded_token: Dict) -> Response:
 def speech2text(decoded_token: dict, assembled_data=None) -> Response:
     logger.info("音声認識処理開始")
     try:
-        data = assembled_data if assembled_data is not None else request.get_json() or {}
+        data = (
+            assembled_data if assembled_data is not None else request.get_json() or {}
+        )
         audio_data = data.get("audio_data", "")
         if not audio_data:
             raise ValueError("音声データが提供されていません")
@@ -567,7 +637,7 @@ def speech2text(decoded_token: dict, assembled_data=None) -> Response:
 
         audio_bytes = base64.b64decode(audio_data)
         logger.info("受信した音声サイズ: %d バイト", len(audio_bytes))
-        
+
         # チャンクアップロードを利用するため、SPEECH_CHUNK_SIZEの制限は解除
 
         responses = transcribe_streaming_v2(audio_bytes, language_codes=["ja-JP"])
@@ -589,26 +659,33 @@ def speech2text(decoded_token: dict, assembled_data=None) -> Response:
                 if alternative.words:
                     for w in alternative.words:
                         start_time_str = format_time(w.start_offset)
-                        end_time_str   = format_time(w.end_offset)
-                        timed_transcription.append({
-                            "start_time": start_time_str,
-                            "end_time": end_time_str,
-                            "text": w.word
-                        })
+                        end_time_str = format_time(w.end_offset)
+                        timed_transcription.append(
+                            {
+                                "start_time": start_time_str,
+                                "end_time": end_time_str,
+                                "text": w.word,
+                            }
+                        )
                 else:
-                    timed_transcription.append({
-                        "start_time": "00:00:00",
-                        "end_time": "00:00:00",
-                        "text": alternative.transcript
-                    })
+                    timed_transcription.append(
+                        {
+                            "start_time": "00:00:00",
+                            "end_time": "00:00:00",
+                            "text": alternative.transcript,
+                        }
+                    )
 
-        return jsonify({
-            "transcription": full_transcript.strip(),
-            "timed_transcription": timed_transcription
-        })
+        return jsonify(
+            {
+                "transcription": full_transcript.strip(),
+                "timed_transcription": timed_transcription,
+            }
+        )
     except Exception as e:
         logger.error(f"音声文字起こしエラー: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
+
 
 # ======= フロントエンド配信用（DEBUG以外） =======
 if not int(os.getenv("DEBUG", 0)):
@@ -621,6 +698,7 @@ if not int(os.getenv("DEBUG", 0)):
     @app.route("/<path:path>")
     def static_file(path):
         return send_from_directory(FRONTEND_PATH, path)
+
 
 if __name__ == "__main__":
     logger.info("Flaskアプリを起動します DEBUG: %s", bool(int(os.getenv("DEBUG", 0))))

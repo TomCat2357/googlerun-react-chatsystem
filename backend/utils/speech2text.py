@@ -32,9 +32,7 @@ def transcribe_streaming_v2(
         auto_decoding_config=cloud_speech_types.AutoDetectDecodingConfig(),
         language_codes=language_codes,
         model="long",
-        features=cloud_speech_types.RecognitionFeatures(
-            enable_word_time_offsets=True
-        )
+        features=cloud_speech_types.RecognitionFeatures(enable_word_time_offsets=True),
     )
     streaming_config = cloud_speech_types.StreamingRecognitionConfig(
         config=recognition_config

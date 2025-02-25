@@ -13,7 +13,9 @@ interface TranscriptDisplayProps {
   isEditMode: boolean;
   editedTranscriptSegments: string[];
   onSegmentFinalize: (
-    e: React.FocusEvent<HTMLSpanElement> | React.CompositionEvent<HTMLSpanElement>,
+    e:
+      | React.FocusEvent<HTMLSpanElement>
+      | React.CompositionEvent<HTMLSpanElement>,
     index: number
   ) => void;
   onSegmentClick: (segment: TimedSegment) => void;
@@ -32,14 +34,18 @@ const secondsToTimeString = (seconds: number): string => {
   const hrs = Math.floor(seconds / 3600);
   const mins = Math.floor((seconds % 3600) / 60);
   const secs = Math.floor(seconds % 60);
-  return `${hrs.toString().padStart(2, "0")}:${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+  return `${hrs.toString().padStart(2, "0")}:${mins
+    .toString()
+    .padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
 };
 
 interface EditableSegmentProps {
   initialText: string;
   index: number;
   onFinalize: (
-    e: React.FocusEvent<HTMLSpanElement> | React.CompositionEvent<HTMLSpanElement>,
+    e:
+      | React.FocusEvent<HTMLSpanElement>
+      | React.CompositionEvent<HTMLSpanElement>,
     index: number
   ) => void;
   onClick: () => void;
@@ -104,12 +110,16 @@ const TranscriptDisplay: React.FC<TranscriptDisplayProps> = ({
         return segments.map((segment, index) => {
           const segmentStartSec = timeStringToSeconds(segment.start_time);
           const segmentEndSec = timeStringToSeconds(segment.end_time);
-          const isActive = currentTime >= segmentStartSec && currentTime < segmentEndSec;
+          const isActive =
+            currentTime >= segmentStartSec && currentTime < segmentEndSec;
           const markerElements = [];
           if (showTimestamps) {
             while (segmentStartSec >= nextThresholdSec) {
               markerElements.push(
-                <span key={`marker-${index}-${nextThresholdSec}`} className="mr-1 text-blue-700">
+                <span
+                  key={`marker-${index}-${nextThresholdSec}`}
+                  className="mr-1 text-blue-700"
+                >
                   {`{${secondsToTimeString(nextThresholdSec)}}`}
                 </span>
               );
@@ -119,7 +129,10 @@ const TranscriptDisplay: React.FC<TranscriptDisplayProps> = ({
           const activeColor = isEditMode ? "#32CD32" : "#ffd700";
           const inactiveColor = isEditMode ? "#B0E57C" : "#fff8b3";
           const highlightStyle: React.CSSProperties = {
-            backgroundColor: isActive || (cursorTime === segment.start_time) ? activeColor : inactiveColor,
+            backgroundColor:
+              isActive || cursorTime === segment.start_time
+                ? activeColor
+                : inactiveColor,
             marginRight: "4px",
             padding: "2px 4px",
             borderRadius: "4px",

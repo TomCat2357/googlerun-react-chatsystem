@@ -63,7 +63,9 @@ const GeocodingPage = () => {
   const [isSending, setIsSending] = useState(false);
   const [results, setResults] = useState<GeoResult[]>([]);
   const [inputMode, setInputMode] = useState<"address" | "latlng">("address");
-  const [csvEncoding, setCsvEncoding] = useState<"utf8" | "shift-jis">("shift-jis");
+  const [csvEncoding, setCsvEncoding] = useState<"utf8" | "shift-jis">(
+    "shift-jis"
+  );
 
   // 地図表示用のstate
   const [showSatellite, setShowSatellite] = useState(false);
@@ -305,8 +307,6 @@ const GeocodingPage = () => {
       return;
     }
 
-
-
     setIsSending(true);
     const timestamp = Date.now();
     let finalResults: GeoResult[] = [];
@@ -512,7 +512,9 @@ const GeocodingPage = () => {
 
   return (
     <div className="max-w-6xl mx-auto p-4">
-      <h1 className="text-2xl font-bold mb-4 text-gray-100">ジオコーディング</h1>
+      <h1 className="text-2xl font-bold mb-4 text-gray-100">
+        ジオコーディング
+      </h1>
 
       {/* 地図コントロール（結果が表示されていても操作可能） */}
       <MapControls
@@ -582,7 +584,9 @@ const GeocodingPage = () => {
           onChange={handleTextChange}
           className="w-full h-64 p-2 bg-gray-800 text-gray-100 border border-gray-700 rounded-lg focus:ring-2 focus:ring-blue-500"
           placeholder={
-            inputMode === "address" ? "例：札幌市役所" : "例：35.6812996,139.7670658"
+            inputMode === "address"
+              ? "例：札幌市役所"
+              : "例：35.6812996,139.7670658"
           }
         />
       </div>
@@ -656,7 +660,9 @@ const GeocodingPage = () => {
                   <th className="px-4 py-2">住所</th>
                 )}
                 {showSatellite && <th className="px-4 py-2">衛星写真</th>}
-                {showStreetView && <th className="px-4 py-2">ストリートビュー</th>}
+                {showStreetView && (
+                  <th className="px-4 py-2">ストリートビュー</th>
+                )}
               </tr>
             </thead>
             <tbody>
