@@ -296,8 +296,8 @@ const GeocodingPage = () => {
     // 画像表示の有無に応じた上限件数を設定
     const maxBatchSize =
       showSatellite || showStreetView
-        ? Config.WITH_IMAGE_MAX_BATCH_SIZE
-        : Config.NO_IMAGE_MAX_BATCH_SIZE;
+        ? Config.getServerConfig().GEOCODING_WITH_IMAGE_MAX_BATCH_SIZE
+        : Config.getServerConfig().GEOCODING_NO_IMAGE_MAX_BATCH_SIZE;
 
     if (allLines.length > maxBatchSize) {
       alert(
@@ -324,7 +324,7 @@ const GeocodingPage = () => {
               const cached = await getCachedResult(query);
               if (
                 cached &&
-                timestamp - (cached.fetchedAt || 0) < Config.CACHE_TTL_MS
+                timestamp - (cached.fetchedAt || 0) < Config.getServerConfig().GOOGLE_MAPS_API_CACHE_TTL
               ) {
                 cachedResults[query] = { ...cached, isCached: true };
               } else {
@@ -431,7 +431,7 @@ const GeocodingPage = () => {
               const cached = await getCachedResult(query);
               if (
                 cached &&
-                timestamp - (cached.fetchedAt || 0) < Config.CACHE_TTL_MS
+                timestamp - (cached.fetchedAt || 0) < Config.getServerConfig().GOOGLE_MAPS_API_CACHE_TTL
               ) {
                 cachedResults[query] = { ...cached, isCached: true };
               } else {

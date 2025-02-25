@@ -22,7 +22,10 @@ export default function LoginButton() {
     const tx = db.transaction("config", "readwrite");
     const store = tx.objectStore("config");
     store.put({ id: "serverConfig", ...config });
-    await tx.complete;
+    await new Promise<void>((resolve, reject) => {
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
   }
 
   const handleLogin = async () => {

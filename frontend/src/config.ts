@@ -50,7 +50,10 @@ export async function setServerConfig(config: typeof serverConfig) {
     const tx = db.transaction(CONFIG_STORE_NAME, "readwrite");
     const store = tx.objectStore(CONFIG_STORE_NAME);
     store.put({ id: CONFIG_KEY, ...config });
-    await tx.complete;
+    await new Promise<void>((resolve, reject) => {
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
   } catch (error) {
     console.error("IndexedDB への設定保存に失敗しました:", error);
   }

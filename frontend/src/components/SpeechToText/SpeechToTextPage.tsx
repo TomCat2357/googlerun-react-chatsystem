@@ -1,6 +1,4 @@
-// frontend/src/components/SpeechToText/SpeechToTextPage.tsx
-
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef } from "react";
 import { useToken } from "../../hooks/useToken";
 import * as Config from "../../config";
 import Encoding from "encoding-japanese";
@@ -34,55 +32,6 @@ const secondsToTimeString = (seconds: number): string => {
     .padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
 };
 
-interface EditableSegmentProps {
-  initialText: string;
-  index: number;
-  onFinalize: (
-    e:
-      | React.FocusEvent<HTMLSpanElement>
-      | React.CompositionEvent<HTMLSpanElement>,
-    index: number
-  ) => void;
-  onClick: () => void;
-  onDoubleClick: () => void;
-  style: React.CSSProperties;
-}
-
-const EditableSegment: React.FC<EditableSegmentProps> = ({
-  initialText,
-  index,
-  onFinalize,
-  onClick,
-  onDoubleClick,
-  style,
-}) => {
-  const spanRef = useRef<HTMLSpanElement>(null);
-
-  useEffect(() => {
-    if (spanRef.current) {
-      spanRef.current.innerText = initialText;
-    }
-  }, [initialText]);
-
-  return (
-    <span
-      ref={spanRef}
-      contentEditable
-      suppressContentEditableWarning
-      style={style}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") {
-          e.preventDefault();
-        }
-      }}
-      onBlur={(e) => onFinalize(e, index)}
-      onCompositionEnd={(e) => onFinalize(e, index)}
-      onClick={onClick}
-      onDoubleClick={onDoubleClick}
-    />
-  );
-};
-
 const SpeechToTextPage = () => {
   const token = useToken();
   const API_BASE_URL: string = Config.API_BASE_URL;
@@ -103,13 +52,9 @@ const SpeechToTextPage = () => {
   const [recordingDate, setRecordingDate] = useState("");
 
   // 文字起こし結果関連
-  const [serverTimedTranscript, setServerTimedTranscript] = useState<
-    TimedSegment[]
-  >([]);
+  const [serverTimedTranscript, setServerTimedTranscript] = useState<TimedSegment[]>([]);
   const [serverTranscript, setServerTranscript] = useState("");
-  const [editedTranscriptSegments, setEditedTranscriptSegments] = useState<
-    string[]
-  >([]);
+  const [editedTranscriptSegments, setEditedTranscriptSegments] = useState<string[]>([]);
 
   // 再生コントロール
   const [isPlaying, setIsPlaying] = useState(false);
@@ -296,10 +241,10 @@ const SpeechToTextPage = () => {
       alert("送信するデータがありません");
       return;
     }
-    if (audioInfo && audioInfo.duration > Config.SPEECH_MAX_SECONDS) {
+    if (audioInfo && audioInfo.duration > Config.getServerConfig().SPEECH_MAX_SECONDS) {
       alert(
         `音声ファイルが長すぎます。${Math.floor(
-          Config.SPEECH_MAX_SECONDS / 60
+          Config.getServerConfig().SPEECH_MAX_SECONDS / 60
         )}分以内のファイルのみ送信可能です。分割してからアップロードしてください。`
       );
       return;
@@ -782,9 +727,7 @@ const SpeechToTextPage = () => {
             <button
               onClick={handleCopyToClipboard}
               className={`font-bold py-2 px-4 rounded transition-colors duration-300 ${
-                copied
-                  ? "bg-white text-black"
-                  : "bg-gray-500 hover:bg-gray-600 text-white"
+                copied ? "bg-white text-black" : "bg-gray-500 hover:bg-gray-600 text-white"
               }`}
             >
               クリップボードにコピー

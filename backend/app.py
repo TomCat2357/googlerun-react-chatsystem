@@ -1,5 +1,5 @@
 # app.py
-from flask import Flask, request, Response, jsonify, make_response, send_from_directory
+from flask import Flask, request, Response, jsonify, make_response,send_from_directory
 from flask_cors import CORS
 from firebase_admin import auth, credentials
 from dotenv import load_dotenv
@@ -8,12 +8,12 @@ import os, json, firebase_admin, io, base64
 from PIL import Image
 from typing import Dict, Optional, Callable, List
 from litellm import completion
-from backend.utils.logger import *
-from backend.utils.maps import *
-from backend.utils.speech2text import transcribe_streaming_v2
+from utils.logger import *
+from utils.maps import *
+from utils.speech2text import transcribe_streaming_v2
 
 # .envファイルを読み込み
-load_dotenv("./backend/config/.env")
+load_dotenv("./config/.env")
 
 # 環境変数から設定を読み込み
 MAX_IMAGES = int(os.getenv("MAX_IMAGES"))
@@ -46,7 +46,7 @@ CORS(
     origins=origins,
     supports_credentials=False,
     expose_headers=["Authorization"],
-    allow_headers=["Content-Type", "Authorization", "X-API-Key"],
+    allow_headers=["Content-Type", "Authorization"],
     methods=["GET", "POST", "OPTIONS"],
 )
 
@@ -687,10 +687,8 @@ def speech2text(decoded_token: dict, assembled_data=None) -> Response:
         return jsonify({"error": str(e)}), 500
 
 
-# ======= フロントエンド配信用（DEBUG以外） =======
-if not int(os.getenv("DEBUG", 0)):
-    FRONTEND_PATH = "./frontend/dist"
-
+if os.getenv("DEBUG"):
+    FRONTEND_PATH = os.getenv("FRONTEND_PATH")
     @app.route("/")
     def index():
         return send_from_directory(FRONTEND_PATH, "index.html")

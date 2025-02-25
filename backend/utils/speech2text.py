@@ -1,7 +1,7 @@
 import os
 from google.cloud.speech_v2 import SpeechClient
 from google.cloud.speech_v2.types import cloud_speech as cloud_speech_types
-from backend.utils.logger import logger
+from utils.logger import logger
 
 
 def transcribe_streaming_v2(
