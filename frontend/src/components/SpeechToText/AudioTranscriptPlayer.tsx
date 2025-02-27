@@ -1,5 +1,5 @@
 // frontend/src/components/SpeechToText/AudioTranscriptPlayer.tsx
-import React, { useRef, useState, useEffect } from "react";
+import React, { useRef, useState } from "react";
 import { AudioInfo } from "./AudioUploader";
 
 export interface TimedSegment {
@@ -12,10 +12,9 @@ interface AudioTranscriptPlayerProps {
   audioData: string;
   audioInfo: AudioInfo | null;
   serverTimedTranscript: TimedSegment[];
-  serverTranscript: string;
+  serverTranscript: string;  // この行を削除しないでください
   isEditMode: boolean;
   onEditModeChange: (isEdit: boolean) => void;
-  // 追加: 編集内容のプロパティ
   editedTranscriptSegments: string[];
   onEditedTranscriptChange: (segments: string[]) => void;
 }
@@ -36,7 +35,7 @@ const AudioTranscriptPlayer: React.FC<AudioTranscriptPlayerProps> = ({
   audioData,
   audioInfo,
   serverTimedTranscript,
-  serverTranscript,
+  serverTranscript: _serverTranscript, // この行を追加
   isEditMode,
   onEditModeChange,
   editedTranscriptSegments,
