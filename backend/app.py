@@ -11,6 +11,7 @@ from litellm import completion
 from utils.logger import *
 from utils.maps import *
 from utils.speech2text import transcribe_streaming_v2
+from backend.utils.generate_image import generate_image
 
 # .envファイルを読み込み
 load_dotenv("./config/.env")
@@ -684,6 +685,41 @@ def speech2text(decoded_token: dict, assembled_data=None) -> Response:
         )
     except Exception as e:
         logger.error(f"音声文字起こしエラー: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/backend/generate-image", methods=["POST"])
+def generate_image_endpoint():
+    # リクエスト JSON からパラメータを取得
+    data = request.get_json(force=True)
+    prompt = data.get("prompt")
+
+    model_name = data.get("model_name")
+    number_of_images = data.get("number_of_images")
+    aspect_ratio = data.get("aspect_ratio")
+    language = data.get("language")
+    add_watermark = data.get("add_watermark")
+    safety_filter_level = data.get("safety_filter_level")
+    person_generation = data.get("person_generation")
+    arguments = [prompt, model_name, number_of_images, aspect_ratio, language, add_watermark, safety_filter_level, person_generation]
+    if None in arguments:
+        NoneParameters = [param for param in arguments is param is None]
+        return jsonify({"error": f"{NoneParameters} is(are) required"}), 400
+
+
+    try:
+        # 画像生成の実行（generate_image 関数は PIL Image のリストを返すと想定）
+        image_list = generate_image(prompt, model_name, number_of_images, aspect_ratio,
+                                    language, add_watermark, safety_filter_level, person_generation)
+        if not image_list:
+            return jsonify({"error": "No images generated"}), 500
+
+        # 最初の画像を base64 エンコードする
+        img_obj = image_list[0]
+        buffered = BytesIO()
+        img_obj.save(buffered, format="PNG")
+        img_base64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
+        return jsonify({"image_base64": img_base64})
+    except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 

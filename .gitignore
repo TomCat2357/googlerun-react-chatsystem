@@ -14,4 +14,5 @@ public
 FolderStructure.txt
 *.wav
 *.mp3
+*.txt
 node_modules
