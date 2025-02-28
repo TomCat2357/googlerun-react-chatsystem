@@ -221,7 +221,7 @@ def get_config(decoded_token: Dict) -> Response:
             "MAX_IMAGES": os.getenv("MAX_IMAGES"),
             "MAX_LONG_EDGE": os.getenv("MAX_LONG_EDGE"),
             "MAX_IMAGE_SIZE": os.getenv("MAX_IMAGE_SIZE"),
-            "MAX_PAYLOAD_SIZE": os.getenv("MAX_PAYLOAD_SIZE", "500000"),
+            "MAX_PAYLOAD_SIZE": os.getenv("MAX_PAYLOAD_SIZE"),
             "GOOGLE_MAPS_API_CACHE_TTL": os.getenv("GOOGLE_MAPS_API_CACHE_TTL"),
             "GEOCODING_NO_IMAGE_MAX_BATCH_SIZE": os.getenv(
                 "GEOCODING_NO_IMAGE_MAX_BATCH_SIZE"
@@ -231,7 +231,14 @@ def get_config(decoded_token: Dict) -> Response:
             ),
             "SPEECH_CHUNK_SIZE": os.getenv("SPEECH_CHUNK_SIZE"),
             "SPEECH_MAX_SECONDS": os.getenv("SPEECH_MAX_SECONDS"),
-            "MODELS": os.getenv("MODELS", ""),
+            "MODELS": os.getenv("MODELS"),
+            "IMAGEN_MODELS": os.getenv("IMAGEN_MODELS"),
+            "IMAGEN_NUMBER_OF_IMAGES": os.getenv("IMAGEN_NUMBER_OF_IMAGES"),
+            "IMAGEN_ASPECT_RATIOS": os.getenv("IMAGEN_ASPECT_RATIOS"),
+            "IMAGEN_LANGUAGES": os.getenv("IMAGEN_LANGUAGES"),
+            "IMAGEN_ADD_WATERMARK": os.getenv("IMAGEN_ADD_WATERMARK"),
+            "IMAGEN_SAFETY_FILTER_LEVELS": os.getenv("IMAGEN_SAFETY_FILTER_LEVELS"),
+            "IMAGEN_PERSON_GENERATIONS": os.getenv("IMAGEN_PERSON_GENERATIONS"),
         }
         response = make_response(jsonify(config_values))
         response.status_code = 200
@@ -688,37 +695,37 @@ def speech2text(decoded_token: dict, assembled_data=None) -> Response:
         return jsonify({"error": str(e)}), 500
 
 @app.route("/backend/generate-image", methods=["POST"])
+@require_auth
 def generate_image_endpoint():
-    # リクエスト JSON からパラメータを取得
-    data = request.get_json(force=True)
+    data = request.get_json()
     prompt = data.get("prompt")
-
     model_name = data.get("model_name")
+    negative_prompt = data.get("negative_prompt")
     number_of_images = data.get("number_of_images")
+    seed = data.get("seed")
     aspect_ratio = data.get("aspect_ratio")
-    language = data.get("language")
+    language = data.get("language", "auto")
     add_watermark = data.get("add_watermark")
     safety_filter_level = data.get("safety_filter_level")
     person_generation = data.get("person_generation")
-    arguments = [prompt, model_name, number_of_images, aspect_ratio, language, add_watermark, safety_filter_level, person_generation]
-    if None in arguments:
-        NoneParameters = [param for param in arguments is param is None]
+    kwarg = dict(prompt=prompt, model_name=model_name, negative_prompt=negative_prompt, seed=seed, number_of_images=number_of_images, aspect_ratio=aspect_ratio, language=language, add_watermark=add_watermark, safety_filter_level=safety_filter_level, person_generation=person_generation)
+    if None in kwarg.values() and seed is not None:
+        NoneParameters = [key for key, value in kwarg.items() if value is None and key != "seed"]
         return jsonify({"error": f"{NoneParameters} is(are) required"}), 400
 
 
     try:
         # 画像生成の実行（generate_image 関数は PIL Image のリストを返すと想定）
-        image_list = generate_image(prompt, model_name, number_of_images, aspect_ratio,
-                                    language, add_watermark, safety_filter_level, person_generation)
+        image_list = generate_image(*kwarg)
         if not image_list:
             return jsonify({"error": "No images generated"}), 500
 
         # 最初の画像を base64 エンコードする
-        img_obj = image_list[0]
-        buffered = BytesIO()
-        img_obj.save(buffered, format="PNG")
-        img_base64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
-        return jsonify({"image_base64": img_base64})
+        encode_images = []
+        for img_obj in image_list:
+            img_base64 = img_obj._as_base64_string()
+            encode_images.append(img_base64)
+        return jsonify({"images": encode_images})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

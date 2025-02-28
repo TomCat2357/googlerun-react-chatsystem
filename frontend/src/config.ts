@@ -27,18 +27,29 @@ let serverConfig = {
   MAX_IMAGES: 0,
   MAX_LONG_EDGE: 0,
   MAX_IMAGE_SIZE: 0,
-  MAX_PAYLOAD_SIZE: "0",
+  MAX_PAYLOAD_SIZE: 0,
   GOOGLE_MAPS_API_CACHE_TTL: 0,
   GEOCODING_NO_IMAGE_MAX_BATCH_SIZE: 0,
   GEOCODING_WITH_IMAGE_MAX_BATCH_SIZE: 0,
   SPEECH_MAX_SECONDS: 0,
-  MODELS: ""
+  MODELS: "",
+  // 追加する新しい設定
+  IMAGEN_MODELS: "",
+  IMAGEN_NUMBER_OF_IMAGES: "",
+  IMAGEN_ASPECT_RATIOS: "",
+  IMAGEN_LANGUAGES: "",
+  IMAGEN_ADD_WATERMARK: "",
+  IMAGEN_SAFETY_FILTER_LEVELS: "",
+  IMAGEN_PERSON_GENERATIONS: "",
 };
+
+
 
 /**
  * サーバー設定をメモリ上と IndexedDB に保存します。
  * @param config 新しいサーバー設定
  */
+
 export async function setServerConfig(config: typeof serverConfig) {
   serverConfig = config;
   try {
@@ -58,7 +69,6 @@ export async function setServerConfig(config: typeof serverConfig) {
     console.error("IndexedDB への設定保存に失敗しました:", error);
   }
 }
-
 /**
  * 現在のメモリ上のサーバー設定を返します。
  */
