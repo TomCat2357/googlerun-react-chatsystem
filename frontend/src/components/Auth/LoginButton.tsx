@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { getAuth, signInWithPopup, GoogleAuthProvider } from 'firebase/auth';
 import { app } from '../../firebase/firebase';
-import { API_BASE_URL, setServerConfig } from '../../config';
+import { fetchAndSaveServerConfig, setServerConfig } from '../../config';
 import * as indexedDBUtils from '../../utils/indexedDBUtils';
 
 export default function LoginButton() {
@@ -37,20 +37,10 @@ export default function LoginButton() {
 
       // ログイン後、IDトークンを取得してサーバー設定を取得
       const token = await result.user.getIdToken();
-      const response = await fetch(`${API_BASE_URL}/backend/config`, {
-        method: "GET",
-        headers: {
-          "Authorization": `Bearer ${token}`
-        }
-      });
-      if (!response.ok) {
-        throw new Error(`設定取得エラー: ${response.status}`);
-      }
-      const configData = await response.json();
-      // サーバー設定をグローバルに保持するためconfig.tsにもセット
-      setServerConfig(configData);
-      // また、IndexedDBにも保存（再ログイン時の更新のため）
-      await saveServerConfigToIndexedDB(configData);
+      // サーバー設定を取得
+      await fetchAndSaveServerConfig(token);  // config.tsから関数をインポート
+
+
 
       navigate('/app/main');
     } catch (err) {

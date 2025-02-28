@@ -107,6 +107,35 @@ export async function loadServerConfig() {
   }
 }
 
+/**
+ * サーバーから設定を取得し、メモリとIndexedDBに保存する関数
+ * @param token 認証トークン
+ * @returns 取得したサーバー設定
+ */
+export async function fetchAndSaveServerConfig(token: string): Promise<typeof serverConfig> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/backend/config`, {
+      method: "GET",
+      headers: {
+        "Authorization": `Bearer ${token}`
+      }
+    });
+    
+    if (!response.ok) {
+      throw new Error(`設定取得エラー: ${response.status}`);
+    }
+    
+    const configData = await response.json();
+    // サーバー設定をグローバルに保持するためconfig.tsにもセット
+    setServerConfig(configData);
+    
+    return configData;
+  } catch (error) {
+    console.error("サーバー設定取得エラー:", error);
+    throw error;
+  }
+}
+
 // モジュール読み込み時に IndexedDB から設定をロード
 loadServerConfig()
   .then((config) => {

@@ -11,7 +11,7 @@ from litellm import completion
 from utils.logger import *
 from utils.maps import *
 from utils.speech2text import transcribe_streaming_v2
-from backend.utils.generate_image import generate_image
+from utils.generate_image import generate_image
 
 # .envファイルを読み込み
 load_dotenv("./config/.env")
