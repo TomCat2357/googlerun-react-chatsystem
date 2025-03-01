@@ -42,6 +42,9 @@ CHUNK_STORE = {}
 origins = [f"http://localhost:{os.getenv('PORT', 8080)}"]
 if int(os.getenv("DEBUG", 0)):
     origins.append("http://localhost:5173")
+for org in os.getenv("ORIGINS", "").split(","):
+    if org:
+        origins.append(org)
 CORS(
     app,
     origins=origins,
@@ -733,12 +736,27 @@ def generate_image_endpoint(decoded_token: Dict) -> Response:
 
 if int(os.getenv("DEBUG")):
     FRONTEND_PATH = os.getenv("FRONTEND_PATH")
+    @app.route("/vite.svg")
+    def serve_favicon():
+        favicon_path = os.path.join(FRONTEND_PATH, "vite.svg")
+        logger.info(f"ファビコンリクエスト: {favicon_path}")
+    
+        if os.path.isfile(favicon_path):
+            logger.info("ファビコンを配信")
+            return send_from_directory(FRONTEND_PATH, "vite.svg", mimetype="image/svg+xml")
+        else:
+            logger.error(f"ファビコンファイルが見つかりません: {favicon_path}")
+            return "Favicon not found", 404
+
+
     @app.route("/")
     def index():
+        logger.info("インデックスページリクエスト: %s", FRONTEND_PATH)
         return send_from_directory(FRONTEND_PATH, "index.html")
 
     @app.route("/<path:path>")
     def static_file(path):
+        logger.info(f"パスリクエスト: /{path}")
         return send_from_directory(FRONTEND_PATH, path)
 
 

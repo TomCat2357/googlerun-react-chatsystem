@@ -1,8 +1,7 @@
-#%%
 import os
 import ipaddress
-from flask import Flask, request, abort, send_from_directory
-from flask_cors import CORS
+from flask import Flask, request, abort, send_from_directory, Response
+import requests
 from dotenv import load_dotenv
 from utils.logger import *
 from functools import wraps
@@ -13,19 +12,6 @@ app = Flask(__name__)
 load_dotenv("./config/.env.gateway")
 FRONTEND_PATH = os.environ.get('FRONTEND_PATH')
 BACKEND_PATH = os.environ.get('BACKEND_PATH')
-
-# CORS設定
-origins = [f"http://localhost:{os.getenv('PORT', 5555)}"]
-if int(os.getenv("DEBUG", 0)):
-    origins.append("http://localhost:5173")
-CORS(
-    app,
-    origins=origins,
-    supports_credentials=False,
-    expose_headers=["Authorization"],
-    allow_headers=["Content-Type", "Authorization"],
-    methods=["GET", "POST", "OPTIONS"],
-)
 
 # 環境変数から ALLOWED_IPS を取得（例："127.0.0.1/24,192.168.1.10"）
 gateway_env = os.environ.get('ALLOWED_IPS', '')
@@ -81,18 +67,156 @@ def allowed_ip_required(func):
         return func(*args, **kwargs)
     return wrapper
 
-@app.route("/")
+# バックエンドへのプロキシルート
+@app.route('/backend/<path:path>', methods=['GET', 'POST', 'OPTIONS'])
 @allowed_ip_required
-def render_frontend():
-    logger.info(f"Frontend request received {os.path.join(FRONTEND_PATH, 'index.html')}")
+def proxy_backend(path):
+    logger.info(f"バックエンドへのプロキシリクエスト: {path}")
+    
+    # リクエストURLの構築
+    target_url = f"{BACKEND_PATH}/backend/{path}"
+    logger.info(f"転送先URL: {target_url}")
+    
+    # オリジナルのリクエストヘッダーをコピー
+    headers = {key: value for key, value in request.headers.items()
+               if key.lower() not in ['host', 'content-length']}
+    
+    # リクエストメソッドに基づいて適切なリクエストを送信
+    try:
+        if request.method == 'GET':
+            resp = requests.get(
+                target_url,
+                params=request.args,
+                headers=headers,
+                cookies=request.cookies,
+                stream=True
+            )
+        elif request.method == 'POST':
+            resp = requests.post(
+                target_url,
+                json=request.get_json() if request.is_json else None,
+                data=request.form if not request.is_json else None,
+                files=request.files if request.files else None,
+                headers=headers,
+                cookies=request.cookies,
+                stream=True
+            )
+        elif request.method == 'OPTIONS':
+            resp = requests.options(
+                target_url,
+                headers=headers,
+                cookies=request.cookies
+            )
+        else:
+            return Response("メソッド未対応", status=405)
+        
+        # バックエンドからのレスポンスヘッダーを抽出
+        response_headers = [(key, value) for key, value in resp.headers.items()
+                           if key.lower() not in ['content-length', 'connection', 'transfer-encoding']]
+        
+        # ストリーミングレスポンスを返す
+        return Response(
+            resp.iter_content(chunk_size=10*1024),
+            status=resp.status_code,
+            headers=response_headers,
+            content_type=resp.headers.get('Content-Type', 'text/plain')
+        )
+        
+    except requests.RequestException as e:
+        logger.error(f"バックエンドプロキシエラー: {str(e)}")
+        return Response(f"バックエンド接続エラー: {str(e)}", status=500)
+
+# アセットファイルを処理（assets/ディレクトリ内のファイル用）
+@app.route("/assets/<path:path>")
+@allowed_ip_required
+def serve_assets(path):
+    logger.info(f"アセットファイルリクエスト: /assets/{path}")
+    assets_dir = os.path.join(FRONTEND_PATH, "assets")
+    if os.path.exists(assets_dir) and os.path.isfile(os.path.join(assets_dir, path)):
+        return send_from_directory(assets_dir, path)
+    else:
+        logger.warning(f"アセットファイルが見つかりません: {path}")
+        if not os.path.exists(assets_dir):
+            logger.error(f"アセットディレクトリが存在しません: {assets_dir}")
+        abort(404)
+
+# 標準的なファビコンルート
+@app.route("/favicon.ico")
+@allowed_ip_required
+def favicon_ico():
+    logger.info("favicon.ico リクエスト")
+    ico_path = os.path.join(FRONTEND_PATH, "favicon.ico")
+    if os.path.isfile(ico_path):
+        return send_from_directory(FRONTEND_PATH, "favicon.ico")
+    
+    # favicon.icoがない場合、vite.svgを代替として使用
+    svg_path = os.path.join(FRONTEND_PATH, "vite.svg")
+    if os.path.isfile(svg_path):
+        logger.info("favicon.ico の代わりに vite.svg を使用")
+        return send_from_directory(FRONTEND_PATH, "vite.svg")
+    
+    # 両方ともない場合は404
+    logger.warning("ファビコンが見つかりません")
+    abort(404)
+
+# Viteファビコンルート
+@app.route("/vite.svg")
+@allowed_ip_required
+def vite_svg():
+    logger.info("vite.svg リクエスト")
+    svg_path = os.path.join(FRONTEND_PATH, "vite.svg")
+    if os.path.isfile(svg_path):
+        # 明示的にMIMEタイプを指定
+        return send_from_directory(FRONTEND_PATH, "vite.svg", mimetype="image/svg+xml")
+    
+    logger.warning(f"vite.svg が見つかりません。確認パス: {svg_path}")
+    # ファイルが見つからない場合はFRONTEND_PATHの内容をログに出力
+    try:
+        logger.info(f"FRONTEND_PATH: {FRONTEND_PATH}")
+        logger.info(f"FRONTEND_PATH内のファイル一覧: {os.listdir(FRONTEND_PATH)}")
+    except Exception as e:
+        logger.error(f"FRONTEND_PATH内のファイル一覧取得エラー: {e}")
+    
+    abort(404)
+
+# ルートディレクトリにある他のファイル
+@app.route("/<filename>")
+@allowed_ip_required
+def root_files(filename):
+    file_path = os.path.join(FRONTEND_PATH, filename)
+    logger.info(f"ルートファイルリクエスト: {filename}, パス: {file_path}")
+    
+    if os.path.isfile(file_path):
+        logger.info(f"ファイルが見つかりました: {file_path}")
+        return send_from_directory(FRONTEND_PATH, filename)
+    else:
+        logger.info(f"ファイルが見つからないため、SPAルーティングに転送: {filename}")
+        return send_from_directory(FRONTEND_PATH, "index.html")
+
+# SPAルーティング用のパス処理（/app/など）
+@app.route("/<path:path>", methods=["GET"])
+@allowed_ip_required
+def static_file(path):
+    logger.info(f"パスリクエスト: /{path}")
+    file_path = os.path.join(FRONTEND_PATH, path)
+    
+    # 実際のファイルが存在するならそれを返す
+    if os.path.isfile(file_path):
+        logger.info(f"ファイルが見つかりました: {file_path}")
+        dir_path = os.path.dirname(file_path)
+        base_name = os.path.basename(file_path)
+        return send_from_directory(dir_path, base_name)
+    
+    # SPAルートの場合やファイルが見つからない場合は、index.htmlを返す
+    logger.info(f"SPAルートとして処理: {path}, index.htmlを返します")
     return send_from_directory(FRONTEND_PATH, "index.html")
 
-
-@app.route("/backend/<path:path>")
+# ルートパス
+@app.route("/", methods=["GET"])
 @allowed_ip_required
-def serve_backend_static(path):
-    logger.info(f"Backend request received: {path}")
-    return send_from_directory(os.path.join(BACKEND_PATH, 'backend'), path)
-#%%
+def index():
+    logger.info("インデックスページリクエスト")
+    return send_from_directory(FRONTEND_PATH, "index.html")
+
 if __name__ == '__main__':
     app.run(host="0.0.0.0", port=os.getenv("PORT", 5555), debug=int(os.getenv("DEBUG", 0)))
