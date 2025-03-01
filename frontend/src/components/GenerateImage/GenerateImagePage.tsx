@@ -44,80 +44,98 @@ const GenerateImagePage: React.FC = () => {
   // 選択肢のオプション
   const [modelOptions, setModelOptions] = useState<string[]>([]);
   const [aspectRatioOptions, setAspectRatioOptions] = useState<string[]>([]);
-  const [numberOfImagesOptions, setNumberOfImagesOptions] = useState<number[]>(
-    []
-  );
+  const [numberOfImagesOptions, setNumberOfImagesOptions] = useState<number[]>([]);
   const [languageOptions, setLanguageOptions] = useState<string[]>([]);
   const [safetyFilterOptions, setSafetyFilterOptions] = useState<string[]>([]);
-  const [personGenerationOptions, setPersonGenerationOptions] = useState<
-    string[]
-  >([]);
+  const [personGenerationOptions, setPersonGenerationOptions] = useState<string[]>([]);
 
   // 設定の読み込み
   useEffect(() => {
+    // サーバー設定がある場合のみ処理する
     if (serverConfig) {
-      // 各種設定オプションの初期化
+      // モデルオプション
       if (serverConfig.IMAGEN_MODELS) {
-        const models = serverConfig.IMAGEN_MODELS.split(",").map((m) =>
-          m.trim()
-        );
-        setModelOptions(models);
-        if (models.length > 0)
-          setParams((prev) => ({ ...prev, model_name: models[0] }));
+        try {
+          const { options, defaultOption } = Config.parseOptionsWithDefault(serverConfig.IMAGEN_MODELS);
+          if (options.length > 0) {
+            setModelOptions(options);
+            setParams(prev => ({ ...prev, model_name: defaultOption }));
+          }
+        } catch (err) {
+          console.error("モデルオプションの解析エラー:", err);
+        }
       }
 
+      // アスペクト比オプション
       if (serverConfig.IMAGEN_ASPECT_RATIOS) {
-        const ratios = serverConfig.IMAGEN_ASPECT_RATIOS.split(",").map((r) =>
-          r.trim()
-        );
-        setAspectRatioOptions(ratios);
-        if (ratios.length > 0)
-          setParams((prev) => ({ ...prev, aspect_ratio: ratios[0] }));
+        try {
+          const { options, defaultOption } = Config.parseOptionsWithDefault(serverConfig.IMAGEN_ASPECT_RATIOS);
+          if (options.length > 0) {
+            setAspectRatioOptions(options);
+            setParams(prev => ({ ...prev, aspect_ratio: defaultOption }));
+          }
+        } catch (err) {
+          console.error("アスペクト比オプションの解析エラー:", err);
+        }
       }
 
+      // 画像数オプション
       if (serverConfig.IMAGEN_NUMBER_OF_IMAGES) {
-        const numbers = serverConfig.IMAGEN_NUMBER_OF_IMAGES.split(",").map(
-          (n) => parseInt(n.trim())
-        );
-        setNumberOfImagesOptions(numbers);
-        if (numbers.length > 0)
-          setParams((prev) => ({ ...prev, number_of_images: numbers[0] }));
+        try {
+          const { options, defaultOption } = Config.parseNumberOptionsWithDefault(serverConfig.IMAGEN_NUMBER_OF_IMAGES);
+          if (options.length > 0) {
+            setNumberOfImagesOptions(options);
+            setParams(prev => ({ ...prev, number_of_images: defaultOption }));
+          }
+        } catch (err) {
+          console.error("画像数オプションの解析エラー:", err);
+        }
       }
 
+      // 言語オプション
       if (serverConfig.IMAGEN_LANGUAGES) {
-        const languages = serverConfig.IMAGEN_LANGUAGES.split(",").map((l) =>
-          l.trim()
-        );
-        setLanguageOptions(languages);
-        if (languages.length > 0)
-          setParams((prev) => ({ ...prev, language: languages[0] }));
+        try {
+          const { options, defaultOption } = Config.parseOptionsWithDefault(serverConfig.IMAGEN_LANGUAGES);
+          if (options.length > 0) {
+            setLanguageOptions(options);
+            setParams(prev => ({ ...prev, language: defaultOption }));
+          }
+        } catch (err) {
+          console.error("言語オプションの解析エラー:", err);
+        }
       }
 
+      // セーフティフィルターオプション
       if (serverConfig.IMAGEN_SAFETY_FILTER_LEVELS) {
-        const levels = serverConfig.IMAGEN_SAFETY_FILTER_LEVELS.split(",").map(
-          (l) => l.trim()
-        );
-        setSafetyFilterOptions(levels);
-        if (levels.length > 0)
-          setParams((prev) => ({ ...prev, safety_filter_level: levels[0] }));
+        try {
+          const { options, defaultOption } = Config.parseOptionsWithDefault(serverConfig.IMAGEN_SAFETY_FILTER_LEVELS);
+          if (options.length > 0) {
+            setSafetyFilterOptions(options);
+            setParams(prev => ({ ...prev, safety_filter_level: defaultOption }));
+          }
+        } catch (err) {
+          console.error("セーフティフィルターオプションの解析エラー:", err);
+        }
       }
 
+      // 人物生成オプション
       if (serverConfig.IMAGEN_PERSON_GENERATIONS) {
-        const options = serverConfig.IMAGEN_PERSON_GENERATIONS.split(",").map(
-          (o) => o.trim()
-        );
-        setPersonGenerationOptions(options);
-        if (options.length > 0)
-          setParams((prev) => ({ ...prev, person_generation: options[0] }));
+        try {
+          const { options, defaultOption } = Config.parseOptionsWithDefault(serverConfig.IMAGEN_PERSON_GENERATIONS);
+          if (options.length > 0) {
+            setPersonGenerationOptions(options);
+            setParams(prev => ({ ...prev, person_generation: defaultOption }));
+          }
+        } catch (err) {
+          console.error("人物生成オプションの解析エラー:", err);
+        }
       }
     }
   }, [serverConfig]);
 
   // フォーム変更ハンドラー
   const handleInputChange = (
-    e: React.ChangeEvent<
-      HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
-    >
+    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>
   ) => {
     const { name, value } = e.target;
     setParams((prev) => ({ ...prev, [name]: value }));
@@ -146,10 +164,7 @@ const GenerateImagePage: React.FC = () => {
         model_name: params.model_name,
         negative_prompt: params.negative_prompt || undefined,
         number_of_images: params.number_of_images,
-        seed:
-          params.seed && params.seed.trim() !== ""
-            ? parseInt(params.seed)
-            : null,
+        seed: params.seed && params.seed.trim() !== "" ? parseInt(params.seed) : null,
         aspect_ratio: params.aspect_ratio,
         language: params.language,
         add_watermark: params.add_watermark,
@@ -180,9 +195,7 @@ const GenerateImagePage: React.FC = () => {
       }
     } catch (err) {
       console.error("画像生成エラー:", err);
-      setError(
-        err instanceof Error ? err.message : "画像生成中にエラーが発生しました"
-      );
+      setError(err instanceof Error ? err.message : "画像生成中にエラーが発生しました");
     } finally {
       setIsGenerating(false);
     }

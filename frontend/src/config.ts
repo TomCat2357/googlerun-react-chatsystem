@@ -43,7 +43,50 @@ let serverConfig = {
   IMAGEN_PERSON_GENERATIONS: "",
 };
 
+/**
+ * カンマ区切り文字列から選択肢とデフォルト値を抽出
+ * - {}で囲まれた値をデフォルト値とする
+ * - {}で囲まれた値がなければ最初の値をデフォルト値とする
+ */
+export function parseOptionsWithDefault(optionsStr: string): { options: string[], defaultOption: string } {
+  if (!optionsStr || !optionsStr.trim()) {
+    return { options: [], defaultOption: '' };
+  }
+  
+  const items = optionsStr.split(',').map(item => item.trim());
+  let defaultOption = '';
+  
+  // {}で囲まれた値を探してデフォルト値を設定
+  const options = items.map(item => {
+    if (item.startsWith('{') && item.endsWith('}')) {
+      const cleanedItem = item.substring(1, item.length - 1);
+      defaultOption = cleanedItem;
+      return cleanedItem;
+    }
+    return item;
+  });
+  
+  // デフォルト値が見つからなければ最初の値をデフォルト値とする
+  if (!defaultOption && options.length > 0) {
+    defaultOption = options[0];
+  }
+  
+  return { options, defaultOption };
+}
 
+/**
+ * 数値型のオプション用解析関数
+ */
+export function parseNumberOptionsWithDefault(optionsStr: string): { options: number[], defaultOption: number } {
+  const { options: strOptions, defaultOption: strDefaultOption } = parseOptionsWithDefault(optionsStr);
+  const options = strOptions.map(opt => parseInt(opt, 10)).filter(num => !isNaN(num));
+  const defaultOption = parseInt(strDefaultOption, 10);
+  
+  return {
+    options,
+    defaultOption: isNaN(defaultOption) && options.length > 0 ? options[0] : defaultOption
+  };
+}
 
 /**
  * サーバー設定をメモリ上と IndexedDB に保存します。

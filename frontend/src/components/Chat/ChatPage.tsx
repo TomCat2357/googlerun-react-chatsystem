@@ -74,11 +74,9 @@ const ChatPage: React.FC = () => {
   useEffect(() => {
     const config = Config.getServerConfig();
     if (config.MODELS) {
-      const modelsArr = config.MODELS.split(",")
-        .map((m) => m.trim())
-        .filter((m) => m);
-      setModels(modelsArr);
-      setSelectedModel(modelsArr[0]);
+      const { options: modelsArr, defaultOption } = Config.parseOptionsWithDefault(config.MODELS);
+      setModels(modelsArr.filter(m => m));
+      setSelectedModel(defaultOption);
     }
   }, []);
 
