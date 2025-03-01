@@ -87,10 +87,7 @@ const ChatPage: React.FC = () => {
   const MAX_LONG_EDGE = Config.getServerConfig().MAX_LONG_EDGE || 1568;
   const MAX_IMAGE_SIZE = Config.getServerConfig().MAX_IMAGE_SIZE || 5242880;
   // 送信時のプロンプトサイズ上限（バイト数）
-  const MAX_PAYLOAD_SIZE = parseInt(
-    Config.getServerConfig().MAX_PAYLOAD_SIZE || "500000",
-    10
-  );
+  const MAX_PAYLOAD_SIZE = Config.getServerConfig().MAX_PAYLOAD_SIZE || 500000;
 
   /**
    * processImageFile

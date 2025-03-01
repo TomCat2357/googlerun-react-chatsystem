@@ -4,29 +4,13 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { getAuth, signInWithPopup, GoogleAuthProvider } from 'firebase/auth';
 import { app } from '../../firebase/firebase';
-import { fetchAndSaveServerConfig, setServerConfig } from '../../config';
-import * as indexedDBUtils from '../../utils/indexedDBUtils';
+import { fetchAndSaveServerConfig } from '../../config';
 
 export default function LoginButton() {
   const [error, setError] = useState<string>('');
   const navigate = useNavigate();
   const { setCurrentUser } = useAuth();
 
-  // IndexedDBにサーバー設定を保存するための関数
-  async function saveServerConfigToIndexedDB(config: any) {
-    const db = await indexedDBUtils.openDB("ServerConfigDB", 1, (db) => {
-      if (!db.objectStoreNames.contains("config")) {
-        db.createObjectStore("config", { keyPath: "id" });
-      }
-    });
-    const tx = db.transaction("config", "readwrite");
-    const store = tx.objectStore("config");
-    store.put({ id: "serverConfig", ...config });
-    await new Promise<void>((resolve, reject) => {
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-    });
-  }
 
   const handleLogin = async () => {
     try {

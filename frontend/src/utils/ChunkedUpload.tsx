@@ -12,8 +12,7 @@ function uint8ToBase64(data: Uint8Array): string {
 export async function sendChunkedRequest(chatRequest: any, token: string, destUrl: string): Promise<Response> {
   // Configモジュールからサーバー設定を取得し、最大プロンプトサイズ（バイト数）をパースする
   const serverConfig = Config.getServerConfig();
-  const MAX_PAYLOAD_SIZE = parseInt(serverConfig.MAX_PAYLOAD_SIZE, 10);
-
+  const MAX_PAYLOAD_SIZE = serverConfig.MAX_PAYLOAD_SIZE || 500000;
   const jsonStr = JSON.stringify(chatRequest);
   const encoder = new TextEncoder();
   const data = encoder.encode(jsonStr);
