@@ -1,10 +1,10 @@
 # app.py
-from flask import Flask, request, Response, jsonify, make_response,send_from_directory
+from flask import Flask, request, Response, jsonify, make_response, send_from_directory, abort
 from flask_cors import CORS
 from firebase_admin import auth, credentials
 from dotenv import load_dotenv
 from functools import wraps
-import os, json, firebase_admin, io, base64
+import os, json, firebase_admin, io, base64, ipaddress, time
 from PIL import Image
 from typing import Dict, Optional, Callable, List
 from litellm import completion
@@ -22,9 +22,7 @@ MAX_LONG_EDGE = int(os.getenv("MAX_LONG_EDGE"))
 MAX_IMAGE_SIZE = int(os.getenv("MAX_IMAGE_SIZE"))
 GOOGLE_MAPS_API_CACHE_TTL = int(os.getenv("GOOGLE_MAPS_API_CACHE_TTL"))
 GEOCODING_NO_IMAGE_MAX_BATCH_SIZE = int(os.getenv("GEOCODING_NO_IMAGE_MAX_BATCH_SIZE"))
-GEOCODING_WITH_IMAGE_MAX_BATCH_SIZE = int(
-    os.getenv("GEOCODING_WITH_IMAGE_MAX_BATCH_SIZE")
-)
+GEOCODING_WITH_IMAGE_MAX_BATCH_SIZE = int(os.getenv("GEOCODING_WITH_IMAGE_MAX_BATCH_SIZE"))
 SPEECH_MAX_SECONDS = int(os.getenv("SPEECH_MAX_SECONDS"))
 MAX_PAYLOAD_SIZE = int(os.getenv("MAX_PAYLOAD_SIZE", 128 * 1024**2))
 
@@ -34,6 +32,50 @@ firebase_admin.initialize_app(
 )
 
 app = Flask(__name__)
+
+# ===== IPアドレス制限機能（gateway.pyから移植） =====
+# ALLOWED_IPSは.envから取得する設定とする
+allowed_tokens = os.getenv('ALLOWED_IPS', '')
+allowed_networks = []
+for token in allowed_tokens.split(','):
+    token = token.strip()
+    if token:
+        try:
+            if '/' in token:
+                network = ipaddress.ip_network(token, strict=False)
+            else:
+                ip = ipaddress.ip_address(token)
+                network = ipaddress.ip_network(f"{ip}/{'32' if ip.version == 4 else '128'}")
+            allowed_networks.append(network)
+        except ValueError as e:
+            logger.error(f"無効なIPアドレスまたはネットワーク形式: {token}, エラー: {e}")
+
+def limit_remote_addr():
+    """リクエスト送信元IPが許可リストに含まれていなければ403を返す"""
+    remote_addr = request.headers.get("X-Forwarded-For", request.remote_addr)
+    logger.info(f"X-Forwarded-For: {remote_addr}")
+    if remote_addr and ',' in remote_addr:
+        remote_addr = remote_addr.split(',')[0].strip()
+    try:
+        client_ip = ipaddress.ip_address(remote_addr)
+        logger.info(f"リクエスト送信元IP: {client_ip}")
+    except ValueError:
+        time.sleep(0.05)
+        abort(400, description="不正なIPアドレス形式です")
+    
+    # IPがいずれかの許可されたネットワークに含まれているかチェック
+    for network in allowed_networks:
+        if client_ip in network:
+            return  # 許可されている場合、処理継続
+    
+    time.sleep(0.05)
+    abort(403, description="アクセスが許可されていません")
+
+# 全エンドポイントに対してIP制限を適用
+@app.before_request
+def ip_guard():
+    limit_remote_addr()
+# ===== IPアドレス制限機能 終了 =====
 
 # グローバルなチャンク保存用辞書
 CHUNK_STORE = {}
@@ -732,19 +774,49 @@ def generate_image_endpoint(decoded_token: Dict) -> Response:
         return jsonify({"error": str(e)}), 500
 
 
-if int(os.getenv("DEBUG")):
-    FRONTEND_PATH = os.getenv("FRONTEND_PATH")
+
+FRONTEND_PATH = os.getenv("FRONTEND_PATH")
 
 
-    @app.route("/")
-    def index():
-        logger.info("インデックスページリクエスト: %s", FRONTEND_PATH)
-        return send_from_directory(FRONTEND_PATH, "index.html")
+@app.route("/assets/<path:path>")
+def serve_assets(path):
+    logger.info(f"アセットファイルリクエスト: /assets/{path}")
+    assets_dir = os.path.join(FRONTEND_PATH, "assets")
+    if os.path.exists(assets_dir) and os.path.isfile(os.path.join(assets_dir, path)):
+        return send_from_directory(assets_dir, path)
+    else:
+        logger.warning(f"アセットファイルが見つかりません: {path}")
+        if not os.path.exists(assets_dir):
+            logger.error(f"アセットディレクトリが存在しません: {assets_dir}")
+        abort(404)
+# Viteファビコンルート
+@app.route("/vite.svg")
+def vite_svg():
+    logger.info("vite.svg リクエスト")
+    svg_path = os.path.join(FRONTEND_PATH, "vite.svg")
+    if os.path.isfile(svg_path):
+        # 明示的にMIMEタイプを指定
+        return send_from_directory(FRONTEND_PATH, "vite.svg", mimetype="image/svg+xml")
+    
+    logger.warning(f"vite.svg が見つかりません。確認パス: {svg_path}")
+    # ファイルが見つからない場合はFRONTEND_PATHの内容をログに出力
+    try:
+        logger.info(f"FRONTEND_PATH: {FRONTEND_PATH}")
+        logger.info(f"FRONTEND_PATH内のファイル一覧: {os.listdir(FRONTEND_PATH)}")
+    except Exception as e:
+        logger.error(f"FRONTEND_PATH内のファイル一覧取得エラー: {e}")
+    
+    abort(404)
+@app.route("/")
+def index():
+    logger.info("インデックスページリクエスト: %s", FRONTEND_PATH)
+    return send_from_directory(FRONTEND_PATH, "index.html")
 
-    @app.route("/<path:path>")
-    def static_file(path):
-        logger.info(f"パスリクエスト: /{path}")
-        return send_from_directory(FRONTEND_PATH, path)
+@app.route("/<path:path>")
+#@require_auth
+def static_file(path):
+    logger.info(f"パスリクエスト: /{path}")
+    return send_from_directory(FRONTEND_PATH, "index.html")
 
 
 if __name__ == "__main__":
