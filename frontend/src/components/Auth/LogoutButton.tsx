@@ -1,6 +1,7 @@
 import { getAuth } from 'firebase/auth';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import * as Config from '../../config'; // config.ts からインポート
 
 export default function LogoutButton() {
     const navigate = useNavigate();
@@ -9,7 +10,7 @@ export default function LogoutButton() {
         const auth = getAuth();
         try {
             await auth.signOut();
-            await axios.post(`${import.meta.env.VITE_API_BASE_URL}/backend/logout`, null, {
+            await axios.post(`${Config.API_BASE_URL}/backend/logout`, null, {
                 withCredentials: true
             });
             navigate('/');

@@ -1,16 +1,17 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { User, getAuth, onAuthStateChanged } from 'firebase/auth';
 import axios from 'axios';
+import * as Config from '../config'; // config.ts からインポート
 
-  // interfaceの更新も必要
-  interface AuthContextType {
-    currentUser: User | null;
-    setCurrentUser: (user: User | null) => void;
-    checkAuthStatus: () => Promise<boolean>;
-    loading: boolean;
-    refreshToken: () => Promise<string | null>;        
-    checkTokenExpiration: () => Promise<string | null>; 
-  }
+// interfaceの更新も必要
+interface AuthContextType {
+  currentUser: User | null;
+  setCurrentUser: (user: User | null) => void;
+  checkAuthStatus: () => Promise<boolean>;
+  loading: boolean;
+  refreshToken: () => Promise<string | null>;        
+  checkTokenExpiration: () => Promise<string | null>; 
+}
 
 // 認証コンテキストの作成
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -75,6 +76,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     return null;
   };
+
   // Firebaseの認証状態変更を監視
   useEffect(() => {
     console.log('AuthProviderのuseEffectが実行されました');
@@ -140,7 +142,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       
       // バックエンドへ認証確認リクエスト
       console.log('バックエンドへ認証確認のリクエストを送信します...');
-      const response = await axios.get(`${import.meta.env.VITE_API_BASE_URL}/backend/verify-auth`, {
+      const response = await axios.get(`${Config.API_BASE_URL}/backend/verify-auth`, {
         headers: {
           Authorization: `Bearer ${token}`,
         },

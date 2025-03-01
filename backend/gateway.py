@@ -125,7 +125,64 @@ def proxy_backend(path):
     except requests.RequestException as e:
         logger.error(f"バックエンドプロキシエラー: {str(e)}")
         return Response(f"バックエンド接続エラー: {str(e)}", status=500)
-
+@app.route('/app/<path:path>', methods=['GET', 'POST', 'OPTIONS'])
+@allowed_ip_required
+def proxy_frontend(path):
+    logger.info(f"フロントエンドへのプロキシリクエスト: {path}")
+    
+    # リクエストURLの構築
+    target_url = f"/app/{path}"
+    logger.info(f"転送先URL: {target_url}")
+    
+    # オリジナルのリクエストヘッダーをコピー
+    headers = {key: value for key, value in request.headers.items()
+               if key.lower() not in ['host', 'content-length']}
+    
+    # リクエストメソッドに基づいて適切なリクエストを送信
+    try:
+        if request.method == 'GET':
+            resp = requests.get(
+                target_url,
+                params=request.args,
+                headers=headers,
+                cookies=request.cookies,
+                stream=True
+            )
+        elif request.method == 'POST':
+            resp = requests.post(
+                target_url,
+                json=request.get_json() if request.is_json else None,
+                data=request.form if not request.is_json else None,
+                files=request.files if request.files else None,
+                headers=headers,
+                cookies=request.cookies,
+                stream=True
+            )
+        elif request.method == 'OPTIONS':
+            resp = requests.options(
+                target_url,
+                headers=headers,
+                cookies=request.cookies
+            )
+        else:
+            return Response("メソッド未対応", status=405)
+        
+        # フロントエンドからのレスポンスヘッダーを抽出
+        response_headers = [(key, value) for key, value in resp.headers.items()
+                           if key.lower() not in ['content-length', 'connection', 'transfer-encoding']]
+        
+        # ストリーミングレスポンスを返す
+        return Response(
+            resp.iter_content(chunk_size=10*1024),
+            status=resp.status_code,
+            headers=response_headers,
+            content_type=resp.headers.get('Content-Type', 'text/plain')
+        )
+        
+    except requests.RequestException as e:
+        logger.error(f"フロントエンドプロキシエラー: {str(e)}")
+        return Response(f"フロントエンド接続エラー: {str(e)}", status=500)
+    
 # アセットファイルを処理（assets/ディレクトリ内のファイル用）
 @app.route("/assets/<path:path>")
 @allowed_ip_required
@@ -139,6 +196,8 @@ def serve_assets(path):
         if not os.path.exists(assets_dir):
             logger.error(f"アセットディレクトリが存在しません: {assets_dir}")
         abort(404)
+
+
 
 # Viteファビコンルート
 @app.route("/vite.svg")

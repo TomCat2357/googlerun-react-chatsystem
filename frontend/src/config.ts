@@ -10,7 +10,7 @@
 import { openDB } from "./utils/indexedDBUtils";
 
 // APIのエンドポイントおよびFirebase設定（.env.localに残す設定）
-export const API_BASE_URL: string = import.meta.env.VITE_API_BASE_URL;
+export const API_BASE_URL: string = import.meta.env.VITE_API_BASE_URL || "";
 export const FIREBASE_CONFIG = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
   authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
