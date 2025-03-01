@@ -6,11 +6,11 @@ from dotenv import load_dotenv
 from utils.logger import *
 from functools import wraps
 
-FRONTEND_PATH = os.environ.get('FRONTEND_PATH')
+
 
 # .env.gateway から環境変数を読み込み
 load_dotenv("./config/.env.gateway")
-
+FRONTEND_PATH = os.environ.get('FRONTEND_PATH')
 app = Flask(__name__)
 
 # 環境変数から ALLOWED_IPS を取得（例："127.0.0.1/24,192.168.1.10"）
