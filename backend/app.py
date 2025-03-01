@@ -696,7 +696,7 @@ def speech2text(decoded_token: dict, assembled_data=None) -> Response:
 
 @app.route("/backend/generate-image", methods=["POST"])
 @require_auth
-def generate_image_endpoint():
+def generate_image_endpoint(decoded_token: Dict) -> Response:
     data = request.get_json()
     prompt = data.get("prompt")
     model_name = data.get("model_name")
@@ -708,15 +708,16 @@ def generate_image_endpoint():
     add_watermark = data.get("add_watermark")
     safety_filter_level = data.get("safety_filter_level")
     person_generation = data.get("person_generation")
-    kwarg = dict(prompt=prompt, model_name=model_name, negative_prompt=negative_prompt, seed=seed, number_of_images=number_of_images, aspect_ratio=aspect_ratio, language=language, add_watermark=add_watermark, safety_filter_level=safety_filter_level, person_generation=person_generation)
-    if None in kwarg.values() and seed is not None:
-        NoneParameters = [key for key, value in kwarg.items() if value is None and key != "seed"]
+    kwargs = dict(prompt=prompt, model_name=model_name, negative_prompt=negative_prompt, seed=seed, number_of_images=number_of_images, aspect_ratio=aspect_ratio, language=language, add_watermark=add_watermark, safety_filter_level=safety_filter_level, person_generation=person_generation)
+    logger.info(f"generate_image 関数の引数: {kwargs}")
+    if None in kwargs.values() and seed is not None:
+        NoneParameters = [key for key, value in kwargs.items() if value is None and key != "seed"]
         return jsonify({"error": f"{NoneParameters} is(are) required"}), 400
 
 
     try:
         # 画像生成の実行（generate_image 関数は PIL Image のリストを返すと想定）
-        image_list = generate_image(*kwarg)
+        image_list = generate_image(**kwargs)
         if not image_list:
             return jsonify({"error": "No images generated"}), 500
 

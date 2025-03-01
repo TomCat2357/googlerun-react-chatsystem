@@ -32,7 +32,7 @@ def generate_image(
     model = ImageGenerationModel.from_pretrained(model_name)
 
     # 画像生成の実行
-    kwarg = dict(
+    kwargs = dict(
         prompt=prompt,
         number_of_images=number_of_images,
         negative_prompt=negative_prompt,
@@ -43,8 +43,8 @@ def generate_image(
         person_generation=person_generation,
     )
     if seed is not None:
-        kwarg["seed"] = seed
-    images = model.generate_images(*kwarg)
+        kwargs["seed"] = seed
+    images = model.generate_images(**kwargs)
     image_list = images.images
     logger.info("画像の数：%d", len(image_list))
     return image_list  # %%
