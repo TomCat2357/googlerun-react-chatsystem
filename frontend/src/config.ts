@@ -120,15 +120,15 @@ export async function fetchAndSaveServerConfig(token: string): Promise<typeof se
         "Authorization": `Bearer ${token}`
       }
     });
-    
+
     if (!response.ok) {
       throw new Error(`設定取得エラー: ${response.status}`);
     }
-    
+
     const configData = await response.json();
     // サーバー設定をグローバルに保持するためconfig.tsにもセット
     setServerConfig(configData);
-    
+
     return configData;
   } catch (error) {
     console.error("サーバー設定取得エラー:", error);

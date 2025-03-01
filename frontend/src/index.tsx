@@ -15,8 +15,15 @@ import "./index.css";
 
 // 遅延ロードするコンポーネント
 const ChatPage = React.lazy(() => import("./components/Chat/ChatPage"));
-const GeocodingPage = React.lazy(() => import("./components/Geocoding/GeocodingPage"));
-const SpeechToTextPage = React.lazy(() => import("./components/SpeechToText/SpeechToTextPage"));
+const GeocodingPage = React.lazy(
+  () => import("./components/Geocoding/GeocodingPage")
+);
+const SpeechToTextPage = React.lazy(
+  () => import("./components/SpeechToText/SpeechToTextPage")
+);
+const GenerateImagePage = React.lazy(
+  () => import("./components/GenerateImage/GenerateImagePage")
+);
 
 // ローディング表示用コンポーネント
 const LoadingFallback = () => (
@@ -32,7 +39,7 @@ function App() {
         <div className="min-h-screen bg-dark-primary">
           <Routes>
             <Route path="/" element={<LoginPage />} />
-            
+
             <Route
               path="/app/*"
               element={
@@ -44,7 +51,14 @@ function App() {
                         <Route path="main" element={<MainPage />} />
                         <Route path="chat" element={<ChatPage />} />
                         <Route path="geocoding" element={<GeocodingPage />} />
-                        <Route path="speechtotext" element={<SpeechToTextPage />} />
+                        <Route
+                          path="speechtotext"
+                          element={<SpeechToTextPage />}
+                        />
+                        <Route
+                          path="generate-image"
+                          element={<GenerateImagePage />}
+                        />
                       </Routes>
                     </Suspense>
                   </>
