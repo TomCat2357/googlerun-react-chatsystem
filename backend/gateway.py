@@ -140,25 +140,6 @@ def serve_assets(path):
             logger.error(f"アセットディレクトリが存在しません: {assets_dir}")
         abort(404)
 
-# 標準的なファビコンルート
-@app.route("/favicon.ico")
-@allowed_ip_required
-def favicon_ico():
-    logger.info("favicon.ico リクエスト")
-    ico_path = os.path.join(FRONTEND_PATH, "favicon.ico")
-    if os.path.isfile(ico_path):
-        return send_from_directory(FRONTEND_PATH, "favicon.ico")
-    
-    # favicon.icoがない場合、vite.svgを代替として使用
-    svg_path = os.path.join(FRONTEND_PATH, "vite.svg")
-    if os.path.isfile(svg_path):
-        logger.info("favicon.ico の代わりに vite.svg を使用")
-        return send_from_directory(FRONTEND_PATH, "vite.svg")
-    
-    # 両方ともない場合は404
-    logger.warning("ファビコンが見つかりません")
-    abort(404)
-
 # Viteファビコンルート
 @app.route("/vite.svg")
 @allowed_ip_required
@@ -179,37 +160,8 @@ def vite_svg():
     
     abort(404)
 
-# ルートディレクトリにある他のファイル
-@app.route("/<filename>")
-@allowed_ip_required
-def root_files(filename):
-    file_path = os.path.join(FRONTEND_PATH, filename)
-    logger.info(f"ルートファイルリクエスト: {filename}, パス: {file_path}")
-    
-    if os.path.isfile(file_path):
-        logger.info(f"ファイルが見つかりました: {file_path}")
-        return send_from_directory(FRONTEND_PATH, filename)
-    else:
-        logger.info(f"ファイルが見つからないため、SPAルーティングに転送: {filename}")
-        return send_from_directory(FRONTEND_PATH, "index.html")
 
-# SPAルーティング用のパス処理（/app/など）
-@app.route("/<path:path>", methods=["GET"])
-@allowed_ip_required
-def static_file(path):
-    logger.info(f"パスリクエスト: /{path}")
-    file_path = os.path.join(FRONTEND_PATH, path)
-    
-    # 実際のファイルが存在するならそれを返す
-    if os.path.isfile(file_path):
-        logger.info(f"ファイルが見つかりました: {file_path}")
-        dir_path = os.path.dirname(file_path)
-        base_name = os.path.basename(file_path)
-        return send_from_directory(dir_path, base_name)
-    
-    # SPAルートの場合やファイルが見つからない場合は、index.htmlを返す
-    logger.info(f"SPAルートとして処理: {path}, index.htmlを返します")
-    return send_from_directory(FRONTEND_PATH, "index.html")
+
 
 # ルートパス
 @app.route("/", methods=["GET"])
