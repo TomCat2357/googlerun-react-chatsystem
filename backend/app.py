@@ -39,12 +39,10 @@ app = Flask(__name__)
 CHUNK_STORE = {}
 
 # CORS設定
-origins = [f"http://localhost:{os.getenv('PORT', 8080)}"]
+origins = [org for org in os.getenv("ORIGINS", "").split(",")]
 if int(os.getenv("DEBUG", 0)):
     origins.append("http://localhost:5173")
-for org in os.getenv("ORIGINS", "").split(","):
-    if org:
-        origins.append(org)
+
 CORS(
     app,
     origins=origins,

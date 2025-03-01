@@ -1,7 +1,5 @@
-import os
-import ipaddress
+import ipaddress, ipaddress, os, time, requests
 from flask import Flask, request, abort, send_from_directory, Response
-import requests
 from dotenv import load_dotenv
 from utils.logger import *
 from functools import wraps
@@ -35,7 +33,9 @@ for token in allowed_tokens:
         logger.error(f"無効なIPアドレスまたはネットワーク形式: {token}, エラー: {e}")
 
 def limit_remote_addr():
-    """リクエスト送信元IPが許可リストに含まれていなければ403を返す"""
+    """リクエスト送信元IPが許可リストに含まれていなければ403を返す
+    abortのときの0.05休みはDDos防止のため
+    """
     remote_addr = request.headers.get("X-Forwarded-For", request.remote_addr)
     logger.info(f"X-Forwarded-For: {remote_addr}")
     if remote_addr and ',' in remote_addr:
@@ -44,12 +44,8 @@ def limit_remote_addr():
         client_ip = ipaddress.ip_address(remote_addr)
         logger.info(f"リクエスト送信元IP: {client_ip}")
     except ValueError:
+        time.sleep(0.05)
         abort(400, description="不正なIPアドレス形式です")
-    
-    # 許可されたIPネットワークのリストが空の場合は全て許可
-    if not allowed_networks:
-        logger.warning("許可されたIPネットワークが設定されていません。全てのIPからのアクセスを許可します。")
-        return
     
     # IPがいずれかの許可されたネットワークに含まれているかチェック
     for network in allowed_networks:
@@ -57,6 +53,7 @@ def limit_remote_addr():
             return  # 許可されている場合、処理継続
     
     # どのネットワークにも含まれていない場合はアクセス拒否
+    time.sleep(0.05)
     abort(403, description="アクセスが許可されていません")
 
 # IP制限の処理をデコレーター化
@@ -125,63 +122,7 @@ def proxy_backend(path):
     except requests.RequestException as e:
         logger.error(f"バックエンドプロキシエラー: {str(e)}")
         return Response(f"バックエンド接続エラー: {str(e)}", status=500)
-@app.route('/app/<path:path>', methods=['GET', 'POST', 'OPTIONS'])
-@allowed_ip_required
-def proxy_frontend(path):
-    logger.info(f"フロントエンドへのプロキシリクエスト: {path}")
-    
-    # リクエストURLの構築
-    target_url = f"/app/{path}"
-    logger.info(f"転送先URL: {target_url}")
-    
-    # オリジナルのリクエストヘッダーをコピー
-    headers = {key: value for key, value in request.headers.items()
-               if key.lower() not in ['host', 'content-length']}
-    
-    # リクエストメソッドに基づいて適切なリクエストを送信
-    try:
-        if request.method == 'GET':
-            resp = requests.get(
-                target_url,
-                params=request.args,
-                headers=headers,
-                cookies=request.cookies,
-                stream=True
-            )
-        elif request.method == 'POST':
-            resp = requests.post(
-                target_url,
-                json=request.get_json() if request.is_json else None,
-                data=request.form if not request.is_json else None,
-                files=request.files if request.files else None,
-                headers=headers,
-                cookies=request.cookies,
-                stream=True
-            )
-        elif request.method == 'OPTIONS':
-            resp = requests.options(
-                target_url,
-                headers=headers,
-                cookies=request.cookies
-            )
-        else:
-            return Response("メソッド未対応", status=405)
-        
-        # フロントエンドからのレスポンスヘッダーを抽出
-        response_headers = [(key, value) for key, value in resp.headers.items()
-                           if key.lower() not in ['content-length', 'connection', 'transfer-encoding']]
-        
-        # ストリーミングレスポンスを返す
-        return Response(
-            resp.iter_content(chunk_size=10*1024),
-            status=resp.status_code,
-            headers=response_headers,
-            content_type=resp.headers.get('Content-Type', 'text/plain')
-        )
-        
-    except requests.RequestException as e:
-        logger.error(f"フロントエンドプロキシエラー: {str(e)}")
-        return Response(f"フロントエンド接続エラー: {str(e)}", status=500)
+
     
 # アセットファイルを処理（assets/ディレクトリ内のファイル用）
 @app.route("/assets/<path:path>")
@@ -223,11 +164,10 @@ def vite_svg():
 
 
 # ルートパス
-@app.route("/", methods=["GET"])
+@app.route("/<path:path>", methods=["GET"])
 @allowed_ip_required
-def index():
-    logger.info("インデックスページリクエスト")
+def index(path=""):
+    logger.info("インデックスページリクエスト: %s", path)
     return send_from_directory(FRONTEND_PATH, "index.html")
-
 if __name__ == '__main__':
     app.run(host="0.0.0.0", port=os.getenv("PORT", 5555), debug=int(os.getenv("DEBUG", 0)))
