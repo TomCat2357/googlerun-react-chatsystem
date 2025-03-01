@@ -731,7 +731,7 @@ def generate_image_endpoint(decoded_token: Dict) -> Response:
         return jsonify({"error": str(e)}), 500
 
 
-if os.getenv("DEBUG"):
+if int(os.getenv("DEBUG")):
     FRONTEND_PATH = os.getenv("FRONTEND_PATH")
     @app.route("/")
     def index():
