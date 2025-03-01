@@ -1,8 +1,7 @@
-// frontend/src/components/Auth/LoginButton.tsx
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
-import { getAuth, signInWithPopup, GoogleAuthProvider } from 'firebase/auth';
+import { getAuth, setPersistence, browserSessionPersistence, signInWithPopup, GoogleAuthProvider } from 'firebase/auth';
 import { app } from '../../firebase/firebase';
 import { fetchAndSaveServerConfig } from '../../config';
 
@@ -11,20 +10,20 @@ export default function LoginButton() {
   const navigate = useNavigate();
   const { setCurrentUser } = useAuth();
 
-
   const handleLogin = async () => {
     try {
       const auth = getAuth(app);
+      // 永続性をセッションストレージに設定（IndexedDB は使用しない）
+      await setPersistence(auth, browserSessionPersistence);
+      console.log("Persistence を browserSessionPersistence に設定しました");
+
       const provider = new GoogleAuthProvider();
       const result = await signInWithPopup(auth, provider);
       setCurrentUser(result.user);
 
       // ログイン後、IDトークンを取得してサーバー設定を取得
       const token = await result.user.getIdToken();
-      // サーバー設定を取得
-      await fetchAndSaveServerConfig(token);  // config.tsから関数をインポート
-
-
+      await fetchAndSaveServerConfig(token);
 
       navigate('/app/main');
     } catch (err) {
