@@ -9,9 +9,11 @@ node_modules
 public
 *.log
 *.pyc
-*firebase*.json
+*secret*.json
 *service_account*.json
+*credentials*.json
 FolderStructure.txt
+
 *.wav
 *.mp3
 *.txt

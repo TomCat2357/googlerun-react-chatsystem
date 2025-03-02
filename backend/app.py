@@ -28,8 +28,9 @@ SPEECH_MAX_SECONDS = int(os.getenv("SPEECH_MAX_SECONDS"))
 MAX_PAYLOAD_SIZE = int(os.getenv("MAX_PAYLOAD_SIZE", 128 * 1024**2))
 
 # Firebase Admin SDKの初期化
-firebase_admin.initialize_app()
-
+#firebase_admin.initialize_app()
+cred = credentials.Certificate("./config/KKH_client_secret.json")
+firebase_admin.initialize_app(cred)
 app = Flask(__name__)
 
 # ===== IPアドレス制限機能（gateway.pyから移植） =====
