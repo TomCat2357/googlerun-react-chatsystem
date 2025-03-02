@@ -2,8 +2,7 @@
 import React, { useState, useEffect } from "react";
 import { useToken } from "../../hooks/useToken";
 import * as Config from "../../config";
-import { useAuthGuard } from "../../utils/useAuthGuard";
-import PageLoader from "../../utils/PageLoader";
+
 
 interface ImageGenerationParams {
   prompt: string;
@@ -19,10 +18,7 @@ interface ImageGenerationParams {
 }
 
 const GenerateImagePage: React.FC = () => {
-  const authReady = useAuthGuard();
-  if (!authReady) {
-    return <PageLoader />;
-  }
+
   const token = useToken();
   const API_BASE_URL: string = Config.API_BASE_URL;
   const serverConfig = Config.getServerConfig();

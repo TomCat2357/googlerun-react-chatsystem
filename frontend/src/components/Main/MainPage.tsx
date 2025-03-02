@@ -1,16 +1,11 @@
 // frontend/src/components/Main/MainPage.tsx
 
 import { useNavigate } from "react-router-dom";
-import { useAuthGuard } from "../../utils/useAuthGuard";
-import PageLoader from "../../utils/PageLoader";
+
 
 const MainPage = () => {
   const navigate = useNavigate();
-  const authReady = useAuthGuard();
 
-  if (!authReady) {
-    return <PageLoader />;
-  }
 
 
   return (
