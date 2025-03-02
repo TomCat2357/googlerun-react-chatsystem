@@ -13,8 +13,8 @@ COPY backend/ ./backend/
 COPY frontend/dist/ ./frontend/dist/
 
 # 環境変数の設定
-ENV FRONTEND_PATH=/app/frontend/dist
-ENV GOOGLE_APPLICATION_CREDENTIALS=/app/backend/config/firebase_credential.json
+#ENV FRONTEND_PATH=/app/frontend/dist
+#ENV GOOGLE_APPLICATION_CREDENTIALS=/app/backend/config/firebase_credential.json
 
 # 作業ディレクトリを変更
 WORKDIR /app/backend
@@ -24,4 +24,6 @@ COPY start.sh /app/start.sh
 RUN chmod +x /app/start.sh
 
 # スクリプトを実行
+
+#CMD ["python", "app.py"]
 CMD ["/app/start.sh"]

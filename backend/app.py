@@ -1,3 +1,4 @@
+#%%
 # app.py
 from flask import Flask, request, Response, jsonify, make_response, send_from_directory, abort
 from flask_cors import CORS
@@ -27,9 +28,7 @@ SPEECH_MAX_SECONDS = int(os.getenv("SPEECH_MAX_SECONDS"))
 MAX_PAYLOAD_SIZE = int(os.getenv("MAX_PAYLOAD_SIZE", 128 * 1024**2))
 
 # Firebase Admin SDKの初期化
-firebase_admin.initialize_app(
-    credentials.Certificate(os.getenv("GOOGLE_APPLICATION_CREDENTIALS"))
-)
+firebase_admin.initialize_app()
 
 app = Flask(__name__)
 
@@ -818,7 +817,7 @@ def static_file(path):
     logger.info(f"パスリクエスト: /{path}")
     return send_from_directory(FRONTEND_PATH, "index.html")
 
-
+#%%
 if __name__ == "__main__":
     logger.info("Flaskアプリを起動します DEBUG: %s", bool(int(os.getenv("DEBUG", 0))))
     app.run(host = "0.0.0.0", port=int(os.getenv("PORT", "8080")), debug=bool(int(os.getenv("DEBUG", 0))))
