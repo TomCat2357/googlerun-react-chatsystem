@@ -21,7 +21,7 @@ def should_omit(path, omit_patterns):
                 return True
     return False
 
-def print_code(target_path, exts=None, base_dir=None, recursive=False, omit=None):
+def print_code(target_path, exts=None, exact_names=None, base_dir=None, recursive=False, omit=None):
     # Gitignoreルールに則った排除チェック
     if omit and should_omit(target_path, omit):
         return
@@ -30,11 +30,20 @@ def print_code(target_path, exts=None, base_dir=None, recursive=False, omit=None
         base_dir = os.path.dirname(target_path) if os.path.isfile(target_path) else target_path
 
     if os.path.isfile(target_path):
-        # 拡張子フィルタのチェック（指定がある場合）
-        if exts:
-            _, file_ext = os.path.splitext(target_path)
-            if file_ext.lower() not in exts:
-                return
+        file_name = os.path.basename(target_path)
+        _, file_ext = os.path.splitext(target_path)
+        
+        # ファイル名と拡張子のフィルタチェック
+        if exts or exact_names:
+            # 拡張子がある場合のチェック
+            if file_ext and exts and file_ext.lower() in exts:
+                pass  # 拡張子一致
+            # 拡張子がない、または完全一致のファイル名をチェック
+            elif exact_names and file_name in exact_names:
+                pass  # ファイル名完全一致
+            else:
+                return  # どのフィルタにも一致しない場合はスキップ
+                
         # 基準ディレクトリからの相対パスを表示
         rel_path = os.path.relpath(target_path, base_dir)
         print()
@@ -57,13 +66,13 @@ def print_code(target_path, exts=None, base_dir=None, recursive=False, omit=None
             # 再帰的に全てのサブディレクトリを探索
             for entry in sorted(os.listdir(target_path)):
                 entry_path = os.path.join(target_path, entry)
-                print_code(entry_path, exts, base_dir, recursive, omit)
+                print_code(entry_path, exts, exact_names, base_dir, recursive, omit)
         else:
             # 直下のファイルのみ処理（サブディレクトリは探索しない）
             for entry in sorted(os.listdir(target_path)):
                 entry_path = os.path.join(target_path, entry)
                 if os.path.isfile(entry_path):
-                    print_code(entry_path, exts, base_dir, recursive, omit)
+                    print_code(entry_path, exts, exact_names, base_dir, recursive, omit)
     else:
         print(f"エラー: '{target_path}' はファイルでもディレクトリでもありません。")
 
@@ -78,6 +87,13 @@ def main():
         nargs="*",
         default=None,
         help="対象とするファイルの拡張子（例: .py .txt）。指定がある場合はその拡張子のファイルのみ出力します。"
+    )
+    parser.add_argument(
+        "-n",
+        "--name",
+        nargs="*",
+        default=None,
+        help="対象とするファイル名（完全一致）。拡張子のないファイル（例: Dockerfile Makefile）を指定する場合に便利です。"
     )
     parser.add_argument(
         "-r",
@@ -96,6 +112,13 @@ def main():
 
     # 拡張子フィルタ（小文字に統一）
     exts = [ext.lower() for ext in args.ext] if args.ext else None
+    
+    # 完全一致ファイル名リスト
+    exact_names = args.name if args.name else None
+
+    # フィルタが何も指定されていない場合は全ファイル対象
+    if not exts and not exact_names:
+        print("情報: フィルタが指定されていないため、全てのファイルを出力します。")
 
     for target_path in args.path:
         target = os.path.abspath(target_path)
@@ -106,7 +129,7 @@ def main():
 
         # 複数のパスが指定された場合、カレントディレクトリをbase_dirとする
         base_dir = os.getcwd()
-        print_code(target, exts, base_dir, recursive=args.recursive, omit=args.omit)
+        print_code(target, exts, exact_names, base_dir, recursive=args.recursive, omit=args.omit)
 
 if __name__ == "__main__":
     main()
