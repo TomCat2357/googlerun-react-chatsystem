@@ -1,13 +1,17 @@
 version: '3.8'
 
 services:
-  backend:
+  app:
     build:
       context: .
       dockerfile: Dockerfile
     ports:
       - "8080:8080"
-    #environment:
-    #  - PORT=8080
-    #volumes:
-    #  - ./backend/config/.env:/app/config/.env:ro
+    environment:
+      - PORT=8080
+      - FRONTEND_PATH=/app/frontend/dist
+      - GOOGLE_APPLICATION_CREDENTIALS=/app/backend/config/firebase_credential.json
+    volumes:
+      - ./backend/config/.env:/app/backend/config/.env:ro
+      - ./backend/config/firebase_credential.json:/app/backend/config/firebase_credential.json:ro
+      - ./backend/config/vertexai_service_account.json:/app/backend/config/vertexai_service_account.json:ro

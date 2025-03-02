@@ -2,13 +2,25 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# 必要なファイルをコピー
-COPY ./app.py .
-COPY ./backend/config/ ./backend/config/
-COPY ./frontend/dist/ ./frontend/dist/
+# 必要なパッケージをインストール
+COPY backend/config/requirements.txt ./requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
-# 依存関係のインストール
-RUN pip install --no-cache-dir -r ./backend/config/requirements.txt
+# バックエンドのコードをコピー
+COPY backend/ ./backend/
 
-# サーバー起動
-CMD ["gunicorn", "--bind", "0.0.0.0:8080", "--workers", "1", "--timeout", "0", "app:app"]
+# フロントエンドのビルド済みファイルをコピー
+COPY frontend/dist/ ./frontend/dist/
+
+# 環境変数の設定
+ENV FRONTEND_PATH=/app/frontend/dist
+ENV GOOGLE_APPLICATION_CREDENTIALS=/app/backend/config/firebase_credential.json
+
+# 作業ディレクトリを変更
+WORKDIR /app/backend
+
+# ポート8080を公開
+EXPOSE 8080
+
+# アプリケーションを実行
+CMD ["python", "app.py"]
