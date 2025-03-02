@@ -5,10 +5,15 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        - PORT=${PORT}
+        - DEBUG=${DEBUG}
+        - GCR=${GCR}
     ports:
-      - "${PORT:-8000}:${PORT:-8000}"
+      - "${PORT}:${PORT}"
     environment:
-      - DEBUG=1  # デフォルトはデバッグモード有効
-      - PORT=8000 # ポート番号
-      #- FRONTEND_PATH=/app/frontend/dist
-      #- GOOGLE_APPLICATION_CREDENTIALS=/app/backend/config/firebase_credential.json
+      - PORT=${PORT}
+      - DEBUG=${DEBUG}
+      - GCR=${GCR}
+    env_file:
+      - .env

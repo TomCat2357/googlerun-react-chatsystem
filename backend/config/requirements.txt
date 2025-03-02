@@ -11,3 +11,4 @@ uvicorn==0.29.0
 asgiref==3.8.1
 h11==0.14.0
 httptools==0.6.1
+asgiref==3.8.1

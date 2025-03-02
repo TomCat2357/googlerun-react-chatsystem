@@ -1,33 +1,18 @@
 #!/bin/bash
 
-# 環境変数DEBUGがdocker-compose経由で設定されているか確認
-# 設定されていない場合は.envファイルから読み込む
-if [ -z "$DEBUG" ]; then
-  # .envファイルからDEBUGを読み込む
-  if [ -f /app/backend/config/.env ]; then
-    source /app/backend/config/.env
-  fi
-fi
+# 環境変数がすでに設定されているのでファイルからの読み込みは不要
 
-# PORTが設定されていない場合は.envから読み込み、それでもなければデフォルト値
-if [ -z "$PORT" ]; then
-  if [ -f /app/backend/config/.env ]; then
-    source /app/backend/config/.env
-  fi
-  # それでもPORTが設定されていない場合はデフォルト値を使用
-  if [ -z "$PORT" ]; then
-    PORT=8080
-  fi
-fi
-
+# 環境変数値を表示
 echo "DEBUG mode: $DEBUG"
 echo "Using PORT: $PORT"
+echo "GCR mode: $GCR"
 
-# DEBUG=0の場合はUvicornで起動
-if [ "$DEBUG" = "0" ]; then
-  echo "Starting with Uvicorn in production mode..."
-  exec uvicorn app:app --host 0.0.0.0 --port $PORT
-else
-  echo "Starting with Flask development server..."
+# GCRが0以外の場合は認証情報フォルダを削除
+if [ "$GCR" != "0" ]; then
+  echo "Running in Google Cloud Run environment, removing credentials folder..."
+  rm -rf /app/backend/credentials
+fi
+
+
   exec python app.py
 fi

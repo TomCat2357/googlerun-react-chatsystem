@@ -13,9 +13,15 @@ from utils.logger import *
 from utils.maps import *
 from utils.speech2text import transcribe_streaming_v2
 from utils.generate_image import generate_image
+import uvicorn
+from asgiref.wsgi import WsgiToAsgi
+    
+
 
 # .envファイルを読み込み
-load_dotenv("./config/.env")
+load_dotenv("./config/.env.server")
+load_dotenv("../.env")
+
 
 # 環境変数から設定を読み込み
 MAX_IMAGES = int(os.getenv("MAX_IMAGES"))
@@ -25,12 +31,26 @@ GOOGLE_MAPS_API_CACHE_TTL = int(os.getenv("GOOGLE_MAPS_API_CACHE_TTL"))
 GEOCODING_NO_IMAGE_MAX_BATCH_SIZE = int(os.getenv("GEOCODING_NO_IMAGE_MAX_BATCH_SIZE"))
 GEOCODING_WITH_IMAGE_MAX_BATCH_SIZE = int(os.getenv("GEOCODING_WITH_IMAGE_MAX_BATCH_SIZE"))
 SPEECH_MAX_SECONDS = int(os.getenv("SPEECH_MAX_SECONDS"))
-MAX_PAYLOAD_SIZE = int(os.getenv("MAX_PAYLOAD_SIZE", 128 * 1024**2))
+MAX_PAYLOAD_SIZE = int(os.getenv("MAX_PAYLOAD_SIZE"))
 
 # Firebase Admin SDKの初期化
-#firebase_admin.initialize_app()
-cred = credentials.Certificate("./config/KKH_client_secret.json")
-firebase_admin.initialize_app(cred)
+try:
+    # 初期化されているかチェック
+    firebase_admin.get_app()
+    logger.info("Firebase既に初期化済み")
+except ValueError:
+    # 初期化されていない場合のみ初期化
+    client_secret_path = "./config/KKH_client_secret.json"
+    if os.path.exists(client_secret_path):
+        logger.info(f"Firebase認証情報を読み込み: {client_secret_path}")
+        cred = credentials.Certificate(client_secret_path)
+        firebase_admin.initialize_app(cred)  # 名前を指定しない
+    else:
+        logger.info("Firebase認証情報なしで初期化")
+        firebase_admin.initialize_app()  # 名前を指定しない
+
+        
+
 app = Flask(__name__)
 
 # ===== IPアドレス制限機能（gateway.pyから移植） =====
@@ -820,5 +840,17 @@ def static_file(path):
 
 #%%
 if __name__ == "__main__":
-    logger.info("Flaskアプリを起動します DEBUG: %s", bool(int(os.getenv("DEBUG", 0))))
-    app.run(host = "0.0.0.0", port=int(os.getenv("PORT", "8080")), debug=bool(int(os.getenv("DEBUG", 0))))
+    if os.getenv("DEBUG"):
+        logger.info("Flaskアプリを起動します DEBUG: %s", bool(int(os.getenv("DEBUG", 0))))
+        app.run(host = "0.0.0.0", port=int(os.getenv("PORT", "8080")), debug=bool(int(os.getenv("DEBUG", 0))))
+    else:
+        logger.info("Uvicornを使用してFlaskアプリを起動します DEBUG: %s", bool(int(os.getenv("DEBUG", 0))))
+        asgi_app = WsgiToAsgi(app)
+        uvicorn.run(
+            asgi_app,
+            host="0.0.0.0", 
+            port=int(os.getenv("PORT", "8080")), 
+            reload=False
+        )
+
+    
