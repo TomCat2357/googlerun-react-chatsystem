@@ -40,7 +40,7 @@ try:
     logger.info("Firebase既に初期化済み")
 except ValueError:
     # 初期化されていない場合のみ初期化
-    client_secret_path = "./config/KKH_client_secret.json"
+    client_secret_path = "./credentials/KKH_client_secret.json"
     if os.path.exists(client_secret_path):
         logger.info(f"Firebase認証情報を読み込み: {client_secret_path}")
         cred = credentials.Certificate(client_secret_path)
