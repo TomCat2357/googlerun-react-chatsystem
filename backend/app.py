@@ -821,4 +821,4 @@ def static_file(path):
 
 if __name__ == "__main__":
     logger.info("Flaskアプリを起動します DEBUG: %s", bool(int(os.getenv("DEBUG", 0))))
-    app.run(port=int(os.getenv("PORT", "8080")), debug=bool(int(os.getenv("DEBUG", 0))))
+    app.run(host = "0.0.0.0", port=int(os.getenv("PORT", "8080")), debug=bool(int(os.getenv("DEBUG", 0))))

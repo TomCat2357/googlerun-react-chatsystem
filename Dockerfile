@@ -4,7 +4,7 @@ WORKDIR /app
 
 # 必要なパッケージをインストール
 COPY backend/config/requirements.txt ./requirements.txt
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt uvicorn
 
 # バックエンドのコードをコピー
 COPY backend/ ./backend/
@@ -19,8 +19,9 @@ ENV GOOGLE_APPLICATION_CREDENTIALS=/app/backend/config/firebase_credential.json
 # 作業ディレクトリを変更
 WORKDIR /app/backend
 
-# ポート8080を公開
-EXPOSE 8080
+# シェルスクリプトを追加して起動方法を条件分岐
+COPY start.sh /app/start.sh
+RUN chmod +x /app/start.sh
 
-# アプリケーションを実行
-CMD ["python", "app.py"]
+# スクリプトを実行
+CMD ["/app/start.sh"]

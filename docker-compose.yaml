@@ -6,12 +6,14 @@ services:
       context: .
       dockerfile: Dockerfile
     ports:
-      - "8080:8080"
+      - "${PORT:-8000}:${PORT:-8000}"
     environment:
-      - PORT=8080
+      - DEBUG=1  # デフォルトはデバッグモード有効
+      - PORT=8000 # ポート番号
       - FRONTEND_PATH=/app/frontend/dist
       - GOOGLE_APPLICATION_CREDENTIALS=/app/backend/config/firebase_credential.json
     volumes:
       - ./backend/config/.env:/app/backend/config/.env:ro
       - ./backend/config/firebase_credential.json:/app/backend/config/firebase_credential.json:ro
       - ./backend/config/vertexai_service_account.json:/app/backend/config/vertexai_service_account.json:ro
+      - ./start.sh:/app/start.sh:ro
