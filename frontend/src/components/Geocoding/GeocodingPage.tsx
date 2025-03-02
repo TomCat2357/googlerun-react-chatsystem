@@ -6,7 +6,8 @@ import * as Config from "../../config";
 import * as Encoding from "encoding-japanese";
 import { MapControls } from "./MapControls";
 import { imageCache } from "../../utils/imageCache";
-
+import { useAuthGuard } from "../../utils/useAuthGuard";
+import PageLoader from "../../utils/PageLoader";
 export interface GeoResult {
   query: string;
   status: string;
@@ -57,6 +58,10 @@ async function setCachedResult(result: GeoResult): Promise<void> {
 }
 
 const GeocodingPage = () => {
+  const authReady = useAuthGuard();
+  if (!authReady) {
+    return <PageLoader />;
+  }
   // 入力・結果関連のstate
   const [inputText, setInputText] = useState("");
   const [lineCount, setLineCount] = useState(0);
@@ -324,7 +329,8 @@ const GeocodingPage = () => {
               const cached = await getCachedResult(query);
               if (
                 cached &&
-                timestamp - (cached.fetchedAt || 0) < Config.getServerConfig().GOOGLE_MAPS_API_CACHE_TTL
+                timestamp - (cached.fetchedAt || 0) <
+                  Config.getServerConfig().GOOGLE_MAPS_API_CACHE_TTL
               ) {
                 cachedResults[query] = { ...cached, isCached: true };
               } else {
@@ -431,7 +437,8 @@ const GeocodingPage = () => {
               const cached = await getCachedResult(query);
               if (
                 cached &&
-                timestamp - (cached.fetchedAt || 0) < Config.getServerConfig().GOOGLE_MAPS_API_CACHE_TTL
+                timestamp - (cached.fetchedAt || 0) <
+                  Config.getServerConfig().GOOGLE_MAPS_API_CACHE_TTL
               ) {
                 cachedResults[query] = { ...cached, isCached: true };
               } else {

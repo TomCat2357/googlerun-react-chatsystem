@@ -84,7 +84,7 @@ CHUNK_STORE = {}
 origins = [org for org in os.getenv("ORIGINS", "").split(",")]
 if int(os.getenv("DEBUG", 0)):
     origins.append("http://localhost:5173")
-
+logger.info("ORIGINS: %s", origins)
 CORS(
     app,
     origins=origins,

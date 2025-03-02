@@ -7,8 +7,14 @@ import AudioUploader, { AudioInfo } from "./AudioUploader";
 import MetadataEditor from "./MetadataEditor";
 import AudioTranscriptPlayer, { TimedSegment } from "./AudioTranscriptPlayer";
 import TranscriptExporter from "./TranscriptExporter";
+import { useAuthGuard } from "../../utils/useAuthGuard";
+import PageLoader from "../../utils/PageLoader";
 
 const SpeechToTextPage = () => {
+  const authReady = useAuthGuard();
+  if (!authReady) {
+    return <PageLoader />;
+  }
   const token = useToken();
   const API_BASE_URL: string = Config.API_BASE_URL;
 

@@ -1,20 +1,10 @@
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../contexts/AuthContext";
+import LogoutButton from "../Auth/LogoutButton"; // LogoutButtonをインポート
 
 const Header = () => {
-  const { currentUser, setCurrentUser } = useAuth();
+  const { currentUser } = useAuth();
   const navigate = useNavigate();
-
-  const handleLogout = async () => {
-    try {
-      // ユーザー状態をクリア
-      setCurrentUser(null);
-      // ログインページにリダイレクト
-      navigate("/");
-    } catch (error) {
-      console.error("ログアウトエラー:", error);
-    }
-  };
 
   return (
     <header className="bg-dark-primary p-2 mb-2">
@@ -27,16 +17,11 @@ const Header = () => {
         </button>
         <div className="flex items-center gap-4">
           <span className="text-white">{currentUser?.email}</span>
-          <button
-            onClick={handleLogout}
-            className="px-3 py-1 bg-red-600 text-white rounded hover:bg-red-700 transition-colors"
-          >
-            ログアウト
-          </button>
+          <LogoutButton /> {/* LogoutButtonコンポーネントを使用 */}
         </div>
       </div>
     </header>
   );
 };
 
-export default Header;
+export default Header; // この行が欠けていました

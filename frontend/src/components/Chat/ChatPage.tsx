@@ -5,8 +5,15 @@ import { useToken } from "../../hooks/useToken";
 import * as indexedDBUtils from "../../utils/indexedDBUtils";
 import * as Config from "../../config";
 import { sendChunkedRequest } from "../../utils/ChunkedUpload";
+import { useAuthGuard } from "../../utils/useAuthGuard";
+import PageLoader from "../../utils/PageLoader";
 
 const ChatPage: React.FC = () => {
+  const authReady = useAuthGuard();
+  if (!authReady) {
+    return <PageLoader />;
+  }
+
   // ==========================
   //  State, Ref の定義
   // ==========================

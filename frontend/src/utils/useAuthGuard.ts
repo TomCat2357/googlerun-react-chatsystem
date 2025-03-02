@@ -1,35 +1,35 @@
-import { ReactNode, useEffect, useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import PageLoader from '../utils/PageLoader';
 
-interface ProtectedRouteProps {
-  children: ReactNode;
-}
-
-export default function ProtectedRoute({ children }: ProtectedRouteProps) {
+/**
+ * ページレベルでの認証ガード用カスタムフック
+ * @returns authReady - 認証チェックが完了したかどうか
+ */
+export function useAuthGuard(): boolean {
+  const [authReady, setAuthReady] = useState(false);
   const { currentUser, checkAuthStatus, loading } = useAuth();
   const navigate = useNavigate();
-  const [authChecked, setAuthChecked] = useState(false);
 
   useEffect(() => {
     let isMounted = true;
 
     const verifyAuth = async () => {
+      // 認証確認中はまだチェックしない
       if (loading) return;
 
       try {
-        console.log('ProtectedRoute: Starting auth verification');
         const isAuthenticated = await checkAuthStatus();
-        console.log('Authentication result:', isAuthenticated);
         
+        // コンポーネントがアンマウントされていないか確認
         if (!isMounted) return;
         
         if (!isAuthenticated) {
-          console.log('Redirecting to login page');
+          // 認証されていない場合はログインページにリダイレクト
           navigate('/', { replace: true });
         } else {
-          setAuthChecked(true);
+          // 認証が確認できたのでUIを表示可能
+          setAuthReady(true);
         }
       } catch (error) {
         console.error('認証チェックエラー:', error);
@@ -46,11 +46,5 @@ export default function ProtectedRoute({ children }: ProtectedRouteProps) {
     };
   }, [loading, checkAuthStatus, navigate, currentUser]);
 
-  // 認証チェック中またはチェックが完了していない場合はローディング画面を表示
-  if (loading || !authChecked) {
-    return <PageLoader message="認証状態を確認中..." />;
-  }
-
-  // 認証済みの場合のみ子コンポーネントを表示
-  return <>{children}</>;
+  return authReady;
 }
