@@ -4,4 +4,10 @@ firebase-admin==6.6.0
 python-dotenv==1.0.1
 litellm==1.59.0
 Pillow==11.0.0
-gunicorn==23.0.0
+google-cloud-aiplatform==1.82.0
+google-cloud-speech==2.31.0
+requests==2.32.3
+uvicorn==0.29.0
+asgiref==3.8.1
+h11==0.14.0
+httptools==0.6.1

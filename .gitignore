@@ -15,4 +15,5 @@ FolderStructure.txt
 *.wav
 *.mp3
 *.txt
+!requirements.txt
 node_modules
