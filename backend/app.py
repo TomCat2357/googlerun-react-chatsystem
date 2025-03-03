@@ -627,17 +627,7 @@ def latlng2query(decoded_token: Dict) -> Response:
         return error_response
 
 
-@app.route("/backend/logout", methods=["POST"])
-def logout() -> Response:
-    try:
-        logger.info("ログアウト処理開始")
-        response = make_response(
-            jsonify({"status": "success", "message": "ログアウトに成功しました"})
-        )
-        return response, 200
-    except Exception as e:
-        logger.error("ログアウト処理中にエラーが発生: %s", str(e), exc_info=True)
-        return jsonify({"error": str(e)}), 401
+
 
 
 @app.route("/backend/static-map", methods=["GET"])
@@ -834,7 +824,17 @@ def generate_image_endpoint(decoded_token: Dict) -> Response:
         error_message = str(e)
         logger.error(f"画像生成エラー: {error_message}", exc_info=True)
         return jsonify({"error": error_message}), 500
-
+@app.route("/backend/logout", methods=["POST"])
+def logout() -> Response:
+    try:
+        logger.info("ログアウト処理開始")
+        response = make_response(
+            jsonify({"status": "success", "message": "ログアウトに成功しました"})
+        )
+        return response, 200
+    except Exception as e:
+        logger.error("ログアウト処理中にエラーが発生: %s", str(e), exc_info=True)
+        return jsonify({"error": str(e)}), 401
 
 
 FRONTEND_PATH = os.getenv("FRONTEND_PATH")
