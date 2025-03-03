@@ -49,6 +49,13 @@ const AudioTranscriptPlayer: React.FC<AudioTranscriptPlayerProps> = ({
   const [cursorTime, setCursorTime] = useState<string | null>(null);
   const [showTimestamps, setShowTimestamps] = useState(false);
   
+  // 追加: 現在の選択範囲と位置を保存するための変数
+  const [selectionInfo, setSelectionInfo] = useState<{
+    element: HTMLElement | null;
+    start: number;
+    end: number;
+  }>({ element: null, start: 0, end: 0 });
+  
   const audioRef = useRef<HTMLAudioElement>(null);
 
   const handlePlayPause = () => {
@@ -114,14 +121,60 @@ const AudioTranscriptPlayer: React.FC<AudioTranscriptPlayerProps> = ({
   ) => {
     if (!isEditMode) return;
     
-    let newText = e.currentTarget.innerText;
+    const element = e.currentTarget;
+    let newText = element.innerText;
     if (!newText.trim()) {
       newText = " ";
     }
     
+    // 現在のカーソル位置を保存
+    const selection = window.getSelection();
+    if (selection && selection.rangeCount > 0) {
+      const range = selection.getRangeAt(0);
+      if (element.contains(range.startContainer)) {
+        setSelectionInfo({
+          element,
+          start: range.startOffset,
+          end: range.endOffset
+        });
+      }
+    }
+    
     const newSegments = [...editedTranscriptSegments];
     newSegments[index] = newText;
-    onEditedTranscriptChange(newSegments); // 親コンポーネントに変更を通知
+    onEditedTranscriptChange(newSegments);
+    
+    // カーソル位置を復元する処理をタイマーで遅延実行
+    setTimeout(() => {
+      if (selectionInfo.element === element) {
+        try {
+          const selection = window.getSelection();
+          if (selection) {
+            selection.removeAllRanges();
+            const range = document.createRange();
+            
+            // テキストノードを取得
+            let textNode = element.firstChild;
+            if (!textNode) {
+              // テキストノードがない場合は作成
+              textNode = document.createTextNode(newText);
+              element.appendChild(textNode);
+            }
+            
+            // 安全にオフセットを設定（テキスト長を超えないように）
+            const maxOffset = textNode.textContent?.length || 0;
+            const safeStart = Math.min(selectionInfo.start, maxOffset);
+            const safeEnd = Math.min(selectionInfo.end, maxOffset);
+            
+            range.setStart(textNode, safeStart);
+            range.setEnd(textNode, safeEnd);
+            selection.addRange(range);
+          }
+        } catch (err) {
+          console.error("カーソル位置復元エラー:", err);
+        }
+      }
+    }, 0);
   };
 
   return (
@@ -251,6 +304,20 @@ const AudioTranscriptPlayer: React.FC<AudioTranscriptPlayerProps> = ({
                         onKeyDown={(e) => {
                           if (e.key === "Enter") {
                             e.preventDefault();
+                          }
+                        }}
+                        // 選択範囲の変更を検出するイベントを追加
+                        onSelect={(e) => {
+                          const selection = window.getSelection();
+                          if (selection && selection.rangeCount > 0) {
+                            const range = selection.getRangeAt(0);
+                            if (e.currentTarget.contains(range.startContainer)) {
+                              setSelectionInfo({
+                                element: e.currentTarget,
+                                start: range.startOffset,
+                                end: range.endOffset
+                              });
+                            }
                           }
                         }}
                         onBlur={(e) => handleSegmentFinalize(e, index)}

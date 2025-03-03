@@ -107,26 +107,38 @@ const GeocodingPage = () => {
   
   // WebSocket接続を確立
   useEffect(() => {
+    // ページロード時にWebSocket接続を試みる
+    if (token) {
+      connectWebSocket();
+    }
+    
     // クリーンアップ関数
-    const cleanupSocket = () => {
+    return () => {
       if (socketRef.current) {
         socketRef.current.close();
         socketRef.current = null;
       }
     };
-    
-    return cleanupSocket;
-  }, []);
+  }, [token]); // tokenが更新されたら再接続
   
   // WebSocketの接続を確立する関数
   const connectWebSocket = () => {
-    if (socketRef.current && (socketRef.current.readyState === WebSocket.OPEN || socketRef.current.readyState === WebSocket.CONNECTING)) {
-      return;
+    // 既存の接続がある場合は閉じる
+    if (socketRef.current) {
+      if (socketRef.current.readyState === WebSocket.OPEN || 
+          socketRef.current.readyState === WebSocket.CONNECTING) {
+        socketRef.current.close();
+      }
+      socketRef.current = null;
     }
     
-    // HTTPSかHTTPかによってプロトコルを変更
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/ws/geocoding`;
+    // WebSocketのURLを作成（相対パスを使用）
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    // 現在のホスト名を使用
+    const host = window.location.host; 
+    const wsUrl = `${wsProtocol}//${host}/ws/geocoding`;
+    
+    console.log(`WebSocket接続を試みます: ${wsUrl}`);
     
     try {
       socketRef.current = new WebSocket(wsUrl);
@@ -138,6 +150,7 @@ const GeocodingPage = () => {
         
         // 認証メッセージを送信
         if (socketRef.current && token) {
+          console.log('認証メッセージを送信します');
           socketRef.current.send(JSON.stringify({
             type: 'AUTH',
             payload: { token }
@@ -396,22 +409,30 @@ const GeocodingPage = () => {
     setIsSending(true);
     setProgress(0);
     
-    // WebSocket接続を確立
+    // WebSocketが未接続の場合は再接続を試みる
     if (!isConnected) {
+      console.log('WebSocketが未接続です。接続を試みます。');
       connectWebSocket();
-      // 接続待機
+      
+      // 接続完了を待つ（最大5秒）
       let attempts = 0;
-      const maxAttempts = 5;
-      while (!isConnected && attempts < maxAttempts) {
-        await new Promise(resolve => setTimeout(resolve, 1000));
+      while (!isConnected && attempts < 10) {
+        await new Promise(resolve => setTimeout(resolve, 500));
         attempts++;
       }
       
       if (!isConnected) {
-        alert('WebSocket接続が確立できませんでした。ページを更新して再試行してください。');
+        alert('WebSocket接続を確立できませんでした。ページをリロードして再試行してください。');
         setIsSending(false);
         return;
       }
+    }
+    
+    // WebSocketが接続されていることを再確認
+    if (!socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) {
+      alert('WebSocket接続が確立されていません。再接続してください。');
+      setIsSending(false);
+      return;
     }
     
     // 初期結果配列をセットアップ（処理中の表示用）
