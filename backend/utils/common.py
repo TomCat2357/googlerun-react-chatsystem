@@ -1,0 +1,262 @@
+# utils/common.py
+import logging
+import os
+import base64
+import io
+import ipaddress
+from PIL import Image
+from google.cloud import secretmanager
+from firebase_admin import auth
+from typing import Dict, Optional, Any, List
+from flask import request, abort, make_response, jsonify, Response
+import time
+import json
+from functools import wraps
+
+# ロギング設定
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s",
+    handlers=[logging.StreamHandler(), logging.FileHandler("app.log")],
+)
+logger = logging.getLogger(__name__)
+
+# 環境変数から設定を読み込み
+MAX_IMAGES = int(os.getenv("MAX_IMAGES", "4"))
+MAX_LONG_EDGE = int(os.getenv("MAX_LONG_EDGE", "1024"))
+MAX_IMAGE_SIZE = int(os.getenv("MAX_IMAGE_SIZE", "1048576"))  # 1MB
+GOOGLE_MAPS_API_CACHE_TTL = int(os.getenv("GOOGLE_MAPS_API_CACHE_TTL", "86400"))  # 24時間
+GEOCODING_NO_IMAGE_MAX_BATCH_SIZE = int(os.getenv("GEOCODING_NO_IMAGE_MAX_BATCH_SIZE", "100"))
+GEOCODING_WITH_IMAGE_MAX_BATCH_SIZE = int(os.getenv("GEOCODING_WITH_IMAGE_MAX_BATCH_SIZE", "20"))
+SPEECH_MAX_SECONDS = int(os.getenv("SPEECH_MAX_SECONDS", "300"))
+MAX_PAYLOAD_SIZE = int(os.getenv("MAX_PAYLOAD_SIZE", "10485760"))  # 10MB
+
+# グローバルなチャンク保存用辞書
+CHUNK_STORE = {}
+
+# Secret Managerからシークレットを取得するための関数
+def access_secret(secret_id, version_id="latest"):
+    """
+    Secret Managerからシークレットを取得する関数
+    """
+    try:
+        logger.info(f"Secret Managerから{secret_id}を取得しています")
+        project_id = os.getenv("GOOGLE_CLOUD_PROJECT")
+        if not project_id:
+            # プロジェクトIDが環境変数に設定されていない場合はメタデータから取得
+            import requests
+            project_id = requests.get(
+                "http://metadata.google.internal/computeMetadata/v1/project/project-id",
+                headers={"Metadata-Flavor": "Google"}
+            ).text
+        
+        client = secretmanager.SecretManagerServiceClient()
+        name = f"projects/{project_id}/secrets/{secret_id}/versions/{version_id}"
+        response = client.access_secret_version(request={"name": name})
+        return response.payload.data.decode("UTF-8")
+    except Exception as e:
+        logger.error(f"Secret Managerからのシークレット取得に失敗: {str(e)}", exc_info=True)
+        return None
+
+
+# Google Maps APIキーを取得するための関数
+def get_google_maps_api_key():
+    """
+    環境変数からGoogle Maps APIキーを取得し、なければSecret Managerから取得する
+    """
+    api_key = os.getenv("GOOGLE_MAPS_API_KEY")
+    if not api_key:
+        logger.info("環境変数にGoogle Maps APIキーが設定されていないため、Secret Managerから取得します")
+        api_key = access_secret("google-maps-api-key")
+        if not api_key:
+            raise Exception("Google Maps APIキーが見つかりません")
+    return api_key
+
+
+def process_uploaded_image(image_data: str) -> str:
+    """
+    画像データを処理し、サイズや形式を調整する
+    """
+    try:
+        header = None
+        if image_data.startswith("data:"):
+            header, image_data = image_data.split(",", 1)
+        image_bytes = base64.b64decode(image_data)
+        image = Image.open(io.BytesIO(image_bytes))
+        if image.mode not in ("RGB", "RGBA"):
+            image = image.convert("RGB")
+        width, height = image.size
+        logger.info(
+            "元の画像サイズ: %dx%dpx, 容量: %.1fKB",
+            width,
+            height,
+            len(image_bytes) / 1024,
+        )
+        if max(width, height) > MAX_LONG_EDGE:
+            scale = MAX_LONG_EDGE / max(width, height)
+            new_width = int(width * scale)
+            new_height = int(height * scale)
+            image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+            logger.info("リサイズ後: %dx%dpx", new_width, new_height)
+        quality = 85
+        output = io.BytesIO()
+        output_format = "JPEG"
+        mime_type = "image/jpeg"
+        if header and "png" in header.lower():
+            output_format = "PNG"
+            mime_type = "image/png"
+            image.save(output, format=output_format, optimize=True)
+        else:
+            image = image.convert("RGB")
+            image.save(output, format=output_format, quality=quality, optimize=True)
+        output_data = output.getvalue()
+        logger.info(
+            "圧縮後の容量: %.1fKB (quality=%d)", len(output_data) / 1024, quality
+        )
+        while len(output_data) > MAX_IMAGE_SIZE and quality > 30:
+            quality -= 10
+            output = io.BytesIO()
+            image.save(output, format=output_format, quality=quality, optimize=True)
+            output_data = output.getvalue()
+            logger.info(
+                "再圧縮後の容量: %.1fKB (quality=%d)", len(output_data) / 1024, quality
+            )
+        processed_base64 = base64.b64encode(output_data).decode("utf-8")
+        return f"data:{mime_type};base64,{processed_base64}"
+    except Exception as e:
+        logger.error("画像処理エラー: %s", str(e), exc_info=True)
+        return image_data
+
+
+def verify_firebase_token(token: str) -> Dict[str, Any]:
+    """Firebase認証トークンを検証し、デコードされたトークンを返す"""
+    try:
+        decoded_token = auth.verify_id_token(token, clock_skew_seconds=60)
+        return decoded_token
+    except Exception as e:
+        logger.error("認証エラー: %s", str(e), exc_info=True)
+        raise e
+
+def get_api_key_for_model(model: str) -> Optional[str]:
+    """モデル名からAPIキーを取得する"""
+    source = model.split("/")[0] if "/" in model else model
+    return json.loads(os.getenv("MODEL_API_KEYS", "{}")).get(source, "")
+
+def limit_remote_addr():
+    """リクエスト送信元IPが許可リストに含まれていなければ403を返す"""
+    remote_addr = request.headers.get("X-Forwarded-For", request.remote_addr)
+    logger.info(f"X-Forwarded-For: {remote_addr}")
+    if remote_addr and ',' in remote_addr:
+        remote_addr = remote_addr.split(',')[0].strip()
+    try:
+        client_ip = ipaddress.ip_address(remote_addr)
+        logger.info(f"リクエスト送信元IP: {client_ip}")
+    except ValueError:
+        time.sleep(0.05)
+        abort(400, description="不正なIPアドレス形式です")
+    
+    # ALLOWED_IPSは.envから取得する設定とする
+    allowed_tokens = os.getenv('ALLOWED_IPS', '')
+    allowed_networks = []
+    for token in allowed_tokens.split(','):
+        token = token.strip()
+        if token:
+            try:
+                if '/' in token:
+                    network = ipaddress.ip_network(token, strict=False)
+                else:
+                    ip = ipaddress.ip_address(token)
+                    network = ipaddress.ip_network(f"{ip}/{'32' if ip.version == 4 else '128'}")
+                allowed_networks.append(network)
+            except ValueError as e:
+                logger.error(f"無効なIPアドレスまたはネットワーク形式: {token}, エラー: {e}")
+    
+    # IPがいずれかの許可されたネットワークに含まれているかチェック
+    for network in allowed_networks:
+        if client_ip in network:
+            return  # 許可されている場合、処理継続
+    
+    time.sleep(0.05)
+    abort(403, description="アクセスが許可されていません")
+
+def handle_chunked_request(function):
+    """チャンクリクエストを処理するデコレータ"""
+    @wraps(function)
+    def decorated_function(*args, **kwargs) -> Response:
+        logger.info("MAX_PAYLOAD_SIZE: %s", MAX_PAYLOAD_SIZE)
+        data = request.get_json() or {}
+        if data.get("chunked"):
+            logger.info("チャンクされたデータです")
+            try:
+                chunk_id = data.get("chunkId")
+                chunk_index = data.get("chunkIndex")
+                total_chunks = data.get("totalChunks")
+                chunk_data_b64 = data.get("chunkData")
+                if (
+                    not chunk_id
+                    or chunk_index is None
+                    or not total_chunks
+                    or not chunk_data_b64
+                ):
+                    raise ValueError("チャンク情報が不足しています")
+                # base64デコードしてバイナリ取得
+                chunk_data = base64.b64decode(chunk_data_b64)
+                if chunk_id not in CHUNK_STORE:
+                    CHUNK_STORE[chunk_id] = {}
+                CHUNK_STORE[chunk_id][chunk_index] = chunk_data
+                logger.info(
+                    "チャンク受信: %s - インデックス %d/%d",
+                    chunk_id,
+                    chunk_index,
+                    total_chunks,
+                )
+                if len(CHUNK_STORE[chunk_id]) < total_chunks:
+                    return (
+                        jsonify(
+                            {
+                                "status": "chunk_received",
+                                "chunkId": chunk_id,
+                                "received": len(CHUNK_STORE[chunk_id]),
+                                "total": total_chunks,
+                            }
+                        ),
+                        200,
+                    )
+                # 全チャンク受信済みの場合、順次再構築
+                assembled_bytes = b"".join(
+                    CHUNK_STORE[chunk_id][i] for i in range(total_chunks)
+                )
+                del CHUNK_STORE[chunk_id]
+                assembled_str = assembled_bytes.decode("utf-8")
+                data = json.loads(assembled_str)
+                logger.info("全チャンク受信完了: %s", chunk_id)
+                kwargs["assembled_data"] = data
+            except Exception as e:
+                logger.error("チャンク組み立てエラー: %s", str(e), exc_info=True)
+                return jsonify({"status": "error", "message": str(e)}), 500
+        else:
+            logger.info("チャンクされていないデータです")
+        return function(*args, **kwargs)
+
+    return decorated_function
+
+def require_auth(function):
+    """Firebase認証を要求するデコレータ"""
+    @wraps(function)
+    def decorated_function(*args, **kwargs) -> Response:
+        try:
+            auth_header = request.headers.get("Authorization")
+            if not auth_header or not auth_header.startswith("Bearer "):
+                logger.warning("トークンが見つかりません")
+                return jsonify({"error": "認証が必要です"}), 401
+            token = auth_header.split("Bearer ")[1]
+            decoded_token: Dict = auth.verify_id_token(token, clock_skew_seconds=60)
+            response: Response = function(decoded_token, *args, **kwargs)
+            return response
+        except Exception as e:
+            logger.error("認証エラー: %s", str(e), exc_info=True)
+            response = make_response(jsonify({"error": str(e)}))
+            response.status_code = 401
+            return response
+
+    return decorated_function
