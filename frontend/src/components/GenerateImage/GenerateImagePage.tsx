@@ -164,7 +164,7 @@ const GenerateImagePage: React.FC = () => {
       const payload = {
         prompt: params.prompt,
         model_name: params.model_name,
-        negative_prompt: params.negative_prompt || "", // 空文字列をデフォルト値として設定
+        negative_prompt: params.negative_prompt || undefined,
         number_of_images: params.number_of_images,
         seed: params.seed && params.seed.trim() !== "" ? parseInt(params.seed) : null,
         aspect_ratio: params.aspect_ratio,
