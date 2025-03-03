@@ -98,22 +98,41 @@ async def verify_token(websocket: WebSocket):
     WebSocketの認証を行う
     """
     try:
-        # クライアントからの最初のメッセージを待機
-        data = await websocket.receive_json()
-        if data["type"] != "AUTH":
-            await websocket.close(code=1008, reason="認証が必要です")
-            return None
+        logger.info("WebSocket認証: クライアントからの認証メッセージ待機中")
+        # タイムアウト設定の追加
+        try:
+            data = await asyncio.wait_for(websocket.receive_json(), timeout=15.0)  # タイムアウト時間を延長
+            logger.info(f"WebSocket認証: メッセージ受信 type={data.get('type')}")
+            
+            if data.get("type") != "AUTH":
+                logger.error(f"WebSocket認証: 不正なメッセージタイプ {data.get('type')}")
+                await websocket.close(code=1008, reason="認証が必要です")
+                return None
 
-        token = data["payload"].get("token")
-        if not token:
-            await websocket.close(code=1008, reason="トークンが見つかりません")
-            return None
+            token = data["payload"].get("token")
+            if not token:
+                logger.error("WebSocket認証: トークンが見つかりません")
+                await websocket.close(code=1008, reason="トークンが見つかりません")
+                return None
 
-        # Firebase認証トークンを検証
-        decoded_token = verify_firebase_token(token)
-        logger.info(f"WebSocket認証成功: {decoded_token.get('email')}")
-        return decoded_token
+            # Firebase認証トークンを検証
+            try:
+                decoded_token = verify_firebase_token(token)
+                logger.info(f"WebSocket認証成功: {decoded_token.get('email')}")
+                return decoded_token
+            except Exception as auth_error:
+                logger.error(f"Firebase認証エラー: {str(auth_error)}")
+                await websocket.close(code=1008, reason=f"認証エラー: {str(auth_error)}")
+                return None
+        except asyncio.TimeoutError:
+            logger.error("WebSocket認証: タイムアウト")
+            await websocket.close(code=1008, reason="認証タイムアウト")
+            return None
     except Exception as e:
         logger.error(f"WebSocket認証エラー: {str(e)}")
-        await websocket.close(code=1008, reason=f"認証エラー: {str(e)}")
+        try:
+            await websocket.close(code=1008, reason=f"認証エラー: {str(e)}")
+        except Exception:
+            # WebSocketが既に閉じられている場合のエラーを無視
+            pass
         return None

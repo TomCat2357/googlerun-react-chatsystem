@@ -7,6 +7,7 @@ import os, json, firebase_admin, asyncio, base64
 from typing import Dict, Any
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.wsgi import WSGIMiddleware
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uvicorn
 
@@ -50,8 +51,7 @@ manager = ConnectionManager()
 
 # CORS設定
 origins = [org for org in os.getenv("ORIGINS", "").split(",")]
-if int(os.getenv("DEBUG", 0)):
-    origins.append("http://localhost:5173")
+origins.append("http://localhost:5173")
 logger.info("ORIGINS: %s", origins)
 CORS(
     app,
@@ -60,6 +60,15 @@ CORS(
     expose_headers=["Authorization"],
     allow_headers=["Content-Type", "Authorization"],
     methods=["GET", "POST", "OPTIONS"],
+)
+
+# FastAPIのCORS設定を追加（WebSocket用）
+fastapi_app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,  # FlaskのCORS設定と同じorigins変数を使用
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # 全エンドポイントに対してIP制限を適用
@@ -76,22 +85,30 @@ class GeocodeRequest(BaseModel):
 # WebSocketエンドポイント
 @fastapi_app.websocket("/ws/geocoding")
 async def websocket_geocoding(websocket: WebSocket):
+    logger.info("WebSocket接続リクエスト受信")
     await websocket.accept()
     
     client_id = f"client_{id(websocket)}"
+    logger.info(f"WebSocketクライアントID割り当て: {client_id}")
     
     try:
         # 認証
+        logger.info("WebSocket認証処理開始")
         decoded_token = await verify_token(websocket)
         if not decoded_token:
+            logger.error("WebSocket認証失敗")
             return
+        
+        logger.info(f"WebSocket認証成功: {decoded_token.get('email')}")
         
         # 接続の確立
         await manager.connect(websocket, client_id)
         
         # メッセージの処理
         while True:
+            logger.info("WebSocketメッセージ待機中")
             data = await websocket.receive_json()
+            logger.info(f"WebSocketメッセージ受信: {data['type']}")
             
             if data["type"] == WebSocketMessageType.GEOCODE_REQUEST:
                 payload = data["payload"]
@@ -191,7 +208,23 @@ def verify_auth(decoded_token: Dict) -> Response:
         response = make_response(jsonify({"error": str(e)}))
         response.status_code = 401
         return response
-
+# テスト用の最小限WebSocketエンドポイント
+@fastapi_app.websocket("/ws/echo")
+async def websocket_echo(websocket: WebSocket):
+    logger.info("Echoテスト: WebSocket接続リクエスト受信")
+    await websocket.accept()
+    logger.info("Echoテスト: WebSocket接続確立")
+    try:
+        while True:
+            data = await websocket.receive_text()
+            logger.info(f"Echoテスト: メッセージ受信: {data}")
+            await websocket.send_text(f"Echo: {data}")
+    except WebSocketDisconnect:
+        logger.info("Echoテスト: クライアント切断")
+    except Exception as e:
+        logger.error(f"Echoテスト: エラー: {str(e)}", exc_info=True)
+        
+        
 @app.route("/backend/chat", methods=["POST"])
 @require_auth
 @handle_chunked_request
@@ -412,16 +445,12 @@ def static_file(path):
 
 # FastAPIにFlaskアプリをマウント
 fastapi_app.mount("/", WSGIMiddleware(app))
-
+#fastapi_app.mount("/api", WSGIMiddleware(app))  
 if __name__ == "__main__":
-    if os.getenv("DEBUG"):
-        logger.info("Flaskアプリを起動します DEBUG: %s", bool(int(os.getenv("DEBUG", 0))))
-        app.run(host = "0.0.0.0", port=int(os.getenv("PORT", "8080")), debug=bool(int(os.getenv("DEBUG", 0))))
-    else:
-        logger.info("Uvicornを使用してFastAPIアプリを起動します DEBUG: %s", bool(int(os.getenv("DEBUG", 0))))
-        uvicorn.run(
-            fastapi_app,
-            host="0.0.0.0", 
-            port=int(os.getenv("PORT", "8080")), 
-            reload=False
-        )
+    logger.info("Uvicornを使用してFastAPIアプリを起動します DEBUG: %s", bool(int(os.getenv("DEBUG", 0))))
+    uvicorn.run(
+        "app:fastapi_app",  
+        host="0.0.0.0", 
+        port=int(os.getenv("PORT", "8080")),
+        log_level="debug",
+        reload=False)
