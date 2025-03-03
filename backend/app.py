@@ -15,8 +15,45 @@ from utils.speech2text import transcribe_streaming_v2
 from utils.generate_image import generate_image
 import uvicorn
 from asgiref.wsgi import WsgiToAsgi
+from google.cloud import secretmanager
     
 
+# Secret Managerからシークレットを取得するための関数
+def access_secret(secret_id, version_id="latest"):
+    """
+    Secret Managerからシークレットを取得する関数
+    """
+    try:
+        logger.info(f"Secret Managerから{secret_id}を取得しています")
+        project_id = os.getenv("GOOGLE_CLOUD_PROJECT")
+        if not project_id:
+            # プロジェクトIDが環境変数に設定されていない場合はメタデータから取得
+            import requests
+            project_id = requests.get(
+                "http://metadata.google.internal/computeMetadata/v1/project/project-id",
+                headers={"Metadata-Flavor": "Google"}
+            ).text
+        
+        client = secretmanager.SecretManagerServiceClient()
+        name = f"projects/{project_id}/secrets/{secret_id}/versions/{version_id}"
+        response = client.access_secret_version(request={"name": name})
+        return response.payload.data.decode("UTF-8")
+    except Exception as e:
+        logger.error(f"Secret Managerからのシークレット取得に失敗: {str(e)}", exc_info=True)
+        return None
+
+# Google Maps APIキーを取得するための関数
+def get_google_maps_api_key():
+    """
+    環境変数からGoogle Maps APIキーを取得し、なければSecret Managerから取得する
+    """
+    api_key = os.getenv("GOOGLE_MAPS_API_KEY")
+    if not api_key:
+        logger.info("環境変数にGoogle Maps APIキーが設定されていないため、Secret Managerから取得します")
+        api_key = access_secret("google-maps-api-key")
+        if not api_key:
+            raise Exception("Google Maps APIキーが見つかりません")
+    return api_key
 
 # .envファイルを読み込み
 load_dotenv("./config/.env.server")
@@ -426,9 +463,8 @@ def query2coordinates(decoded_token: Dict) -> Response:
         lines = data.get("lines", [])
         logger.info("受信したクエリーリスト: %s", lines)
 
-        google_maps_api_key = os.getenv("GOOGLE_MAPS_API_KEY")
-        if not google_maps_api_key:
-            raise Exception("Google Maps APIキーが設定されていません")
+        # Google Maps APIキーを取得
+        google_maps_api_key = get_google_maps_api_key()
 
         unique_queries = {}
         for line in lines:
@@ -490,9 +526,9 @@ def latlng2query(decoded_token: Dict) -> Response:
         data = request.get_json() or {}
         lines = data.get("lines", [])
         logger.info("受信した緯度経度リスト: %s", lines)
-        google_maps_api_key = os.getenv("GOOGLE_MAPS_API_KEY")
-        if not google_maps_api_key:
-            raise Exception("Google Maps APIキーが設定されていません")
+        
+        # Google Maps APIキーを取得
+        google_maps_api_key = get_google_maps_api_key()
 
         unique_lines = {}
         for line in lines:
@@ -613,9 +649,8 @@ def get_static_map_image(decoded_token: Dict) -> Response:
         height = int(request.args.get("height", 600))
         map_type = request.args.get("maptype", "satellite")
 
-        google_maps_api_key = os.getenv("GOOGLE_MAPS_API_KEY")
-        if not google_maps_api_key:
-            raise Exception("Google Maps APIキーが設定されていません")
+        # Google Maps APIキーを取得
+        google_maps_api_key = get_google_maps_api_key()
 
         response = get_static_map(
             google_maps_api_key,
@@ -658,9 +693,8 @@ def get_street_view_image(decoded_token: Dict) -> Response:
         width = int(request.args.get("width", 600))
         height = int(request.args.get("height", 600))
 
-        google_maps_api_key = os.getenv("GOOGLE_MAPS_API_KEY")
-        if not google_maps_api_key:
-            raise Exception("Google Maps APIキーが設定されていません")
+        # Google Maps APIキーを取得
+        google_maps_api_key = get_google_maps_api_key()
 
         response = get_street_view(
             google_maps_api_key,
@@ -777,21 +811,27 @@ def generate_image_endpoint(decoded_token: Dict) -> Response:
         NoneParameters = [key for key, value in kwargs.items() if value is None and key != "seed"]
         return jsonify({"error": f"{NoneParameters} is(are) required"}), 400
 
-
     try:
-        # 画像生成の実行（generate_image 関数は PIL Image のリストを返すと想定）
+        # 画像生成の実行
         image_list = generate_image(**kwargs)
         if not image_list:
-            return jsonify({"error": "No images generated"}), 500
+            # generate_image関数で既にエラーメッセージを生成して例外をスローしているはずなので
+            # ここには到達しないはず。万が一のために同じメッセージを使用
+            error_message = "画像生成に失敗しました。プロンプトにコンテンツポリシーに違反する内容（人物表現など）が含まれている可能性があります。別の内容を試してください。"
+            logger.warning(error_message)
+            return jsonify({"error": error_message}), 500
 
-        # 最初の画像を base64 エンコードする
+        # 画像エンコード処理
         encode_images = []
         for img_obj in image_list:
             img_base64 = img_obj._as_base64_string()
             encode_images.append(img_base64)
         return jsonify({"images": encode_images})
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        # 例外をキャッチして詳細なエラーメッセージをそのまま転送
+        error_message = str(e)
+        logger.error(f"画像生成エラー: {error_message}", exc_info=True)
+        return jsonify({"error": error_message}), 500
 
 
 
@@ -852,5 +892,3 @@ if __name__ == "__main__":
             port=int(os.getenv("PORT", "8080")), 
             reload=False
         )
-
-    
