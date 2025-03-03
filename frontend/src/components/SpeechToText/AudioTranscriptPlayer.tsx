@@ -1,5 +1,5 @@
 // frontend/src/components/SpeechToText/AudioTranscriptPlayer.tsx
-import React, { useRef, useState } from "react";
+import React, { useRef, useState, useEffect } from "react";
 import { AudioInfo } from "./AudioUploader";
 
 export interface TimedSegment {
@@ -49,7 +49,39 @@ const AudioTranscriptPlayer: React.FC<AudioTranscriptPlayerProps> = ({
   const [cursorTime, setCursorTime] = useState<string | null>(null);
   const [showTimestamps, setShowTimestamps] = useState(false);
   
+  // カーソル位置復元のための状態
+  const [selectionInfo, setSelectionInfo] = useState<{
+    element: HTMLElement | null;
+    offset: number;
+    index: number;
+  } | null>(null);
+  
   const audioRef = useRef<HTMLAudioElement>(null);
+
+  // カーソル位置を復元するためのEffect
+  useEffect(() => {
+    // カーソル位置を復元
+    if (selectionInfo && selectionInfo.element) {
+      try {
+        const selection = window.getSelection();
+        if (selection) {
+          const range = document.createRange();
+          // HTMLElementのテキストノードを取得
+          const textNode = selectionInfo.element.firstChild || selectionInfo.element;
+          // カーソル位置を設定
+          const offset = Math.min(selectionInfo.offset, textNode.textContent?.length || 0);
+          range.setStart(textNode, offset);
+          range.collapse(true);
+          selection.removeAllRanges();
+          selection.addRange(range);
+          // 状態をリセット
+          setSelectionInfo(null);
+        }
+      } catch (err) {
+        console.error("カーソル位置の復元に失敗:", err);
+      }
+    }
+  }, [selectionInfo, editedTranscriptSegments]);
 
   const handlePlayPause = () => {
     if (!audioRef.current) return;
@@ -114,6 +146,11 @@ const AudioTranscriptPlayer: React.FC<AudioTranscriptPlayerProps> = ({
   ) => {
     if (!isEditMode) return;
     
+    // onCompositionEndの場合は処理しない（別関数で処理）
+    if (e.type === 'compositionend') {
+      return;
+    }
+    
     let newText = e.currentTarget.innerText;
     if (!newText.trim()) {
       newText = " ";
@@ -122,6 +159,33 @@ const AudioTranscriptPlayer: React.FC<AudioTranscriptPlayerProps> = ({
     const newSegments = [...editedTranscriptSegments];
     newSegments[index] = newText;
     onEditedTranscriptChange(newSegments); // 親コンポーネントに変更を通知
+  };
+
+  // 新しく追加する関数 - IME変換確定時のカーソル位置を保存
+  const handleCompositionEnd = (
+    e: React.CompositionEvent<HTMLSpanElement>,
+    index: number
+  ) => {
+    // カーソル位置を保存
+    const selection = window.getSelection();
+    if (selection && selection.rangeCount > 0) {
+      const range = selection.getRangeAt(0);
+      setSelectionInfo({
+        element: e.currentTarget,
+        offset: range.endOffset,
+        index: index
+      });
+    }
+    
+    // テキスト内容更新処理
+    let newText = e.currentTarget.innerText;
+    if (!newText.trim()) {
+      newText = " ";
+    }
+    
+    const newSegments = [...editedTranscriptSegments];
+    newSegments[index] = newText;
+    onEditedTranscriptChange(newSegments);
   };
 
   return (
@@ -254,7 +318,7 @@ const AudioTranscriptPlayer: React.FC<AudioTranscriptPlayerProps> = ({
                           }
                         }}
                         onBlur={(e) => handleSegmentFinalize(e, index)}
-                        onCompositionEnd={(e) => handleSegmentFinalize(e, index)}
+                        onCompositionEnd={(e) => handleCompositionEnd(e, index)}
                         onClick={() => handleSegmentClick(segment)}
                         onDoubleClick={() => handleSegmentDoubleClick(segment)}
                         dangerouslySetInnerHTML={{
