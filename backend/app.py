@@ -18,42 +18,7 @@ from asgiref.wsgi import WsgiToAsgi
 from google.cloud import secretmanager
     
 
-# Secret Managerからシークレットを取得するための関数
-def access_secret(secret_id, version_id="latest"):
-    """
-    Secret Managerからシークレットを取得する関数
-    """
-    try:
-        logger.info(f"Secret Managerから{secret_id}を取得しています")
-        project_id = os.getenv("GOOGLE_CLOUD_PROJECT")
-        if not project_id:
-            # プロジェクトIDが環境変数に設定されていない場合はメタデータから取得
-            import requests
-            project_id = requests.get(
-                "http://metadata.google.internal/computeMetadata/v1/project/project-id",
-                headers={"Metadata-Flavor": "Google"}
-            ).text
-        
-        client = secretmanager.SecretManagerServiceClient()
-        name = f"projects/{project_id}/secrets/{secret_id}/versions/{version_id}"
-        response = client.access_secret_version(request={"name": name})
-        return response.payload.data.decode("UTF-8")
-    except Exception as e:
-        logger.error(f"Secret Managerからのシークレット取得に失敗: {str(e)}", exc_info=True)
-        return None
 
-# Google Maps APIキーを取得するための関数
-def get_google_maps_api_key():
-    """
-    環境変数からGoogle Maps APIキーを取得し、なければSecret Managerから取得する
-    """
-    api_key = os.getenv("GOOGLE_MAPS_API_KEY")
-    if not api_key:
-        logger.info("環境変数にGoogle Maps APIキーが設定されていないため、Secret Managerから取得します")
-        api_key = access_secret("google-maps-api-key")
-        if not api_key:
-            raise Exception("Google Maps APIキーが見つかりません")
-    return api_key
 
 # .envファイルを読み込み
 load_dotenv("./config/.env.server")
@@ -106,6 +71,43 @@ for token in allowed_tokens.split(','):
             allowed_networks.append(network)
         except ValueError as e:
             logger.error(f"無効なIPアドレスまたはネットワーク形式: {token}, エラー: {e}")
+
+# Secret Managerからシークレットを取得するための関数
+def access_secret(secret_id, version_id="latest"):
+    """
+    Secret Managerからシークレットを取得する関数
+    """
+    try:
+        logger.info(f"Secret Managerから{secret_id}を取得しています")
+        project_id = os.getenv("GOOGLE_CLOUD_PROJECT")
+        if not project_id:
+            # プロジェクトIDが環境変数に設定されていない場合はメタデータから取得
+            import requests
+            project_id = requests.get(
+                "http://metadata.google.internal/computeMetadata/v1/project/project-id",
+                headers={"Metadata-Flavor": "Google"}
+            ).text
+        
+        client = secretmanager.SecretManagerServiceClient()
+        name = f"projects/{project_id}/secrets/{secret_id}/versions/{version_id}"
+        response = client.access_secret_version(request={"name": name})
+        return response.payload.data.decode("UTF-8")
+    except Exception as e:
+        logger.error(f"Secret Managerからのシークレット取得に失敗: {str(e)}", exc_info=True)
+        return None
+
+# Google Maps APIキーを取得するための関数
+def get_google_maps_api_key():
+    """
+    環境変数からGoogle Maps APIキーを取得し、なければSecret Managerから取得する
+    """
+    api_key = os.getenv("GOOGLE_MAPS_API_KEY")
+    if not api_key:
+        logger.info("環境変数にGoogle Maps APIキーが設定されていないため、Secret Managerから取得します")
+        api_key = access_secret("google-maps-api-key")
+        if not api_key:
+            raise Exception("Google Maps APIキーが見つかりません")
+    return api_key
 
 def limit_remote_addr():
     """リクエスト送信元IPが許可リストに含まれていなければ403を返す"""
