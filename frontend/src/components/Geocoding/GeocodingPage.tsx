@@ -105,74 +105,73 @@ const GeocodingPage = () => {
   const token = useToken();
   const API_BASE_URL: string = Config.API_BASE_URL;
   
-  // WebSocket接続を確立
-  useEffect(() => {
-    // クリーンアップ関数
-    const cleanupSocket = () => {
-      if (socketRef.current) {
-        socketRef.current.close();
-        socketRef.current = null;
-      }
-    };
-    
-    return cleanupSocket;
-  }, []);
-  
   // WebSocketの接続を確立する関数
-  const connectWebSocket = () => {
-    if (socketRef.current && (socketRef.current.readyState === WebSocket.OPEN || socketRef.current.readyState === WebSocket.CONNECTING)) {
-      return;
-    }
-    
-    // HTTPSかHTTPかによってプロトコルを変更
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/ws/geocoding`;
-    
-    try {
-      socketRef.current = new WebSocket(wsUrl);
+  const connectWebSocket = (): Promise<boolean> => {
+    return new Promise((resolve) => {
+      if (socketRef.current && (socketRef.current.readyState === WebSocket.OPEN || socketRef.current.readyState === WebSocket.CONNECTING)) {
+        resolve(true);
+        return;
+      }
       
-      socketRef.current.onopen = () => {
-        console.log('WebSocket接続が確立されました');
-        setIsConnected(true);
-        setConnectionError("");
+      // HTTPSかHTTPかによってプロトコルを変更
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${protocol}//${window.location.host}/ws/geocoding`;
+      
+      try {
+        socketRef.current = new WebSocket(wsUrl);
         
-        // 認証メッセージを送信
-        if (socketRef.current && token) {
-          socketRef.current.send(JSON.stringify({
-            type: 'AUTH',
-            payload: { token }
-          }));
-        }
-      };
-      
-      socketRef.current.onmessage = (event) => {
-        try {
-          const message: WebSocketMessage = JSON.parse(event.data);
-          handleWebSocketMessage(message);
-        } catch (error) {
-          console.error('WebSocketメッセージの解析エラー:', error);
-        }
-      };
-      
-      socketRef.current.onerror = (error) => {
-        console.error('WebSocketエラー:', error);
-        setConnectionError("WebSocket接続でエラーが発生しました。");
-      };
-      
-      socketRef.current.onclose = (event) => {
-        console.log('WebSocket接続が閉じられました:', event.code, event.reason);
+        socketRef.current.onopen = () => {
+          console.log('WebSocket接続が確立されました');
+          setIsConnected(true);
+          setConnectionError("");
+          
+          // 認証メッセージを送信
+          if (socketRef.current && token) {
+            socketRef.current.send(JSON.stringify({
+              type: 'AUTH',
+              payload: { token }
+            }));
+          }
+          resolve(true);
+        };
+        
+        socketRef.current.onmessage = (event) => {
+          try {
+            const message: WebSocketMessage = JSON.parse(event.data);
+            handleWebSocketMessage(message);
+          } catch (error) {
+            console.error('WebSocketメッセージの解析エラー:', error);
+          }
+        };
+        
+        socketRef.current.onerror = (error) => {
+          console.error('WebSocketエラー:', error);
+          setConnectionError("WebSocket接続でエラーが発生しました。");
+          setIsConnected(false);
+          resolve(false);
+        };
+        
+        socketRef.current.onclose = (event) => {
+          console.log('WebSocket接続が閉じられました:', event.code, event.reason);
+          setIsConnected(false);
+          resolve(false);
+        };
+      } catch (error) {
+        console.error('WebSocket接続の確立に失敗しました:', error);
+        setConnectionError("WebSocket接続の確立に失敗しました。");
         setIsConnected(false);
-        
-        // 異常終了の場合、5秒後に再接続を試みる
-        if (!event.wasClean) {
-          setTimeout(() => {
-            connectWebSocket();
-          }, 5000);
-        }
-      };
-    } catch (error) {
-      console.error('WebSocket接続の確立に失敗しました:', error);
-      setConnectionError("WebSocket接続の確立に失敗しました。");
+        resolve(false);
+      }
+    });
+  };
+  
+  // WebSocketを切断する関数
+  const disconnectWebSocket = () => {
+    if (socketRef.current) {
+      socketRef.current.close();
+      socketRef.current = null;
+      setIsConnected(false);
+      console.log('WebSocket接続を切断しました');
     }
   };
   
@@ -253,6 +252,8 @@ const GeocodingPage = () => {
     console.error('WebSocketエラー:', payload);
     alert(`エラーが発生しました: ${payload.message || '不明なエラー'}`);
     setIsSending(false);
+    // エラー発生時は接続を切断
+    disconnectWebSocket();
   };
   
   // 処理完了を処理する関数
@@ -260,14 +261,16 @@ const GeocodingPage = () => {
     console.log('処理が完了しました:', payload);
     setIsSending(false);
     setProgress(100);
+    
+    // 処理完了後に接続を切断（必要時接続型のため）
+    disconnectWebSocket();
   };
   
   // WebSocketを通じてジオコーディングリクエストを送信する関数
   const sendGeocodeRequest = (lines: string[]) => {
     if (!socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) {
-      alert('WebSocket接続が確立されていません。再接続してください。');
-      connectWebSocket();
-      return;
+      alert('WebSocket接続が確立されていません。再試行してください。');
+      return false;
     }
     
     const request: WebSocketMessage = {
@@ -287,6 +290,7 @@ const GeocodingPage = () => {
     };
     
     socketRef.current.send(JSON.stringify(request));
+    return true;
   };
 
   // テキストエリアの内容変更時処理
@@ -370,7 +374,7 @@ const GeocodingPage = () => {
     window.URL.revokeObjectURL(url);
   };
 
-  // 送信処理（WebSocketを使用）
+  // 送信処理（WebSocketを使用）- 必要時接続型に修正
   const handleSendLines = async () => {
     const allLines = inputText
       .split("\n")
@@ -396,19 +400,12 @@ const GeocodingPage = () => {
     setIsSending(true);
     setProgress(0);
     
-    // WebSocket接続を確立
+    // WebSocket接続がなければ接続する（必要時接続型）
     if (!isConnected) {
-      connectWebSocket();
-      // 接続待機
-      let attempts = 0;
-      const maxAttempts = 5;
-      while (!isConnected && attempts < maxAttempts) {
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        attempts++;
-      }
-      
-      if (!isConnected) {
-        alert('WebSocket接続が確立できませんでした。ページを更新して再試行してください。');
+      console.log('WebSocketに接続を試みます...');
+      const connected = await connectWebSocket();
+      if (!connected) {
+        alert('WebSocket接続が確立できませんでした。ネットワーク状態を確認してください。');
         setIsSending(false);
         return;
       }
@@ -431,7 +428,11 @@ const GeocodingPage = () => {
     setResults(initialResults);
     
     // WebSocketを通じてリクエストを送信
-    sendGeocodeRequest(allLines);
+    const sent = sendGeocodeRequest(allLines);
+    if (!sent) {
+      setIsSending(false);
+      disconnectWebSocket();
+    }
   };
 
   // 結果クリアボタンのハンドラー
@@ -447,8 +448,8 @@ const GeocodingPage = () => {
   };
   
   // 再接続ボタンのハンドラー
-  const handleReconnect = () => {
-    connectWebSocket();
+  const handleReconnect = async () => {
+    await connectWebSocket();
   };
 
   return (
@@ -559,8 +560,12 @@ const GeocodingPage = () => {
         <div className="flex items-center space-x-4">
           <button
             onClick={handleSendLines}
-            disabled={isSending || !isConnected || lineCount === 0}
-            className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+            disabled={isSending || lineCount === 0}
+            className={`px-4 py-2 text-white rounded transition-colors duration-200 ${
+              isSending || lineCount === 0
+                ? "bg-blue-400 cursor-not-allowed opacity-50" 
+                : "bg-blue-600 hover:bg-blue-700"
+            }`}
           >
             {isSending ? "処理中..." : "送信"}
           </button>
