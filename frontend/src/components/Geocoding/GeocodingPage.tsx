@@ -107,20 +107,14 @@ const GeocodingPage = () => {
   const token = useToken();
   const API_BASE_URL: string = Config.API_BASE_URL;
 
-  // useTokenフックをより堅牢に処理
+  // useTokenフックを監視するだけで、自動接続はしない
   useEffect(() => {
-    const connectWithToken = async () => {
-      if (token) {
-        console.log("認証トークンが取得できました");
-        // トークンが取得できたら接続を試みる
-        await connectWebSocket();
-      } else {
-        console.log("認証トークン取得待機中...");
-      }
-    };
-
-    connectWithToken();
-  }, [token]); // トークンが変更されたら再接続を試みる
+    if (token) {
+      console.log("認証トークンが取得できました");
+    } else {
+      console.log("認証トークン取得待機中...");
+    }
+  }, [token]); 
 
   // WebSocketの接続を確立する関数
   const connectWebSocket = (): Promise<boolean> => {
@@ -543,46 +537,22 @@ const GeocodingPage = () => {
     setLineCount(0);
   };
 
-  // 再接続ボタンのハンドラー
-  const handleReconnect = async () => {
-    // 既存の接続をきれいに閉じる
-    if (socketRef.current) {
-      try {
-        socketRef.current.close();
-        socketRef.current = null;
-      } catch (e) {
-        console.error("既存のWebSocket接続をクローズ中にエラー:", e);
-      }
-    }
-    
-    setConnectionError("接続を試みています...");
-    await connectWebSocket();
-  };
-
   return (
     <div className="max-w-6xl mx-auto p-4">
       <h1 className="text-2xl font-bold mb-4 text-gray-100">
         ジオコーディング
       </h1>
 
-      {/* WebSocket接続状態 */}
+      {/* WebSocket接続状態 - シンプル化 */}
       <div className="mb-4 flex items-center">
         <div
           className={`w-3 h-3 rounded-full mr-2 ${
             isConnected ? "bg-green-500" : "bg-red-500"
           }`}
         ></div>
-        <span className="text-gray-200 mr-4">
+        <span className="text-gray-200">
           {isConnected ? "WebSocket接続済み" : "WebSocket未接続"}
         </span>
-        {!isConnected && (
-          <button
-            onClick={handleReconnect}
-            className="px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700"
-          >
-            再接続
-          </button>
-        )}
         {connectionError && (
           <span className="text-red-400 ml-4">{connectionError}</span>
         )}
