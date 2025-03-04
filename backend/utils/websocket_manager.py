@@ -18,15 +18,13 @@ class WebSocketMessageType(str, enum.Enum):
     ERROR = "ERROR"
     COMPLETE = "COMPLETE"
 
-
-# WebSocketの接続を管理するクラス
 class ConnectionManager:
     def __init__(self):
         self.active_connections: Dict[str, WebSocket] = {}
         self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
 
     async def connect(self, websocket: WebSocket, client_id: str):
-        await websocket.accept()
+        # 接続は既にacceptされていると仮定
         self.active_connections[client_id] = websocket
         logger.info(f"WebSocket接続: {client_id}")
 
@@ -42,14 +40,17 @@ class ConnectionManager:
                 websocket = self.active_connections[client_id]
                 if websocket.client_state == WebSocketState.CONNECTED:
                     await websocket.send_json(message)
+                    logger.debug(f"メッセージを送信しました: {client_id}, type={message.get('type')}")
                     return True
                 else:
+                    logger.warning(f"WebSocketが接続されていません: {client_id}")
                     self.disconnect(client_id)
                     return False
             except Exception as e:
                 logger.error(f"メッセージ送信エラー: {str(e)}")
                 self.disconnect(client_id)
                 return False
+        logger.warning(f"クライアントIDが見つかりません: {client_id}")
         return False
 
     def run_in_executor(self, func, *args, **kwargs):
@@ -90,6 +91,13 @@ class ConnectionManager:
                 "streetViewImage": street_view_image,
                 "progress": progress
             }
+        })
+
+    async def send_progress(self, client_id: str, progress: int, message: str = ""):
+        """進捗状況を送信する"""
+        return await self.send_message(client_id, {
+            "type": "PROGRESS",
+            "payload": {"progress": progress, "message": message}
         })
 
 # WebSocket認証関数

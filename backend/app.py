@@ -3,7 +3,7 @@ from flask import Flask, request, Response, jsonify, make_response, send_from_di
 from flask_cors import CORS
 from firebase_admin import auth, credentials
 from dotenv import load_dotenv
-import os, json, firebase_admin, asyncio, base64
+import os, json, firebase_admin, asyncio, base64, time
 from typing import Dict, Any
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.wsgi import WSGIMiddleware
@@ -92,26 +92,28 @@ async def websocket_geocoding(websocket: WebSocket):
     logger.info(f"WebSocketクライアントID割り当て: {client_id}")
     
     try:
-        # 認証
+        # 接続の確立
+        await manager.connect(websocket, client_id)
+        logger.info(f"クライアント {client_id} が接続しました")
+        '''
+        # 認証処理を復活させる
         logger.info("WebSocket認証処理開始")
         decoded_token = await verify_token(websocket)
         if not decoded_token:
             logger.error("WebSocket認証失敗")
+            await manager.send_error(client_id, "認証に失敗しました")
             return
         
         logger.info(f"WebSocket認証成功: {decoded_token.get('email')}")
-        
-        # 接続の確立
-        await manager.connect(websocket, client_id)
-        
+        '''
         # メッセージの処理
         while True:
             logger.info("WebSocketメッセージ待機中")
             data = await websocket.receive_json()
-            logger.info(f"WebSocketメッセージ受信: {data['type']}")
+            logger.info(f"WebSocketメッセージ受信: {data.get('type', 'unknown')}")
             
-            if data["type"] == WebSocketMessageType.GEOCODE_REQUEST:
-                payload = data["payload"]
+            if data.get("type") == WebSocketMessageType.GEOCODE_REQUEST:
+                payload = data.get("payload", {})
                 mode = payload.get("mode", "address")
                 lines = payload.get("lines", [])
                 options = payload.get("options", {})
@@ -131,7 +133,7 @@ async def websocket_geocoding(websocket: WebSocket):
                     )
                     continue
                 
-                # 非同期処理の開始
+                # 本番の非同期処理を実行
                 asyncio.create_task(
                     process_geocoding(
                         manager,
@@ -146,7 +148,11 @@ async def websocket_geocoding(websocket: WebSocket):
     except Exception as e:
         logger.error(f"WebSocketエラー: {str(e)}", exc_info=True)
     finally:
-        manager.disconnect(client_id)
+        try:
+            manager.disconnect(client_id)
+            logger.info(f"クライアント {client_id} との接続を解除しました")
+        except Exception as e:
+            logger.error(f"接続解除エラー: {str(e)}")
 
 # === 既存のエンドポイント（WebSocket移行対象のRESTfulエンドポイントは削除） ===
 @app.route("/backend/config", methods=["GET"])
