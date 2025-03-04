@@ -1,5 +1,13 @@
 # app.py
-from flask import Flask, request, Response, jsonify, make_response, send_from_directory, abort
+from flask import (
+    Flask,
+    request,
+    Response,
+    jsonify,
+    make_response,
+    send_from_directory,
+    abort,
+)
 from flask_cors import CORS
 from firebase_admin import auth, credentials
 from dotenv import load_dotenv
@@ -13,10 +21,18 @@ import uvicorn
 
 # 自作モジュールのインポート
 from utils.common import (
-    logger, process_uploaded_image, limit_remote_addr, 
-    handle_chunked_request, require_auth, MAX_IMAGES
+    logger,
+    process_uploaded_image,
+    limit_remote_addr,
+    handle_chunked_request,
+    require_auth,
+    MAX_IMAGES,
 )
-from utils.websocket_manager import ConnectionManager, WebSocketMessageType, verify_token
+from utils.websocket_manager import (
+    ConnectionManager,
+    WebSocketMessageType,
+    verify_token,
+)
 from utils.geocoding_service import process_geocoding
 from utils.chat_utils import common_message_function
 from utils.speech2text import transcribe_streaming_v2
@@ -71,10 +87,12 @@ fastapi_app.add_middleware(
     allow_headers=["*"],
 )
 
+
 # 全エンドポイントに対してIP制限を適用
 @app.before_request
 def ip_guard():
     limit_remote_addr()
+
 
 # リクエストモデル
 class GeocodeRequest(BaseModel):
@@ -82,20 +100,20 @@ class GeocodeRequest(BaseModel):
     lines: list[str]
     options: Dict[str, Any]
 
+
 # WebSocketエンドポイント
 @fastapi_app.websocket("/ws/geocoding")
 async def websocket_geocoding(websocket: WebSocket):
     logger.info("WebSocket接続リクエスト受信")
     await websocket.accept()
-    
+
     client_id = f"client_{id(websocket)}"
     logger.info(f"WebSocketクライアントID割り当て: {client_id}")
-    
+
     try:
         # 接続の確立
         await manager.connect(websocket, client_id)
         logger.info(f"クライアント {client_id} が接続しました")
-        '''
         # 認証処理を復活させる
         logger.info("WebSocket認証処理開始")
         decoded_token = await verify_token(websocket)
@@ -103,36 +121,40 @@ async def websocket_geocoding(websocket: WebSocket):
             logger.error("WebSocket認証失敗")
             await manager.send_error(client_id, "認証に失敗しました")
             return
-        
+
         logger.info(f"WebSocket認証成功: {decoded_token.get('email')}")
-        '''
+
         # メッセージの処理
         while True:
             logger.info("WebSocketメッセージ待機中")
             data = await websocket.receive_json()
             logger.info(f"WebSocketメッセージ受信: {data.get('type', 'unknown')}")
-            
+
             if data.get("type") == WebSocketMessageType.GEOCODE_REQUEST:
                 payload = data.get("payload", {})
                 mode = payload.get("mode", "address")
                 lines = payload.get("lines", [])
                 options = payload.get("options", {})
-                
+
                 # 上限件数のチェック
-                from utils.common import GEOCODING_WITH_IMAGE_MAX_BATCH_SIZE, GEOCODING_NO_IMAGE_MAX_BATCH_SIZE
+                from utils.common import (
+                    GEOCODING_WITH_IMAGE_MAX_BATCH_SIZE,
+                    GEOCODING_NO_IMAGE_MAX_BATCH_SIZE,
+                )
+
                 max_batch_size = (
                     GEOCODING_WITH_IMAGE_MAX_BATCH_SIZE
                     if options.get("showSatellite") or options.get("showStreetView")
                     else GEOCODING_NO_IMAGE_MAX_BATCH_SIZE
                 )
-                
+
                 if len(lines) > max_batch_size:
                     await manager.send_error(
                         client_id,
-                        f"入力された件数は{len(lines)}件ですが、1回の送信で取得可能な上限は{max_batch_size}件です。"
+                        f"入力された件数は{len(lines)}件ですが、1回の送信で取得可能な上限は{max_batch_size}件です。",
                     )
                     continue
-                
+
                 # 本番の非同期処理を実行
                 asyncio.create_task(
                     process_geocoding(
@@ -140,7 +162,7 @@ async def websocket_geocoding(websocket: WebSocket):
                         client_id=client_id,
                         mode=mode,
                         lines=lines,
-                        options=options
+                        options=options,
                     )
                 )
     except WebSocketDisconnect:
@@ -153,6 +175,7 @@ async def websocket_geocoding(websocket: WebSocket):
             logger.info(f"クライアント {client_id} との接続を解除しました")
         except Exception as e:
             logger.error(f"接続解除エラー: {str(e)}")
+
 
 # === 既存のエンドポイント（WebSocket移行対象のRESTfulエンドポイントは削除） ===
 @app.route("/backend/config", methods=["GET"])
@@ -191,6 +214,7 @@ def get_config(decoded_token: Dict) -> Response:
         error_response.status_code = 500
         return error_response
 
+
 @app.route("/backend/verify-auth", methods=["GET"])
 @require_auth
 def verify_auth(decoded_token: Dict) -> Response:
@@ -214,6 +238,8 @@ def verify_auth(decoded_token: Dict) -> Response:
         response = make_response(jsonify({"error": str(e)}))
         response.status_code = 401
         return response
+
+
 # テスト用の最小限WebSocketエンドポイント
 @fastapi_app.websocket("/ws/echo")
 async def websocket_echo(websocket: WebSocket):
@@ -229,8 +255,8 @@ async def websocket_echo(websocket: WebSocket):
         logger.info("Echoテスト: クライアント切断")
     except Exception as e:
         logger.error(f"Echoテスト: エラー: {str(e)}", exc_info=True)
-        
-        
+
+
 @app.route("/backend/chat", methods=["POST"])
 @require_auth
 @handle_chunked_request
@@ -245,8 +271,9 @@ def chat(decoded_token: Dict, assembled_data=None) -> Response:
         logger.info(f"モデル: {model}")
         if model is None:
             raise ValueError("モデル情報が提供されていません")
-            
+
         from utils.common import get_api_key_for_model
+
         model_api_key = get_api_key_for_model(model)
         error_keyword = "@trigger_error"
         error_flag = False
@@ -292,6 +319,7 @@ def chat(decoded_token: Dict, assembled_data=None) -> Response:
         error_response = make_response(jsonify({"status": "error", "message": str(e)}))
         error_response.status_code = 500
         return error_response
+
 
 @app.route("/backend/speech2text", methods=["POST"])
 @require_auth
@@ -359,6 +387,7 @@ def speech2text(decoded_token: dict, assembled_data=None) -> Response:
         logger.error(f"音声文字起こしエラー: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
+
 @app.route("/backend/generate-image", methods=["POST"])
 @require_auth
 def generate_image_endpoint(decoded_token: Dict) -> Response:
@@ -373,10 +402,23 @@ def generate_image_endpoint(decoded_token: Dict) -> Response:
     add_watermark = data.get("add_watermark")
     safety_filter_level = data.get("safety_filter_level")
     person_generation = data.get("person_generation")
-    kwargs = dict(prompt=prompt, model_name=model_name, negative_prompt=negative_prompt, seed=seed, number_of_images=number_of_images, aspect_ratio=aspect_ratio, language=language, add_watermark=add_watermark, safety_filter_level=safety_filter_level, person_generation=person_generation)
+    kwargs = dict(
+        prompt=prompt,
+        model_name=model_name,
+        negative_prompt=negative_prompt,
+        seed=seed,
+        number_of_images=number_of_images,
+        aspect_ratio=aspect_ratio,
+        language=language,
+        add_watermark=add_watermark,
+        safety_filter_level=safety_filter_level,
+        person_generation=person_generation,
+    )
     logger.info(f"generate_image 関数の引数: {kwargs}")
     if None in kwargs.values() and seed is not None:
-        NoneParameters = [key for key, value in kwargs.items() if value is None and key != "seed"]
+        NoneParameters = [
+            key for key, value in kwargs.items() if value is None and key != "seed"
+        ]
         return jsonify({"error": f"{NoneParameters} is(are) required"}), 400
 
     try:
@@ -396,6 +438,7 @@ def generate_image_endpoint(decoded_token: Dict) -> Response:
         logger.error(f"画像生成エラー: {error_message}", exc_info=True)
         return jsonify({"error": error_message}), 500
 
+
 @app.route("/backend/logout", methods=["POST"])
 def logout() -> Response:
     try:
@@ -408,8 +451,10 @@ def logout() -> Response:
         logger.error("ログアウト処理中にエラーが発生: %s", str(e), exc_info=True)
         return jsonify({"error": str(e)}), 401
 
+
 # ファイル配信関連エンドポイント
 FRONTEND_PATH = os.getenv("FRONTEND_PATH")
+
 
 @app.route("/assets/<path:path>")
 def serve_assets(path):
@@ -423,40 +468,48 @@ def serve_assets(path):
             logger.error(f"アセットディレクトリが存在しません: {assets_dir}")
         abort(404)
 
+
 @app.route("/vite.svg")
 def vite_svg():
     logger.info("vite.svg リクエスト")
     svg_path = os.path.join(FRONTEND_PATH, "vite.svg")
     if os.path.isfile(svg_path):
         return send_from_directory(FRONTEND_PATH, "vite.svg", mimetype="image/svg+xml")
-    
+
     logger.warning(f"vite.svg が見つかりません。確認パス: {svg_path}")
     try:
         logger.info(f"FRONTEND_PATH: {FRONTEND_PATH}")
         logger.info(f"FRONTEND_PATH内のファイル一覧: {os.listdir(FRONTEND_PATH)}")
     except Exception as e:
         logger.error(f"FRONTEND_PATH内のファイル一覧取得エラー: {e}")
-    
+
     abort(404)
+
 
 @app.route("/")
 def index():
     logger.info("インデックスページリクエスト: %s", FRONTEND_PATH)
     return send_from_directory(FRONTEND_PATH, "index.html")
 
+
 @app.route("/<path:path>")
 def static_file(path):
     logger.info(f"パスリクエスト: /{path}")
     return send_from_directory(FRONTEND_PATH, "index.html")
 
+
 # FastAPIにFlaskアプリをマウント
 fastapi_app.mount("/", WSGIMiddleware(app))
-#fastapi_app.mount("/api", WSGIMiddleware(app))  
+# fastapi_app.mount("/api", WSGIMiddleware(app))
 if __name__ == "__main__":
-    logger.info("Uvicornを使用してFastAPIアプリを起動します DEBUG: %s", bool(int(os.getenv("DEBUG", 0))))
+    logger.info(
+        "Uvicornを使用してFastAPIアプリを起動します DEBUG: %s",
+        bool(int(os.getenv("DEBUG", 0))),
+    )
     uvicorn.run(
-        "app:fastapi_app",  
-        host="0.0.0.0", 
+        "app:fastapi_app",
+        host="0.0.0.0",
         port=int(os.getenv("PORT", "8080")),
         log_level="debug",
-        reload=False)
+        reload=False,
+    )
