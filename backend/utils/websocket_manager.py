@@ -28,10 +28,17 @@ class ConnectionManager:
         self.active_connections[client_id] = websocket
         logger.info(f"WebSocket接続: {client_id}")
 
-    def disconnect(self, client_id: str):
-        if client_id in self.active_connections:
-            del self.active_connections[client_id]
-            logger.info(f"WebSocket切断: {client_id}")
+    async def disconnect(self, client_id: str):
+        try:
+            if client_id in self.active_connections:
+                websocket = self.active_connections[client_id]
+                del self.active_connections[client_id]
+                try:
+                    await websocket.close()
+                except Exception as e:
+                    logger.warning(f"WebSocket切断中のエラーを無視: {str(e)}")
+        except Exception as e:
+            logger.error(f"クライアント接続解除中のエラー: {str(e)}", exc_info=True)
             
     async def send_message(self, client_id: str, message: Dict[str, Any]):
         """クライアントにメッセージを送信する"""

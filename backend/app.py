@@ -794,6 +794,8 @@ if __name__ == "__main__":
     if os.path.exists(cert_path) and os.path.exists(key_path):
         config.certfile = cert_path
         config.keyfile = key_path
+        # SSLプロトコルを明示的に設定して安定性を向上
+        config.ciphers = "HIGH:!aNULL:!MD5"
         logger.info("SSL/TLSが有効化されました")
     else:
         logger.warning("SSL/TLS証明書が見つかりません。HTTP/1.1のみで動作します")
