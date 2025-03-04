@@ -305,7 +305,7 @@ async def verify_auth(current_user: Dict = Depends(get_current_user)):
         raise HTTPException(status_code=401, detail=str(e))
 
 
-# チャンクデータ処理関数
+# チャンクデータ処理関数を修正
 async def process_chunked_data(data: Dict[str, Any]):
     from utils.common import CHUNK_STORE
 
@@ -313,12 +313,17 @@ async def process_chunked_data(data: Dict[str, Any]):
     chunk_index = data.get("chunkIndex")
     total_chunks = data.get("totalChunks")
     chunk_data_b64 = data.get("chunkData")
+    is_binary = data.get("isBinary", False)  # バイナリデータかどうかのフラグを追加
 
     if not chunk_id or chunk_index is None or not total_chunks or not chunk_data_b64:
         raise HTTPException(status_code=400, detail="チャンク情報が不足しています")
 
     # base64デコードしてバイナリ取得
-    chunk_data = base64.b64decode(chunk_data_b64)
+    try:
+        chunk_data = base64.b64decode(chunk_data_b64)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"不正なBase64データ: {str(e)}")
+
     if chunk_id not in CHUNK_STORE:
         CHUNK_STORE[chunk_id] = {}
 
@@ -339,11 +344,20 @@ async def process_chunked_data(data: Dict[str, Any]):
         }
 
     # 全チャンク受信済みの場合、順次再構築
-    assembled_bytes = b"".join(CHUNK_STORE[chunk_id][i] for i in range(total_chunks))
-    del CHUNK_STORE[chunk_id]
-    assembled_str = assembled_bytes.decode("utf-8")
-    return json.loads(assembled_str)
-
+    try:
+        assembled_bytes = b"".join(CHUNK_STORE[chunk_id][i] for i in range(total_chunks))
+        del CHUNK_STORE[chunk_id]
+        
+        # バイナリデータの場合は変換せずに返す
+        if is_binary:
+            return {"binary_data": assembled_bytes}
+        
+        # テキストデータの場合はUTF-8としてデコードしJSONとしてパース
+        assembled_str = assembled_bytes.decode("utf-8")
+        return json.loads(assembled_str)
+    except Exception as e:
+        logger.error("チャンクデータの再構築エラー: %s", str(e), exc_info=True)
+        raise HTTPException(status_code=500, detail=f"チャンクデータの処理エラー: {str(e)}")
 
 @app.post("/backend/chat")
 async def chat(request: Request, current_user: Dict = Depends(get_current_user)):
@@ -428,7 +442,7 @@ async def chat(request: Request, current_user: Dict = Depends(get_current_user))
         logger.error("チャットエラー: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
-
+# speech2textエンドポイントを修正
 @app.post("/backend/speech2text")
 async def speech2text(request: Request, current_user: Dict = Depends(get_current_user)):
     logger.info("音声認識処理開始")
@@ -440,8 +454,15 @@ async def speech2text(request: Request, current_user: Dict = Depends(get_current
         if body.get("chunked"):
             logger.info("チャンクされたデータです")
             try:
-                # チャンクデータの処理
+                # チャンクデータの処理（isBinaryフラグを追加）
+                body["isBinary"] = True  # 音声データはバイナリとして処理
                 data = await process_chunked_data(body)
+                
+                # バイナリデータが返された場合の処理
+                if "binary_data" in data:
+                    audio_bytes = data["binary_data"]
+                    audio_data_b64 = base64.b64encode(audio_bytes).decode('utf-8')
+                    data = {"audio_data": audio_data_b64}
             except Exception as e:
                 logger.error("チャンク組み立てエラー: %s", str(e), exc_info=True)
                 raise HTTPException(status_code=500, detail=str(e))
@@ -507,8 +528,6 @@ async def speech2text(request: Request, current_user: Dict = Depends(get_current
     except Exception as e:
         logger.error(f"音声文字起こしエラー: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
-
-
 @app.post("/backend/generate-image")
 async def generate_image_endpoint(
     request: GenerateImageRequest, current_user: Dict = Depends(get_current_user)

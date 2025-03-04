@@ -172,7 +172,14 @@ const SpeechToTextPage = () => {
     
     setIsSending(true);
     try {
-      const payload = { audio_data: audioData };
+      // audioDataにはbase64形式の音声データが含まれている
+      // Base64のヘッダー部分（data:audio/...;base64,）を除去
+      let base64Data = audioData;
+      if (base64Data.startsWith('data:')) {
+        base64Data = base64Data.split(',')[1];
+      }
+      
+      const payload = { audio_data: base64Data };
       const response = await sendChunkedRequest(
         payload,
         token,
@@ -199,7 +206,7 @@ const SpeechToTextPage = () => {
       }
     } catch (error) {
       console.error("送信エラー:", error);
-      alert("送信中にエラーが発生しました");
+      alert("送信中にエラーが発生しました: " + (error instanceof Error ? error.message : String(error)));
     } finally {
       setIsSending(false);
     }
