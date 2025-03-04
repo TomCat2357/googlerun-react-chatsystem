@@ -313,51 +313,115 @@ async def process_chunked_data(data: Dict[str, Any]):
     chunk_index = data.get("chunkIndex")
     total_chunks = data.get("totalChunks")
     chunk_data_b64 = data.get("chunkData")
-    is_binary = data.get("isBinary", False)  # バイナリデータかどうかのフラグを追加
+    is_binary = data.get("isBinary", False)  # バイナリデータかどうかのフラグ
 
     if not chunk_id or chunk_index is None or not total_chunks or not chunk_data_b64:
+        logger.error("チャンク情報が不足しています: %s", {k: v is None for k, v in {
+            "chunkId": chunk_id, 
+            "chunkIndex": chunk_index, 
+            "totalChunks": total_chunks, 
+            "chunkData": chunk_data_b64
+        }.items()})
         raise HTTPException(status_code=400, detail="チャンク情報が不足しています")
 
-    # base64デコードしてバイナリ取得
+    # チャンク数が多すぎる場合はエラー
+    if total_chunks > 20000:
+        logger.error("チャンク数が多すぎます: %s", total_chunks)
+        raise HTTPException(status_code=400, detail=f"チャンク数が多すぎます（{total_chunks}）。ファイルを小さくしてください。")
+
     try:
-        chunk_data = base64.b64decode(chunk_data_b64)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"不正なBase64データ: {str(e)}")
+        # base64デコードしてバイナリ取得
+        try:
+            # チャンクデータを小さく処理
+            chunk_data = base64.b64decode(chunk_data_b64)
+        except Exception as e:
+            logger.error("Base64デコードエラー: %s", str(e))
+            raise HTTPException(status_code=400, detail=f"不正なBase64データ: {str(e)}")
 
-    if chunk_id not in CHUNK_STORE:
-        CHUNK_STORE[chunk_id] = {}
+        # チャンク情報のログ出力
+        logger.info(
+            "チャンク受信: %s - インデックス %d/%d (サイズ: %.2f KB)",
+            chunk_id,
+            chunk_index,
+            total_chunks,
+            len(chunk_data) / 1024,
+        )
 
-    CHUNK_STORE[chunk_id][chunk_index] = chunk_data
-    logger.info(
-        "チャンク受信: %s - インデックス %d/%d",
-        chunk_id,
-        chunk_index,
-        total_chunks,
-    )
+        # チャンクストアの初期化
+        if chunk_id not in CHUNK_STORE:
+            CHUNK_STORE[chunk_id] = {"chunks": {}, "is_binary": is_binary, "timestamp": time.time()}
 
-    if len(CHUNK_STORE[chunk_id]) < total_chunks:
-        return {
-            "status": "chunk_received",
-            "chunkId": chunk_id,
-            "received": len(CHUNK_STORE[chunk_id]),
-            "total": total_chunks,
-        }
-
-    # 全チャンク受信済みの場合、順次再構築
-    try:
-        assembled_bytes = b"".join(CHUNK_STORE[chunk_id][i] for i in range(total_chunks))
-        del CHUNK_STORE[chunk_id]
+        # チャンクを保存
+        CHUNK_STORE[chunk_id]["chunks"][chunk_index] = chunk_data
         
-        # バイナリデータの場合は変換せずに返す
-        if is_binary:
-            return {"binary_data": assembled_bytes}
+        # ストアのクリーンアップ（古いチャンクを削除）
+        current_time = time.time()
+        expired_chunk_ids = []
+        for c_id, c_data in CHUNK_STORE.items():
+            if c_id != chunk_id and current_time - c_data.get("timestamp", 0) > 3600:  # 1時間以上経過したチャンク
+                expired_chunk_ids.append(c_id)
         
-        # テキストデータの場合はUTF-8としてデコードしJSONとしてパース
-        assembled_str = assembled_bytes.decode("utf-8")
-        return json.loads(assembled_str)
+        for expired_id in expired_chunk_ids:
+            del CHUNK_STORE[expired_id]
+            logger.info("期限切れチャンクを削除: %s", expired_id)
+
+        # 全チャンク受信チェック
+        received_count = len(CHUNK_STORE[chunk_id]["chunks"])
+        
+        if received_count < total_chunks:
+            return {
+                "status": "chunk_received",
+                "chunkId": chunk_id,
+                "received": received_count,
+                "total": total_chunks,
+            }
+
+        # 全チャンク受信済みの場合、順次再構築
+        try:
+            logger.info("全チャンク受信完了。データ組み立て開始: %s", chunk_id)
+            
+            # チャンクを順番通りに結合
+            assembled_bytes = b""
+            try:
+                for i in range(total_chunks):
+                    if i not in CHUNK_STORE[chunk_id]["chunks"]:
+                        logger.error("チャンクが欠落しています: インデックス %d", i)
+                        raise HTTPException(status_code=500, detail=f"チャンク {i} が欠落しています")
+                    assembled_bytes += CHUNK_STORE[chunk_id]["chunks"][i]
+            except Exception as e:
+                logger.error("チャンク結合エラー: %s", str(e))
+                raise HTTPException(status_code=500, detail=f"チャンク結合エラー: {str(e)}")
+            
+            # チャンクストアをクリア
+            is_binary = CHUNK_STORE[chunk_id]["is_binary"]
+            del CHUNK_STORE[chunk_id]
+            
+            # バイナリデータの場合は変換せずに返す
+            if is_binary:
+                logger.info("バイナリデータ組み立て完了: %.2f KB", len(assembled_bytes) / 1024)
+                return {"binary_data": assembled_bytes}
+            
+            # テキストデータの場合はUTF-8としてデコードしJSONとしてパース
+            try:
+                assembled_str = assembled_bytes.decode("utf-8")
+                parsed_json = json.loads(assembled_str)
+                logger.info("JSONデータ組み立て完了")
+                return parsed_json
+            except UnicodeDecodeError as e:
+                logger.error("UTF-8デコードエラー: %s", str(e))
+                raise HTTPException(status_code=500, detail=f"UTF-8デコードエラー: {str(e)}")
+            except json.JSONDecodeError as e:
+                logger.error("JSONパースエラー: %s", str(e))
+                raise HTTPException(status_code=500, detail=f"JSONパースエラー: {str(e)}")
+        except Exception as e:
+            logger.error("チャンクデータの再構築エラー: %s", str(e), exc_info=True)
+            raise HTTPException(status_code=500, detail=f"チャンクデータの処理エラー: {str(e)}")
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error("チャンクデータの再構築エラー: %s", str(e), exc_info=True)
-        raise HTTPException(status_code=500, detail=f"チャンクデータの処理エラー: {str(e)}")
+        logger.error("チャンク処理中の予期せぬエラー: %s", str(e), exc_info=True)
+        raise HTTPException(status_code=500, detail=f"チャンク処理エラー: {str(e)}")
+
 
 @app.post("/backend/chat")
 async def chat(request: Request, current_user: Dict = Depends(get_current_user)):
@@ -442,7 +506,6 @@ async def chat(request: Request, current_user: Dict = Depends(get_current_user))
         logger.error("チャットエラー: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
-# speech2textエンドポイントを修正
 @app.post("/backend/speech2text")
 async def speech2text(request: Request, current_user: Dict = Depends(get_current_user)):
     logger.info("音声認識処理開始")
@@ -458,13 +521,25 @@ async def speech2text(request: Request, current_user: Dict = Depends(get_current
                 body["isBinary"] = True  # 音声データはバイナリとして処理
                 data = await process_chunked_data(body)
                 
+                # 中間ステータスのチェック - これが重要な修正部分
+                if data.get("status") == "chunk_received":
+                    # 中間チャンクの場合は、そのままステータスを返す
+                    logger.info(f"チャンク中間状態: {data.get('received')}/{data.get('total')} 受信済み")
+                    return data
+                
                 # バイナリデータが返された場合の処理
                 if "binary_data" in data:
                     audio_bytes = data["binary_data"]
+                    logger.info(f"バイナリデータ受信完了: {len(audio_bytes) / 1024:.2f} KB")
                     audio_data_b64 = base64.b64encode(audio_bytes).decode('utf-8')
                     data = {"audio_data": audio_data_b64}
+                else:
+                    logger.error(f"予期しないデータ形式: {data.keys()}")
+                    raise HTTPException(status_code=400, detail="不正なデータ形式")
+            except HTTPException:
+                raise
             except Exception as e:
-                logger.error("チャンク組み立てエラー: %s", str(e), exc_info=True)
+                logger.error(f"チャンク組み立てエラー: {str(e)}", exc_info=True)
                 raise HTTPException(status_code=500, detail=str(e))
         else:
             logger.info("チャンクされていないデータです")
@@ -472,6 +547,7 @@ async def speech2text(request: Request, current_user: Dict = Depends(get_current
 
         audio_data = data.get("audio_data", "")
         if not audio_data:
+            logger.error("音声データが見つかりません")
             raise HTTPException(
                 status_code=400, detail="音声データが提供されていません"
             )
@@ -480,10 +556,27 @@ async def speech2text(request: Request, current_user: Dict = Depends(get_current
         if audio_data.startswith("data:"):
             _, audio_data = audio_data.split(",", 1)
 
-        audio_bytes = base64.b64decode(audio_data)
-        logger.info("受信した音声サイズ: %d バイト", len(audio_bytes))
+        try:
+            audio_bytes = base64.b64decode(audio_data)
+            logger.info(f"受信した音声サイズ: {len(audio_bytes) / 1024:.2f} KB")
+        except Exception as e:
+            logger.error(f"音声データのBase64デコードエラー: {str(e)}")
+            raise HTTPException(status_code=400, detail=f"音声データの解析に失敗しました: {str(e)}")
 
-        responses = transcribe_streaming_v2(audio_bytes, language_codes=["ja-JP"])
+        
+        # 受信したデータが空でないか確認
+        if len(audio_bytes) == 0:
+            logger.error("音声データが空です")
+            raise HTTPException(status_code=400, detail="音声データが空です")
+
+        try:
+            # 音声認識処理
+            logger.info("音声認識処理を開始します")
+            responses = transcribe_streaming_v2(audio_bytes, language_codes=["ja-JP"])
+            logger.info("音声認識完了")
+        except Exception as e:
+            logger.error(f"音声認識エラー: {str(e)}", exc_info=True)
+            raise HTTPException(status_code=500, detail=f"音声認識エラー: {str(e)}")
 
         full_transcript = ""
         timed_transcription = []
@@ -519,6 +612,7 @@ async def speech2text(request: Request, current_user: Dict = Depends(get_current
                         }
                     )
 
+        logger.info(f"文字起こし結果: {len(full_transcript)} 文字, {len(timed_transcription)} セグメント")
         return {
             "transcription": full_transcript.strip(),
             "timed_transcription": timed_transcription,
@@ -528,6 +622,7 @@ async def speech2text(request: Request, current_user: Dict = Depends(get_current
     except Exception as e:
         logger.error(f"音声文字起こしエラー: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+    
 @app.post("/backend/generate-image")
 async def generate_image_endpoint(
     request: GenerateImageRequest, current_user: Dict = Depends(get_current_user)
