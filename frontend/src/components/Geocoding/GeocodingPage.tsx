@@ -861,20 +861,12 @@ const GeocodingPage = () => {
         ジオコーディング
       </h1>
 
-      {/* WebSocket接続状態 - シンプル化 */}
-      <div className="mb-4 flex items-center">
-        <div
-          className={`w-3 h-3 rounded-full mr-2 ${
-            isConnected ? "bg-green-500" : "bg-red-500"
-          }`}
-        ></div>
-        <span className="text-gray-200">
-          {isConnected ? "WebSocket接続済み" : "WebSocket未接続"}
-        </span>
-        {connectionError && (
-          <span className="text-red-400 ml-4">{connectionError}</span>
-        )}
-      </div>
+      {/* エラーメッセージのみを表示 */}
+      {connectionError && (
+        <div className="mb-4">
+          <span className="text-red-400">{connectionError}</span>
+        </div>
+      )}
 
       {/* 地図コントロール（結果が表示されていても操作可能） */}
       <MapControls
@@ -957,6 +949,12 @@ const GeocodingPage = () => {
           有効な行数: <strong>{lineCount}</strong>
         </div>
         <div className="flex items-center space-x-4">
+          {/* WebSocket接続状態のインジケーターを送信ボタンの左に配置 */}
+          <div
+            className={`w-3 h-3 rounded-full ${
+              isConnected ? "bg-red-500" : "bg-green-500"
+            }`}
+          ></div>
           <button
             onClick={handleSendLines}
             disabled={isSending || lineCount === 0}

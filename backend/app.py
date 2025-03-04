@@ -1,5 +1,16 @@
 # app.py
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Request, Response, Body, File, UploadFile
+from fastapi import (
+    FastAPI,
+    WebSocket,
+    WebSocketDisconnect,
+    HTTPException,
+    Depends,
+    Request,
+    Response,
+    Body,
+    File,
+    UploadFile,
+)
 from fastapi.responses import JSONResponse, StreamingResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -57,7 +68,8 @@ manager = ConnectionManager()
 
 # CORS設定
 origins = [org for org in os.getenv("ORIGINS", "").split(",")]
-origins.append("http://localhost:5173")
+if int(os.getenv("DEBUG", 0)):
+    origins.append("http://localhost:5173")
 logger.info("ORIGINS: %s", origins)
 
 # FastAPIのCORS設定
@@ -70,13 +82,14 @@ app.add_middleware(
     expose_headers=["Authorization"],
 )
 
+
 # 認証ミドルウェア用の依存関係
 async def get_current_user(request: Request):
     auth_header = request.headers.get("Authorization")
     if not auth_header or not auth_header.startswith("Bearer "):
         logger.warning("トークンが見つかりません")
         raise HTTPException(status_code=401, detail="認証が必要です")
-    
+
     token = auth_header.split("Bearer ")[1]
     try:
         decoded_token = auth.verify_id_token(token, clock_skew_seconds=60)
@@ -84,6 +97,7 @@ async def get_current_user(request: Request):
     except Exception as e:
         logger.error("認証エラー: %s", str(e), exc_info=True)
         raise HTTPException(status_code=401, detail=str(e))
+
 
 # IPガードミドルウェア
 @app.middleware("http")
@@ -95,11 +109,13 @@ async def ip_guard(request: Request, call_next):
     except HTTPException as exc:
         return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
 
+
 # リクエストモデル
 class GeocodeRequest(BaseModel):
     mode: str
     lines: List[str]
     options: Dict[str, Any]
+
 
 class ChatRequest(BaseModel):
     messages: List[Dict[str, Any]]
@@ -110,6 +126,7 @@ class ChatRequest(BaseModel):
     totalChunks: Optional[int] = None
     chunkData: Optional[str] = None
 
+
 class SpeechToTextRequest(BaseModel):
     audio_data: str
     chunked: Optional[bool] = False
@@ -117,6 +134,7 @@ class SpeechToTextRequest(BaseModel):
     chunkIndex: Optional[int] = None
     totalChunks: Optional[int] = None
     chunkData: Optional[str] = None
+
 
 class GenerateImageRequest(BaseModel):
     prompt: str
@@ -129,6 +147,7 @@ class GenerateImageRequest(BaseModel):
     add_watermark: Optional[bool] = None
     safety_filter_level: Optional[str] = None
     person_generation: Optional[str] = None
+
 
 # WebSocketエンドポイント
 @app.websocket("/ws/geocoding")
@@ -278,20 +297,20 @@ async def verify_auth(current_user: Dict = Depends(get_current_user)):
 # チャンクデータ処理関数
 async def process_chunked_data(data: Dict[str, Any]):
     from utils.common import CHUNK_STORE
-    
+
     chunk_id = data.get("chunkId")
     chunk_index = data.get("chunkIndex")
     total_chunks = data.get("totalChunks")
     chunk_data_b64 = data.get("chunkData")
-    
+
     if not chunk_id or chunk_index is None or not total_chunks or not chunk_data_b64:
         raise HTTPException(status_code=400, detail="チャンク情報が不足しています")
-    
+
     # base64デコードしてバイナリ取得
     chunk_data = base64.b64decode(chunk_data_b64)
     if chunk_id not in CHUNK_STORE:
         CHUNK_STORE[chunk_id] = {}
-    
+
     CHUNK_STORE[chunk_id][chunk_index] = chunk_data
     logger.info(
         "チャンク受信: %s - インデックス %d/%d",
@@ -299,7 +318,7 @@ async def process_chunked_data(data: Dict[str, Any]):
         chunk_index,
         total_chunks,
     )
-    
+
     if len(CHUNK_STORE[chunk_id]) < total_chunks:
         return {
             "status": "chunk_received",
@@ -307,26 +326,21 @@ async def process_chunked_data(data: Dict[str, Any]):
             "received": len(CHUNK_STORE[chunk_id]),
             "total": total_chunks,
         }
-    
+
     # 全チャンク受信済みの場合、順次再構築
-    assembled_bytes = b"".join(
-        CHUNK_STORE[chunk_id][i] for i in range(total_chunks)
-    )
+    assembled_bytes = b"".join(CHUNK_STORE[chunk_id][i] for i in range(total_chunks))
     del CHUNK_STORE[chunk_id]
     assembled_str = assembled_bytes.decode("utf-8")
     return json.loads(assembled_str)
 
 
 @app.post("/backend/chat")
-async def chat(
-    request: Request,
-    current_user: Dict = Depends(get_current_user)
-):
+async def chat(request: Request, current_user: Dict = Depends(get_current_user)):
     logger.info("チャットリクエストを処理中")
     try:
         # リクエストボディの読み込み
         body = await request.json()
-        
+
         # チャンク処理の確認
         if body.get("chunked"):
             logger.info("チャンクされたデータです")
@@ -339,26 +353,28 @@ async def chat(
         else:
             logger.info("チャンクされていないデータです")
             data = body
-        
+
         messages = data.get("messages", [])
         model = data.get("model")
         logger.info(f"モデル: {model}")
-        
+
         if model is None:
-            raise HTTPException(status_code=400, detail="モデル情報が提供されていません")
+            raise HTTPException(
+                status_code=400, detail="モデル情報が提供されていません"
+            )
 
         from utils.common import get_api_key_for_model
 
         model_api_key = get_api_key_for_model(model)
         error_keyword = "@trigger_error"
         error_flag = False
-        
+
         for msg in messages:
             content = msg.get("content", "")
             if error_keyword == content:
                 error_flag = True
                 break
-                
+
         transformed_messages = []
         for msg in messages:
             if msg.get("role") == "user" and msg.get("images"):
@@ -375,13 +391,15 @@ async def chat(
                 msg["content"] = parts
                 msg.pop("images", None)
             transformed_messages.append(msg)
-            
+
         logger.info(f"選択されたモデル: {model}")
         logger.debug(f"messages: {transformed_messages}")
-        
+
         if error_flag:
-            raise HTTPException(status_code=500, detail="意図的なエラーがトリガーされました")
-            
+            raise HTTPException(
+                status_code=500, detail="意図的なエラーがトリガーされました"
+            )
+
         # ストリーミングレスポンスの作成
         async def generate_stream():
             for chunk in common_message_function(
@@ -391,13 +409,13 @@ async def chat(
                 api_key=model_api_key,
             ):
                 yield chunk
-                
+
         return StreamingResponse(
             generate_stream(),
             media_type="text/event-stream",
-            headers={"Cache-Control": "no-cache", "Transfer-Encoding": "chunked"}
+            headers={"Cache-Control": "no-cache", "Transfer-Encoding": "chunked"},
         )
-        
+
     except HTTPException as he:
         raise he
     except Exception as e:
@@ -406,15 +424,12 @@ async def chat(
 
 
 @app.post("/backend/speech2text")
-async def speech2text(
-    request: Request,
-    current_user: Dict = Depends(get_current_user)
-):
+async def speech2text(request: Request, current_user: Dict = Depends(get_current_user)):
     logger.info("音声認識処理開始")
     try:
         # リクエストボディの読み込み
         body = await request.json()
-        
+
         # チャンク処理の確認
         if body.get("chunked"):
             logger.info("チャンクされたデータです")
@@ -430,7 +445,9 @@ async def speech2text(
 
         audio_data = data.get("audio_data", "")
         if not audio_data:
-            raise HTTPException(status_code=400, detail="音声データが提供されていません")
+            raise HTTPException(
+                status_code=400, detail="音声データが提供されていません"
+            )
 
         # ヘッダー除去（"data:audio/～;base64,..."形式の場合）
         if audio_data.startswith("data:"):
@@ -488,8 +505,7 @@ async def speech2text(
 
 @app.post("/backend/generate-image")
 async def generate_image_endpoint(
-    request: GenerateImageRequest,
-    current_user: Dict = Depends(get_current_user)
+    request: GenerateImageRequest, current_user: Dict = Depends(get_current_user)
 ):
     prompt = request.prompt
     model_name = request.model_name
@@ -501,7 +517,7 @@ async def generate_image_endpoint(
     add_watermark = request.add_watermark
     safety_filter_level = request.safety_filter_level
     person_generation = request.person_generation
-    
+
     kwargs = dict(
         prompt=prompt,
         model_name=model_name,
@@ -515,13 +531,14 @@ async def generate_image_endpoint(
         person_generation=person_generation,
     )
     logger.info(f"generate_image 関数の引数: {kwargs}")
-    
+
     # 必須パラメータのチェック
-    none_parameters = [key for key, value in kwargs.items() if value is None and key != "seed"]
+    none_parameters = [
+        key for key, value in kwargs.items() if value is None and key != "seed"
+    ]
     if none_parameters:
         return JSONResponse(
-            status_code=400,
-            content={"error": f"{none_parameters} is(are) required"}
+            status_code=400, content={"error": f"{none_parameters} is(are) required"}
         )
 
     try:
@@ -558,7 +575,12 @@ async def logout():
 FRONTEND_PATH = os.getenv("FRONTEND_PATH", "../frontend/dist")
 
 # 静的ファイルのマウント
-app.mount("/assets", StaticFiles(directory=os.path.join(FRONTEND_PATH, "assets")), name="assets")
+app.mount(
+    "/assets",
+    StaticFiles(directory=os.path.join(FRONTEND_PATH, "assets")),
+    name="assets",
+)
+
 
 @app.get("/vite.svg")
 async def vite_svg():
@@ -599,5 +621,5 @@ if __name__ == "__main__":
         host="0.0.0.0",
         port=int(os.getenv("PORT", "8080")),
         log_level="debug",
-        reload=False,
+        reload=False
     )
