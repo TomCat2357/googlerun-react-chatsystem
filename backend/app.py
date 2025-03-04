@@ -1,31 +1,22 @@
 # app.py
-from flask import (
-    Flask,
-    request,
-    Response,
-    jsonify,
-    make_response,
-    send_from_directory,
-    abort,
-)
-from flask_cors import CORS
-from firebase_admin import auth, credentials
-from dotenv import load_dotenv
-import os, json, firebase_admin, asyncio, base64, time
-from typing import Dict, Any
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.middleware.wsgi import WSGIMiddleware
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Request, Response, Body, File, UploadFile
+from fastapi.responses import JSONResponse, StreamingResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-import uvicorn
+from fastapi.staticfiles import StaticFiles
+from fastapi.routing import APIRoute
+from pydantic import BaseModel, Field
+from typing import Dict, Any, List, Optional, Callable
+from firebase_admin import auth, credentials
+import firebase_admin
+from dotenv import load_dotenv
+import os, json, asyncio, base64, time, uvicorn
 
 # 自作モジュールのインポート
 from utils.common import (
     logger,
     process_uploaded_image,
     limit_remote_addr,
-    handle_chunked_request,
-    require_auth,
+    verify_firebase_token,
     MAX_IMAGES,
 )
 from utils.websocket_manager import (
@@ -58,9 +49,8 @@ except ValueError:
         logger.info("Firebase認証情報なしで初期化")
         firebase_admin.initialize_app()  # 名前を指定しない
 
-# FlaskとFastAPIの初期化
-app = Flask(__name__)
-fastapi_app = FastAPI()
+# FastAPIアプリケーションの初期化
+app = FastAPI()
 
 # 接続マネージャのインスタンス作成
 manager = ConnectionManager()
@@ -69,40 +59,79 @@ manager = ConnectionManager()
 origins = [org for org in os.getenv("ORIGINS", "").split(",")]
 origins.append("http://localhost:5173")
 logger.info("ORIGINS: %s", origins)
-CORS(
-    app,
-    origins=origins,
-    supports_credentials=False,
-    expose_headers=["Authorization"],
-    allow_headers=["Content-Type", "Authorization"],
-    methods=["GET", "POST", "OPTIONS"],
-)
 
-# FastAPIのCORS設定を追加（WebSocket用）
-fastapi_app.add_middleware(
+# FastAPIのCORS設定
+app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,  # FlaskのCORS設定と同じorigins変数を使用
+    allow_origins=origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization"],
+    expose_headers=["Authorization"],
 )
 
+# 認証ミドルウェア用の依存関係
+async def get_current_user(request: Request):
+    auth_header = request.headers.get("Authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
+        logger.warning("トークンが見つかりません")
+        raise HTTPException(status_code=401, detail="認証が必要です")
+    
+    token = auth_header.split("Bearer ")[1]
+    try:
+        decoded_token = auth.verify_id_token(token, clock_skew_seconds=60)
+        return decoded_token
+    except Exception as e:
+        logger.error("認証エラー: %s", str(e), exc_info=True)
+        raise HTTPException(status_code=401, detail=str(e))
 
-# 全エンドポイントに対してIP制限を適用
-@app.before_request
-def ip_guard():
-    limit_remote_addr()
-
+# IPガードミドルウェア
+@app.middleware("http")
+async def ip_guard(request: Request, call_next):
+    try:
+        limit_remote_addr(request)
+        response = await call_next(request)
+        return response
+    except HTTPException as exc:
+        return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
 
 # リクエストモデル
 class GeocodeRequest(BaseModel):
     mode: str
-    lines: list[str]
+    lines: List[str]
     options: Dict[str, Any]
 
+class ChatRequest(BaseModel):
+    messages: List[Dict[str, Any]]
+    model: str
+    chunked: Optional[bool] = False
+    chunkId: Optional[str] = None
+    chunkIndex: Optional[int] = None
+    totalChunks: Optional[int] = None
+    chunkData: Optional[str] = None
+
+class SpeechToTextRequest(BaseModel):
+    audio_data: str
+    chunked: Optional[bool] = False
+    chunkId: Optional[str] = None
+    chunkIndex: Optional[int] = None
+    totalChunks: Optional[int] = None
+    chunkData: Optional[str] = None
+
+class GenerateImageRequest(BaseModel):
+    prompt: str
+    model_name: str
+    negative_prompt: Optional[str] = None
+    number_of_images: Optional[int] = None
+    seed: Optional[int] = None
+    aspect_ratio: Optional[str] = None
+    language: Optional[str] = "auto"
+    add_watermark: Optional[bool] = None
+    safety_filter_level: Optional[str] = None
+    person_generation: Optional[str] = None
 
 # WebSocketエンドポイント
-@fastapi_app.websocket("/ws/geocoding")
+@app.websocket("/ws/geocoding")
 async def websocket_geocoding(websocket: WebSocket):
     logger.info("WebSocket接続リクエスト受信")
     await websocket.accept()
@@ -177,10 +206,25 @@ async def websocket_geocoding(websocket: WebSocket):
             logger.error(f"接続解除エラー: {str(e)}")
 
 
-# === 既存のエンドポイント（WebSocket移行対象のRESTfulエンドポイントは削除） ===
-@app.route("/backend/config", methods=["GET"])
-@require_auth
-def get_config(decoded_token: Dict) -> Response:
+# テスト用のWebSocketエンドポイント
+@app.websocket("/ws/echo")
+async def websocket_echo(websocket: WebSocket):
+    logger.info("Echoテスト: WebSocket接続リクエスト受信")
+    await websocket.accept()
+    logger.info("Echoテスト: WebSocket接続確立")
+    try:
+        while True:
+            data = await websocket.receive_text()
+            logger.info(f"Echoテスト: メッセージ受信: {data}")
+            await websocket.send_text(f"Echo: {data}")
+    except WebSocketDisconnect:
+        logger.info("Echoテスト: クライアント切断")
+    except Exception as e:
+        logger.error(f"Echoテスト: エラー: {str(e)}", exc_info=True)
+
+
+@app.get("/backend/config")
+async def get_config(current_user: Dict = Depends(get_current_user)):
     try:
         config_values = {
             "MAX_IMAGES": os.getenv("MAX_IMAGES"),
@@ -205,83 +249,116 @@ def get_config(decoded_token: Dict) -> Response:
             "IMAGEN_SAFETY_FILTER_LEVELS": os.getenv("IMAGEN_SAFETY_FILTER_LEVELS"),
             "IMAGEN_PERSON_GENERATIONS": os.getenv("IMAGEN_PERSON_GENERATIONS"),
         }
-        response = make_response(jsonify(config_values))
-        response.status_code = 200
-        return response
+        return config_values
     except Exception as e:
         logger.error("Config取得エラー: %s", str(e), exc_info=True)
-        error_response = make_response(jsonify({"error": str(e)}))
-        error_response.status_code = 500
-        return error_response
+        raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.route("/backend/verify-auth", methods=["GET"])
-@require_auth
-def verify_auth(decoded_token: Dict) -> Response:
+@app.get("/backend/verify-auth")
+async def verify_auth(current_user: Dict = Depends(get_current_user)):
     try:
         logger.info("認証検証開始")
-        logger.info("トークンの復号化成功。ユーザー: %s", decoded_token.get("email"))
+        logger.info("トークンの復号化成功。ユーザー: %s", current_user.get("email"))
         response_data = {
             "status": "success",
             "user": {
-                "email": decoded_token.get("email"),
-                "uid": decoded_token.get("uid"),
+                "email": current_user.get("email"),
+                "uid": current_user.get("uid"),
             },
-            "expire_time": decoded_token.get("exp"),
+            "expire_time": current_user.get("exp"),
         }
         logger.info("認証検証完了")
-        response = make_response(jsonify(response_data))
-        response.status_code = 200
-        return response
+        return response_data
     except Exception as e:
         logger.error("認証エラー: %s", str(e), exc_info=True)
-        response = make_response(jsonify({"error": str(e)}))
-        response.status_code = 401
-        return response
+        raise HTTPException(status_code=401, detail=str(e))
 
 
-# テスト用の最小限WebSocketエンドポイント
-@fastapi_app.websocket("/ws/echo")
-async def websocket_echo(websocket: WebSocket):
-    logger.info("Echoテスト: WebSocket接続リクエスト受信")
-    await websocket.accept()
-    logger.info("Echoテスト: WebSocket接続確立")
-    try:
-        while True:
-            data = await websocket.receive_text()
-            logger.info(f"Echoテスト: メッセージ受信: {data}")
-            await websocket.send_text(f"Echo: {data}")
-    except WebSocketDisconnect:
-        logger.info("Echoテスト: クライアント切断")
-    except Exception as e:
-        logger.error(f"Echoテスト: エラー: {str(e)}", exc_info=True)
+# チャンクデータ処理関数
+async def process_chunked_data(data: Dict[str, Any]):
+    from utils.common import CHUNK_STORE
+    
+    chunk_id = data.get("chunkId")
+    chunk_index = data.get("chunkIndex")
+    total_chunks = data.get("totalChunks")
+    chunk_data_b64 = data.get("chunkData")
+    
+    if not chunk_id or chunk_index is None or not total_chunks or not chunk_data_b64:
+        raise HTTPException(status_code=400, detail="チャンク情報が不足しています")
+    
+    # base64デコードしてバイナリ取得
+    chunk_data = base64.b64decode(chunk_data_b64)
+    if chunk_id not in CHUNK_STORE:
+        CHUNK_STORE[chunk_id] = {}
+    
+    CHUNK_STORE[chunk_id][chunk_index] = chunk_data
+    logger.info(
+        "チャンク受信: %s - インデックス %d/%d",
+        chunk_id,
+        chunk_index,
+        total_chunks,
+    )
+    
+    if len(CHUNK_STORE[chunk_id]) < total_chunks:
+        return {
+            "status": "chunk_received",
+            "chunkId": chunk_id,
+            "received": len(CHUNK_STORE[chunk_id]),
+            "total": total_chunks,
+        }
+    
+    # 全チャンク受信済みの場合、順次再構築
+    assembled_bytes = b"".join(
+        CHUNK_STORE[chunk_id][i] for i in range(total_chunks)
+    )
+    del CHUNK_STORE[chunk_id]
+    assembled_str = assembled_bytes.decode("utf-8")
+    return json.loads(assembled_str)
 
 
-@app.route("/backend/chat", methods=["POST"])
-@require_auth
-@handle_chunked_request
-def chat(decoded_token: Dict, assembled_data=None) -> Response:
+@app.post("/backend/chat")
+async def chat(
+    request: Request,
+    current_user: Dict = Depends(get_current_user)
+):
     logger.info("チャットリクエストを処理中")
     try:
-        data = (
-            assembled_data if assembled_data is not None else request.get_json() or {}
-        )
+        # リクエストボディの読み込み
+        body = await request.json()
+        
+        # チャンク処理の確認
+        if body.get("chunked"):
+            logger.info("チャンクされたデータです")
+            try:
+                # チャンクデータの処理
+                data = await process_chunked_data(body)
+            except Exception as e:
+                logger.error("チャンク組み立てエラー: %s", str(e), exc_info=True)
+                raise HTTPException(status_code=500, detail=str(e))
+        else:
+            logger.info("チャンクされていないデータです")
+            data = body
+        
         messages = data.get("messages", [])
         model = data.get("model")
         logger.info(f"モデル: {model}")
+        
         if model is None:
-            raise ValueError("モデル情報が提供されていません")
+            raise HTTPException(status_code=400, detail="モデル情報が提供されていません")
 
         from utils.common import get_api_key_for_model
 
         model_api_key = get_api_key_for_model(model)
         error_keyword = "@trigger_error"
         error_flag = False
+        
         for msg in messages:
             content = msg.get("content", "")
             if error_keyword == content:
                 error_flag = True
                 break
+                
         transformed_messages = []
         for msg in messages:
             if msg.get("role") == "user" and msg.get("images"):
@@ -298,41 +375,62 @@ def chat(decoded_token: Dict, assembled_data=None) -> Response:
                 msg["content"] = parts
                 msg.pop("images", None)
             transformed_messages.append(msg)
+            
         logger.info(f"選択されたモデル: {model}")
         logger.debug(f"messages: {transformed_messages}")
+        
         if error_flag:
-            raise ValueError("意図的なエラーがトリガーされました")
-        response = Response(
-            common_message_function(
+            raise HTTPException(status_code=500, detail="意図的なエラーがトリガーされました")
+            
+        # ストリーミングレスポンスの作成
+        async def generate_stream():
+            for chunk in common_message_function(
                 model=model,
                 stream=True,
                 messages=transformed_messages,
                 api_key=model_api_key,
-            ),
-            mimetype="text/event-stream",
-            headers={"Cache-Control": "no-cache", "Transfer-Encoding": "chunked"},
+            ):
+                yield chunk
+                
+        return StreamingResponse(
+            generate_stream(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "Transfer-Encoding": "chunked"}
         )
-        response.status_code = 200
-        return response
+        
+    except HTTPException as he:
+        raise he
     except Exception as e:
         logger.error("チャットエラー: %s", e, exc_info=True)
-        error_response = make_response(jsonify({"status": "error", "message": str(e)}))
-        error_response.status_code = 500
-        return error_response
+        raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.route("/backend/speech2text", methods=["POST"])
-@require_auth
-@handle_chunked_request
-def speech2text(decoded_token: dict, assembled_data=None) -> Response:
+@app.post("/backend/speech2text")
+async def speech2text(
+    request: Request,
+    current_user: Dict = Depends(get_current_user)
+):
     logger.info("音声認識処理開始")
     try:
-        data = (
-            assembled_data if assembled_data is not None else request.get_json() or {}
-        )
+        # リクエストボディの読み込み
+        body = await request.json()
+        
+        # チャンク処理の確認
+        if body.get("chunked"):
+            logger.info("チャンクされたデータです")
+            try:
+                # チャンクデータの処理
+                data = await process_chunked_data(body)
+            except Exception as e:
+                logger.error("チャンク組み立てエラー: %s", str(e), exc_info=True)
+                raise HTTPException(status_code=500, detail=str(e))
+        else:
+            logger.info("チャンクされていないデータです")
+            data = body
+
         audio_data = data.get("audio_data", "")
         if not audio_data:
-            raise ValueError("音声データが提供されていません")
+            raise HTTPException(status_code=400, detail="音声データが提供されていません")
 
         # ヘッダー除去（"data:audio/～;base64,..."形式の場合）
         if audio_data.startswith("data:"):
@@ -377,31 +475,33 @@ def speech2text(decoded_token: dict, assembled_data=None) -> Response:
                         }
                     )
 
-        return jsonify(
-            {
-                "transcription": full_transcript.strip(),
-                "timed_transcription": timed_transcription,
-            }
-        )
+        return {
+            "transcription": full_transcript.strip(),
+            "timed_transcription": timed_transcription,
+        }
+    except HTTPException as he:
+        raise he
     except Exception as e:
         logger.error(f"音声文字起こしエラー: {e}", exc_info=True)
-        return jsonify({"error": str(e)}), 500
+        raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.route("/backend/generate-image", methods=["POST"])
-@require_auth
-def generate_image_endpoint(decoded_token: Dict) -> Response:
-    data = request.get_json()
-    prompt = data.get("prompt")
-    model_name = data.get("model_name")
-    negative_prompt = data.get("negative_prompt")
-    number_of_images = data.get("number_of_images")
-    seed = data.get("seed")
-    aspect_ratio = data.get("aspect_ratio")
-    language = data.get("language", "auto")
-    add_watermark = data.get("add_watermark")
-    safety_filter_level = data.get("safety_filter_level")
-    person_generation = data.get("person_generation")
+@app.post("/backend/generate-image")
+async def generate_image_endpoint(
+    request: GenerateImageRequest,
+    current_user: Dict = Depends(get_current_user)
+):
+    prompt = request.prompt
+    model_name = request.model_name
+    negative_prompt = request.negative_prompt
+    number_of_images = request.number_of_images
+    seed = request.seed
+    aspect_ratio = request.aspect_ratio
+    language = request.language
+    add_watermark = request.add_watermark
+    safety_filter_level = request.safety_filter_level
+    person_generation = request.person_generation
+    
     kwargs = dict(
         prompt=prompt,
         model_name=model_name,
@@ -415,66 +515,57 @@ def generate_image_endpoint(decoded_token: Dict) -> Response:
         person_generation=person_generation,
     )
     logger.info(f"generate_image 関数の引数: {kwargs}")
-    if None in kwargs.values() and seed is not None:
-        NoneParameters = [
-            key for key, value in kwargs.items() if value is None and key != "seed"
-        ]
-        return jsonify({"error": f"{NoneParameters} is(are) required"}), 400
+    
+    # 必須パラメータのチェック
+    none_parameters = [key for key, value in kwargs.items() if value is None and key != "seed"]
+    if none_parameters:
+        return JSONResponse(
+            status_code=400,
+            content={"error": f"{none_parameters} is(are) required"}
+        )
 
     try:
         image_list = generate_image(**kwargs)
         if not image_list:
             error_message = "画像生成に失敗しました。プロンプトにコンテンツポリシーに違反する内容（人物表現など）が含まれている可能性があります。別の内容を試してください。"
             logger.warning(error_message)
-            return jsonify({"error": error_message}), 500
+            raise HTTPException(status_code=500, detail=error_message)
 
         encode_images = []
         for img_obj in image_list:
             img_base64 = img_obj._as_base64_string()
             encode_images.append(img_base64)
-        return jsonify({"images": encode_images})
+        return {"images": encode_images}
+    except HTTPException as he:
+        raise he
     except Exception as e:
         error_message = str(e)
         logger.error(f"画像生成エラー: {error_message}", exc_info=True)
-        return jsonify({"error": error_message}), 500
+        raise HTTPException(status_code=500, detail=error_message)
 
 
-@app.route("/backend/logout", methods=["POST"])
-def logout() -> Response:
+@app.post("/backend/logout")
+async def logout():
     try:
         logger.info("ログアウト処理開始")
-        response = make_response(
-            jsonify({"status": "success", "message": "ログアウトに成功しました"})
-        )
-        return response, 200
+        return {"status": "success", "message": "ログアウトに成功しました"}
     except Exception as e:
         logger.error("ログアウト処理中にエラーが発生: %s", str(e), exc_info=True)
-        return jsonify({"error": str(e)}), 401
+        raise HTTPException(status_code=401, detail=str(e))
 
 
-# ファイル配信関連エンドポイント
-FRONTEND_PATH = os.getenv("FRONTEND_PATH")
+# 静的ファイル配信設定
+FRONTEND_PATH = os.getenv("FRONTEND_PATH", "../frontend/dist")
 
+# 静的ファイルのマウント
+app.mount("/assets", StaticFiles(directory=os.path.join(FRONTEND_PATH, "assets")), name="assets")
 
-@app.route("/assets/<path:path>")
-def serve_assets(path):
-    logger.info(f"アセットファイルリクエスト: /assets/{path}")
-    assets_dir = os.path.join(FRONTEND_PATH, "assets")
-    if os.path.exists(assets_dir) and os.path.isfile(os.path.join(assets_dir, path)):
-        return send_from_directory(assets_dir, path)
-    else:
-        logger.warning(f"アセットファイルが見つかりません: {path}")
-        if not os.path.exists(assets_dir):
-            logger.error(f"アセットディレクトリが存在しません: {assets_dir}")
-        abort(404)
-
-
-@app.route("/vite.svg")
-def vite_svg():
+@app.get("/vite.svg")
+async def vite_svg():
     logger.info("vite.svg リクエスト")
     svg_path = os.path.join(FRONTEND_PATH, "vite.svg")
     if os.path.isfile(svg_path):
-        return send_from_directory(FRONTEND_PATH, "vite.svg", mimetype="image/svg+xml")
+        return FileResponse(svg_path, media_type="image/svg+xml")
 
     logger.warning(f"vite.svg が見つかりません。確認パス: {svg_path}")
     try:
@@ -483,31 +574,28 @@ def vite_svg():
     except Exception as e:
         logger.error(f"FRONTEND_PATH内のファイル一覧取得エラー: {e}")
 
-    abort(404)
+    raise HTTPException(status_code=404, detail="ファイルが見つかりません")
 
 
-@app.route("/")
-def index():
+@app.get("/")
+async def index():
     logger.info("インデックスページリクエスト: %s", FRONTEND_PATH)
-    return send_from_directory(FRONTEND_PATH, "index.html")
+    return FileResponse(os.path.join(FRONTEND_PATH, "index.html"))
 
 
-@app.route("/<path:path>")
-def static_file(path):
+@app.get("/{path:path}")
+async def static_file(path: str):
     logger.info(f"パスリクエスト: /{path}")
-    return send_from_directory(FRONTEND_PATH, "index.html")
+    return FileResponse(os.path.join(FRONTEND_PATH, "index.html"))
 
 
-# FastAPIにFlaskアプリをマウント
-fastapi_app.mount("/", WSGIMiddleware(app))
-# fastapi_app.mount("/api", WSGIMiddleware(app))
 if __name__ == "__main__":
     logger.info(
         "Uvicornを使用してFastAPIアプリを起動します DEBUG: %s",
         bool(int(os.getenv("DEBUG", 0))),
     )
     uvicorn.run(
-        "app:fastapi_app",
+        "app:app",
         host="0.0.0.0",
         port=int(os.getenv("PORT", "8080")),
         log_level="debug",

@@ -8,7 +8,7 @@ from PIL import Image
 from google.cloud import secretmanager
 from firebase_admin import auth
 from typing import Dict, Optional, Any, List
-from flask import request, abort, make_response, jsonify, Response
+from fastapi import HTTPException, Request
 import time
 import json
 from functools import wraps
@@ -137,14 +137,20 @@ def verify_firebase_token(token: str) -> Dict[str, Any]:
         logger.error("認証エラー: %s", str(e), exc_info=True)
         raise e
 
+
 def get_api_key_for_model(model: str) -> Optional[str]:
     """モデル名からAPIキーを取得する"""
     source = model.split("/")[0] if "/" in model else model
     return json.loads(os.getenv("MODEL_API_KEYS", "{}")).get(source, "")
 
-def limit_remote_addr():
+
+def limit_remote_addr(request: Request):
     """リクエスト送信元IPが許可リストに含まれていなければ403を返す"""
-    remote_addr = request.headers.get("X-Forwarded-For", request.remote_addr)
+    remote_addr = request.headers.get("X-Forwarded-For", None)
+    if not remote_addr:
+        client_host = request.client.host if request.client else None
+        remote_addr = client_host
+        
     logger.info(f"X-Forwarded-For: {remote_addr}")
     if remote_addr and ',' in remote_addr:
         remote_addr = remote_addr.split(',')[0].strip()
@@ -153,7 +159,7 @@ def limit_remote_addr():
         logger.info(f"リクエスト送信元IP: {client_ip}")
     except ValueError:
         time.sleep(0.05)
-        abort(400, description="不正なIPアドレス形式です")
+        raise HTTPException(status_code=400, detail="不正なIPアドレス形式です")
     
     # ALLOWED_IPSは.envから取得する設定とする
     allowed_tokens = os.getenv('ALLOWED_IPS', '')
@@ -177,86 +183,4 @@ def limit_remote_addr():
             return  # 許可されている場合、処理継続
     
     time.sleep(0.05)
-    abort(403, description="アクセスが許可されていません")
-
-def handle_chunked_request(function):
-    """チャンクリクエストを処理するデコレータ"""
-    @wraps(function)
-    def decorated_function(*args, **kwargs) -> Response:
-        logger.info("MAX_PAYLOAD_SIZE: %s", MAX_PAYLOAD_SIZE)
-        data = request.get_json() or {}
-        if data.get("chunked"):
-            logger.info("チャンクされたデータです")
-            try:
-                chunk_id = data.get("chunkId")
-                chunk_index = data.get("chunkIndex")
-                total_chunks = data.get("totalChunks")
-                chunk_data_b64 = data.get("chunkData")
-                if (
-                    not chunk_id
-                    or chunk_index is None
-                    or not total_chunks
-                    or not chunk_data_b64
-                ):
-                    raise ValueError("チャンク情報が不足しています")
-                # base64デコードしてバイナリ取得
-                chunk_data = base64.b64decode(chunk_data_b64)
-                if chunk_id not in CHUNK_STORE:
-                    CHUNK_STORE[chunk_id] = {}
-                CHUNK_STORE[chunk_id][chunk_index] = chunk_data
-                logger.info(
-                    "チャンク受信: %s - インデックス %d/%d",
-                    chunk_id,
-                    chunk_index,
-                    total_chunks,
-                )
-                if len(CHUNK_STORE[chunk_id]) < total_chunks:
-                    return (
-                        jsonify(
-                            {
-                                "status": "chunk_received",
-                                "chunkId": chunk_id,
-                                "received": len(CHUNK_STORE[chunk_id]),
-                                "total": total_chunks,
-                            }
-                        ),
-                        200,
-                    )
-                # 全チャンク受信済みの場合、順次再構築
-                assembled_bytes = b"".join(
-                    CHUNK_STORE[chunk_id][i] for i in range(total_chunks)
-                )
-                del CHUNK_STORE[chunk_id]
-                assembled_str = assembled_bytes.decode("utf-8")
-                data = json.loads(assembled_str)
-                logger.info("全チャンク受信完了: %s", chunk_id)
-                kwargs["assembled_data"] = data
-            except Exception as e:
-                logger.error("チャンク組み立てエラー: %s", str(e), exc_info=True)
-                return jsonify({"status": "error", "message": str(e)}), 500
-        else:
-            logger.info("チャンクされていないデータです")
-        return function(*args, **kwargs)
-
-    return decorated_function
-
-def require_auth(function):
-    """Firebase認証を要求するデコレータ"""
-    @wraps(function)
-    def decorated_function(*args, **kwargs) -> Response:
-        try:
-            auth_header = request.headers.get("Authorization")
-            if not auth_header or not auth_header.startswith("Bearer "):
-                logger.warning("トークンが見つかりません")
-                return jsonify({"error": "認証が必要です"}), 401
-            token = auth_header.split("Bearer ")[1]
-            decoded_token: Dict = auth.verify_id_token(token, clock_skew_seconds=60)
-            response: Response = function(decoded_token, *args, **kwargs)
-            return response
-        except Exception as e:
-            logger.error("認証エラー: %s", str(e), exc_info=True)
-            response = make_response(jsonify({"error": str(e)}))
-            response.status_code = 401
-            return response
-
-    return decorated_function
+    raise HTTPException(status_code=403, detail="アクセスが許可されていません")
