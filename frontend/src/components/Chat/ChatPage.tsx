@@ -273,6 +273,68 @@ const ChatPage: React.FC = () => {
   };
 
   // ==========================
+  //  ドラッグアンドドロップ処理
+  // ==========================
+  const handleDragOver = (e: React.DragEvent<HTMLTextAreaElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  const handleDrop = async (e: React.DragEvent<HTMLTextAreaElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    if (!e.dataTransfer.files || e.dataTransfer.files.length === 0 || isProcessing) {
+      return;
+    }
+    
+    const files = Array.from(e.dataTransfer.files);
+    
+    if (files.length > MAX_IMAGES - selectedFiles.length) {
+      setErrorMessage(`アップロード可能なファイル数の上限(${MAX_IMAGES}件)を超えています`);
+      return;
+    }
+    
+    try {
+      // ファイル処理
+      const filePromises = files.map(file => {
+        const fileExtension = file.name.split('.').pop()?.toLowerCase() || '';
+        
+        // PDFファイルはドラッグ&ドロップの場合は常にテキストとして処理
+        if (fileExtension === 'pdf' || file.type === 'application/pdf') {
+          return processFile(file, MAX_IMAGE_SIZE, MAX_LONG_EDGE, ['.txt', '.pdf']);
+        }
+        
+        // その他のファイルは拡張子に基づいて処理
+        if (file.type.startsWith('image/')) {
+          return processFile(file, MAX_IMAGE_SIZE, MAX_LONG_EDGE, ['image/*']);
+        } else if (file.type.startsWith('audio/')) {
+          return processFile(file, MAX_IMAGE_SIZE, MAX_LONG_EDGE, ['audio/*']);
+        } else {
+          return processFile(file, MAX_IMAGE_SIZE, MAX_LONG_EDGE, ['.txt', '.docx', '.csv']);
+        }
+      });
+      
+      const processedResults = await Promise.all(filePromises);
+      
+      // 結果を1次元配列に平坦化
+      let newFiles: FileData[] = [];
+      processedResults.forEach(result => {
+        if (Array.isArray(result)) {
+          newFiles.push(...result);
+        } else {
+          newFiles.push(result);
+        }
+      });
+      
+      setSelectedFiles([...selectedFiles, ...newFiles]);
+    } catch (error) {
+      console.error('ファイルのドロップ処理エラー:', error);
+      setErrorMessage('ファイルの処理中にエラーが発生しました');
+    }
+  };
+
+  // ==========================
   //  ファイルアップロードハンドラー
   // ==========================
   const handleFileUpload = async (
@@ -620,6 +682,8 @@ const ChatPage: React.FC = () => {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyPress={handleKeyPress}
+              onDragOver={handleDragOver}
+              onDrop={handleDrop}
               className="flex-1 p-2 bg-gray-900 border border-gray-700 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-100"
               placeholder="メッセージを入力..."
               rows={4}  // 高さを増やして右側のボタン群と高さを合わせる
