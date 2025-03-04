@@ -1,0 +1,390 @@
+/**
+ * fileUtils.ts
+ * チャットアプリで使用するファイル処理ユーティリティ
+ */
+
+import * as XLSX from 'xlsx';
+import mammoth from 'mammoth';
+import * as pdfjsLib from 'pdfjs-dist';
+
+// PDFJSの初期化
+if (typeof window !== 'undefined' && pdfjsLib) {
+    pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.js`;
+  }
+  
+// ファイルタイプの定義
+export enum FileType {
+  IMAGE = 'image',
+  AUDIO = 'audio',
+  TEXT = 'text',
+  CSV = 'csv',
+  DOCX = 'docx',
+  PDF = 'pdf',
+}
+
+// ファイル情報の型定義
+export interface FileData {
+  id: string;
+  name: string;
+  type: FileType;
+  content: string; // base64 or text content
+  preview?: string; // プレビュー表示用（テキストの場合は冒頭部分など）
+  size: number; // 元のファイルサイズ（バイト）
+}
+
+/**
+ * ファイルをFileData形式に処理する
+ */
+export async function processFile(file: File, maxImageSize: number, maxLongEdge: number): Promise<FileData> {
+  const fileExtension = file.name.split('.').pop()?.toLowerCase() || '';
+  const fileId = `file_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+  
+  // ファイルの種類を判定
+  let fileType: FileType;
+  
+  if (file.type.startsWith('image/')) {
+    fileType = FileType.IMAGE;
+  } else if (file.type.startsWith('audio/')) {
+    fileType = FileType.AUDIO;
+  } else if (file.type === 'application/pdf') {
+    fileType = FileType.PDF;
+  } else if (fileExtension === 'csv' || file.type === 'text/csv') {
+    fileType = FileType.CSV;
+  } else if (fileExtension === 'docx' || file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+    fileType = FileType.DOCX;
+  } else {
+    fileType = FileType.TEXT;
+  }
+  
+  // ファイルの処理
+  switch (fileType) {
+    case FileType.IMAGE:
+      return processImageFile(file, fileId, maxImageSize, maxLongEdge);
+    case FileType.AUDIO:
+      return processAudioFile(file, fileId);
+    case FileType.PDF:
+      return await processPdfAsImage(file, fileId, maxImageSize, maxLongEdge);
+    case FileType.CSV:
+      return await processCsvFile(file, fileId);
+    case FileType.DOCX:
+      return await processDocxFile(file, fileId);
+    case FileType.TEXT:
+    default:
+      return await processTextFile(file, fileId);
+  }
+}
+
+/**
+ * 画像ファイルの処理
+ */
+async function processImageFile(file: File, fileId: string, maxImageSize: number, maxLongEdge: number): Promise<FileData> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      if (event.target?.result) {
+        const dataUrl = event.target.result as string;
+        const image = new Image();
+        
+        image.onload = () => {
+          let { naturalWidth: width, naturalHeight: height } = image;
+          const longEdge = Math.max(width, height);
+          let scale = 1;
+          
+          if (longEdge > maxLongEdge) {
+            scale = maxLongEdge / longEdge;
+            width = Math.floor(width * scale);
+            height = Math.floor(height * scale);
+          }
+          
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          
+          if (!ctx) {
+            reject(new Error('キャンバスの取得に失敗しました'));
+            return;
+          }
+          
+          ctx.drawImage(image, 0, 0, width, height);
+          
+          let quality = 0.85;
+          const minQuality = 0.3;
+          
+          const processCanvas = () => {
+            const newDataUrl = canvas.toDataURL('image/jpeg', quality);
+            const arr = newDataUrl.split(',');
+            const byteString = atob(arr[1]);
+            const buffer = new ArrayBuffer(byteString.length);
+            const intArray = new Uint8Array(buffer);
+            
+            for (let i = 0; i < byteString.length; i++) {
+              intArray[i] = byteString.charCodeAt(i);
+            }
+            
+            const blob = new Blob([buffer], { type: 'image/jpeg' });
+            
+            if (blob.size > maxImageSize && quality > minQuality) {
+              quality -= 0.1;
+              processCanvas();
+            } else {
+              resolve({
+                id: fileId,
+                name: file.name,
+                type: FileType.IMAGE,
+                content: newDataUrl,
+                size: file.size,
+              });
+            }
+          };
+          
+          processCanvas();
+        };
+        
+        image.onerror = () => {
+          reject(new Error('画像読み込みエラー'));
+        };
+        
+        image.src = dataUrl;
+      } else {
+        reject(new Error('ファイル読み込みエラー'));
+      }
+    };
+    
+    reader.onerror = () => {
+      reject(new Error('ファイル読み込みエラー'));
+    };
+    
+    reader.readAsDataURL(file);
+  });
+}
+
+/**
+ * 音声ファイルの処理
+ */
+async function processAudioFile(file: File, fileId: string): Promise<FileData> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      if (event.target?.result) {
+        const dataUrl = event.target.result as string;
+        resolve({
+          id: fileId,
+          name: file.name,
+          type: FileType.AUDIO,
+          content: dataUrl,
+          preview: '🔊 音声ファイル',
+          size: file.size,
+        });
+      } else {
+        reject(new Error('ファイル読み込みエラー'));
+      }
+    };
+    reader.onerror = () => {
+      reject(new Error('ファイル読み込みエラー'));
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+/**
+ * PDFをページ画像として処理
+ */
+async function processPdfAsImage(file: File, fileId: string, maxImageSize: number, maxLongEdge: number): Promise<FileData> {
+  try {
+    // ファイルをArrayBufferに読み込む
+    const arrayBuffer = await file.arrayBuffer();
+    
+    // PDFを読み込む
+    const pdf = await pdfjs.getDocument({ data: arrayBuffer }).promise;
+    
+    // 最初のページを取得
+    const page = await pdf.getPage(1);
+    
+    // ビューポートを設定
+    const viewport = page.getViewport({ scale: 1.0 });
+    
+    // スケール調整
+    let scale = 1.0;
+    const longEdge = Math.max(viewport.width, viewport.height);
+    if (longEdge > maxLongEdge) {
+      scale = maxLongEdge / longEdge;
+    }
+    
+    const scaledViewport = page.getViewport({ scale });
+    
+    // キャンバスを作成
+    const canvas = document.createElement('canvas');
+    const context = canvas.getContext('2d');
+    canvas.width = scaledViewport.width;
+    canvas.height = scaledViewport.height;
+    
+    if (!context) {
+      throw new Error('キャンバスの作成に失敗しました');
+    }
+    
+    // PDFをレンダリング
+    await page.render({
+      canvasContext: context,
+      viewport: scaledViewport
+    }).promise;
+    
+    // 画像を取得
+    let quality = 0.8;
+    let imageData = canvas.toDataURL('image/jpeg', quality);
+    
+    // サイズチェック
+    while (imageData.length > maxImageSize && quality > 0.3) {
+      quality -= 0.1;
+      imageData = canvas.toDataURL('image/jpeg', quality);
+    }
+    
+    return {
+      id: fileId,
+      name: file.name,
+      type: FileType.IMAGE, // PDFも画像として扱う
+      content: imageData,
+      preview: 'PDF (1ページ目の画像)',
+      size: file.size,
+    };
+  } catch (error) {
+    console.error('PDF処理エラー:', error);
+    throw new Error('PDF処理に失敗しました');
+  }
+}
+
+/**
+ * CSVファイルの処理
+ */
+async function processCsvFile(file: File, fileId: string): Promise<FileData> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        if (event.target?.result) {
+          const content = event.target.result as string;
+          
+          // XLSXでCSVを解析してプレビュー作成
+          const workbook = XLSX.read(content, { type: 'string' });
+          const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+          const jsonData = XLSX.utils.sheet_to_json(firstSheet, { header: 1 });
+          
+          // プレビュー用に最初の数行を表示
+          const previewRows = jsonData.slice(0, 3);
+          const preview = previewRows
+            .map(row => (row as any[]).join(', '))
+            .join('\n') + (jsonData.length > 3 ? '\n...' : '');
+          
+          resolve({
+            id: fileId,
+            name: file.name,
+            type: FileType.CSV,
+            content: content,
+            preview: preview,
+            size: file.size,
+          });
+        } else {
+          reject(new Error('ファイル読み込みエラー'));
+        }
+      } catch (error) {
+        reject(error);
+      }
+    };
+    reader.onerror = () => {
+      reject(new Error('ファイル読み込みエラー'));
+    };
+    reader.readAsText(file);
+  });
+}
+
+/**
+ * DOCXファイルの処理
+ */
+async function processDocxFile(file: File, fileId: string): Promise<FileData> {
+  try {
+    const arrayBuffer = await file.arrayBuffer();
+    const result = await mammoth.extractRawText({ arrayBuffer });
+    const text = result.value;
+    
+    // プレビュー用に最初の数百文字を表示
+    const preview = text.substring(0, 200) + (text.length > 200 ? '...' : '');
+    
+    return {
+      id: fileId,
+      name: file.name,
+      type: FileType.DOCX,
+      content: text,
+      preview: preview,
+      size: file.size,
+    };
+  } catch (error) {
+    console.error('DOCX処理エラー:', error);
+    throw new Error('DOCXファイルの処理に失敗しました');
+  }
+}
+
+/**
+ * テキストファイルの処理
+ */
+async function processTextFile(file: File, fileId: string): Promise<FileData> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      if (event.target?.result) {
+        const content = event.target.result as string;
+        const preview = content.substring(0, 200) + (content.length > 200 ? '...' : '');
+        
+        resolve({
+          id: fileId,
+          name: file.name,
+          type: FileType.TEXT,
+          content: content,
+          preview: preview,
+          size: file.size,
+        });
+      } else {
+        reject(new Error('ファイル読み込みエラー'));
+      }
+    };
+    reader.onerror = () => {
+      reject(new Error('ファイル読み込みエラー'));
+    };
+    reader.readAsText(file);
+  });
+}
+
+/**
+ * ファイルデータをAPIリクエスト用に変換
+ */
+export function convertFileDataForApi(files: FileData[]): any {
+  const apiData: any = {
+    images: [],
+    audioFiles: [],
+    textFiles: [],
+  };
+  
+  files.forEach(file => {
+    switch (file.type) {
+      case FileType.IMAGE:
+        apiData.images.push(file.content);
+        break;
+      case FileType.AUDIO:
+        apiData.audioFiles.push({
+          name: file.name,
+          content: file.content,
+        });
+        break;
+      case FileType.TEXT:
+      case FileType.CSV:
+      case FileType.DOCX:
+        apiData.textFiles.push({
+          name: file.name,
+          type: file.type,
+          content: file.content,
+        });
+        break;
+    }
+  });
+  
+  return apiData;
+}

@@ -11,6 +11,24 @@ from fastapi import (
     File,
     UploadFile,
 )
+from utils.common import (
+    logger,
+    process_uploaded_image,
+    limit_remote_addr,
+    verify_firebase_token,
+    MAX_IMAGES,
+)
+
+# 新規追加
+from utils.file_utils import (
+    process_uploaded_image,
+    process_audio_file,
+    process_text_file,
+    prepare_message_for_ai,
+    parse_csv_preview,
+    process_docx_text,
+)
+
 from fastapi.responses import JSONResponse, StreamingResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -22,14 +40,7 @@ import firebase_admin
 from dotenv import load_dotenv
 import os, json, asyncio, base64, time, uvicorn
 
-# 自作モジュールのインポート
-from utils.common import (
-    logger,
-    process_uploaded_image,
-    limit_remote_addr,
-    verify_firebase_token,
-    MAX_IMAGES,
-)
+
 from utils.websocket_manager import (
     ConnectionManager,
     WebSocketMessageType,
@@ -375,22 +386,17 @@ async def chat(request: Request, current_user: Dict = Depends(get_current_user))
                 error_flag = True
                 break
 
+        # メッセージ変換処理を更新
         transformed_messages = []
         for msg in messages:
-            if msg.get("role") == "user" and msg.get("images"):
-                parts = []
-                if msg.get("content"):
-                    parts.append({"type": "text", "text": msg["content"]})
-                logger.info("チャンク内の画像数: %d", len(msg["images"]))
-                images_to_process = msg["images"][:MAX_IMAGES]
-                for image in images_to_process:
-                    processed_image = process_uploaded_image(image)
-                    parts.append(
-                        {"type": "image_url", "image_url": {"url": processed_image}}
-                    )
-                msg["content"] = parts
-                msg.pop("images", None)
-            transformed_messages.append(msg)
+            # ユーザーメッセージに添付ファイルがある場合の処理
+            if msg.get("role") == "user":
+                # prepare_message_for_ai を使ってメッセージ全体を変換
+                processed_msg = prepare_message_for_ai(msg)
+                transformed_messages.append(processed_msg)
+            else:
+                # システムメッセージまたはアシスタントメッセージはそのまま
+                transformed_messages.append(msg)
 
         logger.info(f"選択されたモデル: {model}")
         logger.debug(f"messages: {transformed_messages}")
@@ -621,5 +627,5 @@ if __name__ == "__main__":
         host="0.0.0.0",
         port=int(os.getenv("PORT", "8080")),
         log_level="debug",
-        reload=False
+        reload=False,
     )

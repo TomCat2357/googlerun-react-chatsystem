@@ -17,3 +17,10 @@ starlette==0.46.0
 httptools==0.6.4
 watchfiles==1.0.4 
 websockets==15.0
+# DOCXファイル処理用
+docx2txt==0.8
+pydub==0.25.1
+python-docx==0.8.11
+
+# 音声ファイル処理用
+lxml==5.3.1

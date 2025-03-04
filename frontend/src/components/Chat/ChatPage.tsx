@@ -5,6 +5,7 @@ import { useToken } from "../../hooks/useToken";
 import * as indexedDBUtils from "../../utils/indexedDBUtils";
 import * as Config from "../../config";
 import { sendChunkedRequest } from "../../utils/ChunkedUpload";
+import { FileData, FileType, processFile, convertFileDataForApi } from "../../utils/fileUtils";
 
 
 const ChatPage: React.FC = () => {
@@ -21,9 +22,10 @@ const ChatPage: React.FC = () => {
   const [chatHistories, setChatHistories] = useState<ChatHistory[]>([]);
   const messageContainerRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
-  const [selectedImagesBase64, setSelectedImagesBase64] = useState<string[]>(
-    []
-  );
+  
+  // 各種ファイル用のステート
+  const [selectedFiles, setSelectedFiles] = useState<FileData[]>([]);
+  
   const [errorMessage, setErrorMessage] = useState<string>("");
   const token = useToken();
   const API_BASE_URL: string = Config.API_BASE_URL;
@@ -32,7 +34,7 @@ const ChatPage: React.FC = () => {
   const [isEditMode, setIsEditMode] = useState<boolean>(false);
   const [backupMessages, setBackupMessages] = useState<Message[]>([]);
   // --- 拡大表示用画像 ---
-  const [enlargedImage, setEnlargedImage] = useState<string | null>(null);
+  const [enlargedContent, setEnlargedContent] = useState<{ content: string, type: FileType } | null>(null);
 
   // IndexedDB用（ChatHistoryDB）
   function openChatHistoryDB(): Promise<IDBDatabase> {
@@ -83,97 +85,13 @@ const ChatPage: React.FC = () => {
   }, []);
 
   // ==========================
-  //  画像アップロード関連定数
+  //  ファイルアップロード関連定数
   // ==========================
   const MAX_IMAGES = Config.getServerConfig().MAX_IMAGES || 5;
   const MAX_LONG_EDGE = Config.getServerConfig().MAX_LONG_EDGE || 1568;
   const MAX_IMAGE_SIZE = Config.getServerConfig().MAX_IMAGE_SIZE || 5242880;
   // 送信時のプロンプトサイズ上限（バイト数）
   const MAX_PAYLOAD_SIZE = Config.getServerConfig().MAX_PAYLOAD_SIZE || 500000;
-
-  /**
-   * processImageFile
-   *
-   * 画像ファイルを読み込み、リサイズ・再圧縮後の dataURL を返す
-   */
-  const processImageFile = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      console.log("[processImageFile] 処理開始：", file.name);
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        if (event.target?.result) {
-          const dataUrl = event.target.result as string;
-          const image = new Image();
-          image.onload = () => {
-            console.log("[processImageFile] 画像読み込み完了：", file.name);
-            let { naturalWidth: width, naturalHeight: height } = image;
-            console.log(`[processImageFile] 元サイズ: ${width}x${height}`);
-            const longEdge = Math.max(width, height);
-            let scale = 1;
-            if (longEdge > MAX_LONG_EDGE) {
-              scale = MAX_LONG_EDGE / longEdge;
-              width = Math.floor(width * scale);
-              height = Math.floor(height * scale);
-              console.log(
-                `[processImageFile] リサイズ実施：新サイズ ${width}x${height}`
-              );
-            } else {
-              console.log("[processImageFile] リサイズ不要");
-            }
-            const canvas = document.createElement("canvas");
-            canvas.width = width;
-            canvas.height = height;
-            const ctx = canvas.getContext("2d");
-            if (!ctx) {
-              reject(new Error("キャンバスの取得に失敗しました"));
-              return;
-            }
-            ctx.drawImage(image, 0, 0, width, height);
-
-            let quality = 0.85;
-            const minQuality = 0.3;
-            const processCanvas = () => {
-              const newDataUrl = canvas.toDataURL("image/jpeg", quality);
-              const arr = newDataUrl.split(",");
-              const byteString = atob(arr[1]);
-              const buffer = new ArrayBuffer(byteString.length);
-              const intArray = new Uint8Array(buffer);
-              for (let i = 0; i < byteString.length; i++) {
-                intArray[i] = byteString.charCodeAt(i);
-              }
-              const blob = new Blob([buffer], { type: "image/jpeg" });
-              console.log(
-                `[processImageFile] 現在の品質 ${quality}, Blobサイズ: ${blob.size} bytes`
-              );
-              if (blob.size > MAX_IMAGE_SIZE && quality > minQuality) {
-                quality -= 0.1;
-                console.log(
-                  `[processImageFile] サイズ超過のため再圧縮：新品質 ${quality}`
-                );
-                processCanvas();
-              } else {
-                console.log("[processImageFile] 画像処理完了");
-                resolve(newDataUrl);
-              }
-            };
-            processCanvas();
-          };
-          image.onerror = () => {
-            console.error("[processImageFile] 画像読み込みエラー", file.name);
-            reject(new Error("画像読み込みエラー"));
-          };
-          image.src = dataUrl;
-        } else {
-          reject(new Error("Failed to read file"));
-        }
-      };
-      reader.onerror = () => {
-        console.error("[processImageFile] ファイル読み込みエラー", file.name);
-        reject(new Error("ファイル読み込みエラー"));
-      };
-      reader.readAsDataURL(file);
-    });
-  };
 
   // ==========================
   //  IndexedDB からチャット履歴を読み込み
@@ -257,7 +175,7 @@ const ChatPage: React.FC = () => {
   const restoreHistory = (history: ChatHistory) => {
     if (isEditMode) {
       setInput("");
-      setSelectedImagesBase64([]);
+      setSelectedFiles([]);
       setIsEditMode(false);
     }
     setCurrentChatId(history.id);
@@ -270,34 +188,44 @@ const ChatPage: React.FC = () => {
   const clearChat = () => {
     setMessages([]);
     setCurrentChatId(null);
-    setSelectedImagesBase64([]);
+    setSelectedFiles([]);
     setInput("");
     setIsEditMode(false);
   };
 
   // ==========================
-  //  画像アップロードハンドラー
+  //  ファイルアップロードハンドラー
   // ==========================
-  const handleImageUpload = async (e: ChangeEvent<HTMLInputElement>) => {
-    console.log("[handleImageUpload] ファイル選択イベント発生");
+  const handleFileUpload = async (e: ChangeEvent<HTMLInputElement>, fileTypes: string[]) => {
+    console.log(`[handleFileUpload] ${fileTypes.join('/')} ファイル選択イベント発生`);
     if (!e.target.files) return;
+    
     const files = Array.from(e.target.files);
-    const allowedCount = MAX_IMAGES - selectedImagesBase64.length;
+    const allowedCount = MAX_IMAGES - selectedFiles.length;
+    
     if (files.length > allowedCount) {
       setErrorMessage(
-        `一度にアップロードできる画像は最大 ${MAX_IMAGES} 枚です`
+        `一度にアップロードできるファイルは最大 ${MAX_IMAGES} 件です`
       );
       files.splice(allowedCount);
     }
-    const promises = files.map((file) => processImageFile(file));
+    
     try {
-      const newBase64s = await Promise.all(promises);
-      console.log("[handleImageUpload] 画像処理完了:", newBase64s);
-      setSelectedImagesBase64((prev) => [...prev, ...newBase64s]);
+      const fileDataPromises = files.map(file => 
+        processFile(file, MAX_IMAGE_SIZE, MAX_LONG_EDGE)
+      );
+      
+      const newFiles = await Promise.all(fileDataPromises);
+      console.log(`[handleFileUpload] ファイル処理完了:`, newFiles);
+      
+      setSelectedFiles(prev => [...prev, ...newFiles]);
     } catch (error) {
-      console.error("[handleImageUpload] 画像アップロードエラー:", error);
-      setErrorMessage("画像の処理中にエラーが発生しました");
+      console.error(`[handleFileUpload] ファイルアップロードエラー:`, error);
+      setErrorMessage("ファイルの処理中にエラーが発生しました");
     }
+    
+    // ファイル選択をリセット（同じファイルを連続で選択できるように）
+    e.target.value = '';
   };
 
   // ==========================
@@ -307,13 +235,31 @@ const ChatPage: React.FC = () => {
     if (isProcessing) return;
     const messageToEdit = messages[index];
     if (messageToEdit.role !== "user") return;
+    
     setBackupMessages(messages);
     setInput(messageToEdit.content);
+    
+    // 古い形式の画像を新しい形式に変換
+    const newFiles: FileData[] = [];
+    
     if (messageToEdit.images && messageToEdit.images.length > 0) {
-      setSelectedImagesBase64([...messageToEdit.images]);
-    } else {
-      setSelectedImagesBase64([]);
+      messageToEdit.images.forEach((img, i) => {
+        newFiles.push({
+          id: `legacy_img_${i}`,
+          name: `image_${i}.jpg`,
+          type: FileType.IMAGE,
+          content: img,
+          size: 0, // サイズ不明
+        });
+      });
     }
+    
+    // 新形式のファイルがあれば追加
+    if (messageToEdit.files && messageToEdit.files.length > 0) {
+      newFiles.push(...messageToEdit.files);
+    }
+    
+    setSelectedFiles(newFiles);
     setMessages(messages.slice(0, index));
     setIsEditMode(true);
   };
@@ -324,7 +270,7 @@ const ChatPage: React.FC = () => {
       setBackupMessages([]);
     }
     setInput("");
-    setSelectedImagesBase64([]);
+    setSelectedFiles([]);
     setIsEditMode(false);
   };
 
@@ -333,28 +279,36 @@ const ChatPage: React.FC = () => {
   // ==========================
   const sendMessage = async () => {
     let backupInput = "";
-    let backupImages: string[] = [];
+    let backupFiles: FileData[] = [];
     let backupMsgs: Message[] = [];
-    if (!input.trim() && selectedImagesBase64.length === 0) return;
+    
+    if (!input.trim() && selectedFiles.length === 0) return;
     if (isProcessing || !token) return;
+    
     setErrorMessage("");
+    
     try {
       setIsProcessing(true);
       backupInput = input;
-      backupImages = [...selectedImagesBase64];
+      backupFiles = [...selectedFiles];
       backupMsgs = [...messages];
 
+      // API用にファイルデータを変換
+      const apiFileData = convertFileDataForApi(selectedFiles);
+      
       const newUserMessage: Message = {
         role: "user",
-        content: input.trim() || "[Images Uploaded]",
-        images:
-          selectedImagesBase64.length > 0 ? [...selectedImagesBase64] : [],
+        content: input.trim() || "[Files Uploaded]",
+        images: apiFileData.images || [],
+        files: selectedFiles,
+        audioFiles: apiFileData.audioFiles || [],
+        textFiles: apiFileData.textFiles || [],
       };
 
       let updatedMessages: Message[] = [...messages, newUserMessage];
       setMessages(updatedMessages);
       setInput("");
-      setSelectedImagesBase64([]);
+      setSelectedFiles([]);
       setIsEditMode(false);
 
       abortControllerRef.current = new AbortController();
@@ -440,7 +394,7 @@ const ChatPage: React.FC = () => {
         console.error("メッセージ送信エラー:", error);
         setMessages(backupMsgs);
         setInput(backupInput);
-        setSelectedImagesBase64(backupImages);
+        setSelectedFiles(backupFiles);
         setErrorMessage(
           error instanceof Error ? error.message : "不明なエラー"
         );
@@ -510,6 +464,48 @@ const ChatPage: React.FC = () => {
       }
     };
     reader.readAsText(file);
+  };
+  
+  // ==========================
+  //  ファイル削除ハンドラー
+  // ==========================
+  const handleRemoveFile = (fileId: string) => {
+    setSelectedFiles(prev => prev.filter(file => file.id !== fileId));
+  };
+  
+  // ==========================
+  //  ファイルプレビュー表示
+  // ==========================
+  const handleShowPreview = (file: FileData) => {
+    if (file.type === FileType.IMAGE) {
+      setEnlargedContent({ content: file.content, type: file.type });
+    } else if (file.type === FileType.AUDIO) {
+      // 音声ファイルはそのまま再生
+      setEnlargedContent({ content: file.content, type: file.type });
+    } else {
+      // テキスト系はプレビューモーダルを表示
+      setEnlargedContent({ content: file.content, type: file.type });
+    }
+  };
+
+  // ==========================
+  //  ファイルタイプに応じたアイコン表示
+  // ==========================
+  const getFileIcon = (type: FileType) => {
+    switch (type) {
+      case FileType.IMAGE:
+        return "🖼️";
+      case FileType.AUDIO:
+        return "🔊";
+      case FileType.TEXT:
+        return "📄";
+      case FileType.CSV:
+        return "📊";
+      case FileType.DOCX:
+        return "📝";
+      default:
+        return "📎";
+    }
   };
 
   // ==========================
@@ -632,17 +628,50 @@ const ChatPage: React.FC = () => {
                 ) : (
                   <div>{message.content}</div>
                 )}
+                
+                {/* 添付ファイルの表示（従来の画像対応） */}
                 {message.images && message.images.length > 0 && (
                   <div className="mt-2 flex flex-wrap gap-2">
                     {message.images.map((img, i) => (
                       <img
-                        key={i}
+                        key={`legacy_img_${i}`}
                         src={img}
                         alt="Uploaded"
-                        onClick={() => setEnlargedImage(img)}
+                        onClick={() => setEnlargedContent({ content: img, type: FileType.IMAGE })}
                         className="max-w-xs rounded border cursor-pointer"
                       />
                     ))}
+                  </div>
+                )}
+                
+                {/* 新形式のファイル表示 */}
+                {message.files && message.files.length > 0 && (
+                  <div className="mt-2">
+                    <div className="text-sm text-gray-300 mb-1">添付ファイル:</div>
+                    <div className="flex flex-wrap gap-2">
+                      {message.files.map((file) => (
+                        <div 
+                          key={file.id}
+                          onClick={() => handleShowPreview(file)}
+                          className="relative cursor-pointer"
+                        >
+                          {file.type === FileType.IMAGE ? (
+                            <img 
+                              src={file.content} 
+                              alt={file.name}
+                              className="max-w-xs max-h-32 rounded border" 
+                            />
+                          ) : (
+                            <div className="p-2 bg-gray-700 rounded border border-gray-600 flex items-center">
+                              <span className="mr-2">{getFileIcon(file.type)}</span>
+                              <span className="text-sm truncate max-w-[150px]">
+                                {file.name}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
               </div>
@@ -670,23 +699,33 @@ const ChatPage: React.FC = () => {
               </button>
             </div>
           )}
-          {selectedImagesBase64.length > 0 && (
+          
+          {/* 選択済みファイルのプレビュー表示 */}
+          {selectedFiles.length > 0 && (
             <div className="flex flex-wrap mb-4 gap-2">
-              {selectedImagesBase64.map((imgBase64, i) => (
-                <div key={i} className="relative inline-block">
-                  <img
-                    src={imgBase64}
-                    alt="preview"
-                    onClick={() => setEnlargedImage(imgBase64)}
-                    className="w-16 h-16 object-cover rounded border cursor-pointer"
-                  />
+              {selectedFiles.map((file) => (
+                <div key={file.id} className="relative inline-block">
+                  {file.type === FileType.IMAGE ? (
+                    <img
+                      src={file.content}
+                      alt={file.name}
+                      onClick={() => handleShowPreview(file)}
+                      className="w-16 h-16 object-cover rounded border cursor-pointer"
+                    />
+                  ) : (
+                    <div 
+                      className="w-16 h-16 bg-gray-700 flex flex-col items-center justify-center rounded border cursor-pointer"
+                      onClick={() => handleShowPreview(file)}
+                    >
+                      <div>{getFileIcon(file.type)}</div>
+                      <div className="text-xs truncate w-full text-center px-1">
+                        {file.name.length > 8 ? file.name.substring(0, 8) + '...' : file.name}
+                      </div>
+                    </div>
+                  )}
                   <button
                     className="absolute top-0 right-0 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center"
-                    onClick={() =>
-                      setSelectedImagesBase64((prev) =>
-                        prev.filter((_, index) => index !== i)
-                      )
-                    }
+                    onClick={() => handleRemoveFile(file.id)}
                   >
                     ×
                   </button>
@@ -694,6 +733,7 @@ const ChatPage: React.FC = () => {
               ))}
             </div>
           )}
+          
           <div className="flex space-x-2">
             <textarea
               value={input}
@@ -704,17 +744,50 @@ const ChatPage: React.FC = () => {
               rows={2}
               disabled={isProcessing}
             />
-            <label className="flex items-center justify-center px-4 py-2 bg-gray-700 hover:bg-gray-600 text-gray-100 rounded-lg cursor-pointer">
-              画像選択
-              <input
-                type="file"
-                accept="image/*"
-                multiple
-                className="hidden"
-                onChange={handleImageUpload}
-                disabled={isProcessing}
-              />
-            </label>
+            
+            {/* ファイル添付ボタングループ */}
+            <div className="flex flex-col space-y-2">
+              {/* 画像ボタン */}
+              <label className="flex items-center justify-center px-4 py-1 bg-gray-700 hover:bg-gray-600 text-gray-100 rounded-lg cursor-pointer">
+                <span>🖼️</span>
+                <input
+                  type="file"
+                  accept="image/*,.pdf"
+                  multiple
+                  className="hidden"
+                  onChange={(e) => handleFileUpload(e, ['image/*', 'application/pdf'])}
+                  disabled={isProcessing}
+                />
+              </label>
+              
+              {/* 音声ボタン */}
+              <label className="flex items-center justify-center px-4 py-1 bg-gray-700 hover:bg-gray-600 text-gray-100 rounded-lg cursor-pointer">
+                <span>🔊</span>
+                <input
+                  type="file"
+                  accept="audio/*"
+                  multiple
+                  className="hidden"
+                  onChange={(e) => handleFileUpload(e, ['audio/*'])}
+                  disabled={isProcessing}
+                />
+              </label>
+              
+              {/* テキストボタン */}
+              <label className="flex items-center justify-center px-4 py-1 bg-gray-700 hover:bg-gray-600 text-gray-100 rounded-lg cursor-pointer">
+                <span>📄</span>
+                <input
+                  type="file"
+                  accept=".txt,.docx,.csv"
+                  multiple
+                  className="hidden"
+                  onChange={(e) => handleFileUpload(e, ['.txt', '.docx', '.csv'])}
+                  disabled={isProcessing}
+                />
+              </label>
+            </div>
+            
+            {/* 送信ボタン */}
             <button
               onClick={isProcessing ? stopGeneration : sendMessage}
               className={`px-4 py-2 rounded-lg ${
@@ -729,25 +802,42 @@ const ChatPage: React.FC = () => {
         </div>
       </div>
 
-      {/* 拡大表示用モーダル */}
-      {enlargedImage && (
+      {/* コンテンツ拡大表示用モーダル */}
+      {enlargedContent && (
         <div
           className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-75 z-50"
-          onClick={() => setEnlargedImage(null)}
+          onClick={() => setEnlargedContent(null)}
         >
-          <div className="relative">
+          <div className="relative max-w-4xl max-h-[90vh] overflow-auto bg-gray-800 rounded-lg p-4">
             <button
-              className="absolute top-0 right-0 m-2 text-white text-2xl font-bold"
-              onClick={() => setEnlargedImage(null)}
+              className="absolute top-2 right-2 text-white text-2xl font-bold"
+              onClick={() => setEnlargedContent(null)}
             >
               ×
             </button>
-            <img
-              src={enlargedImage}
-              alt="Enlarged"
-              className="max-h-screen max-w-full"
-              onClick={(e) => e.stopPropagation()}
-            />
+            
+            {enlargedContent.type === FileType.IMAGE ? (
+              <img
+                src={enlargedContent.content}
+                alt="Enlarged content"
+                className="max-h-[80vh]"
+                onClick={(e) => e.stopPropagation()}
+              />
+            ) : enlargedContent.type === FileType.AUDIO ? (
+              <audio
+                src={enlargedContent.content}
+                controls
+                className="w-full"
+                onClick={(e) => e.stopPropagation()}
+              />
+            ) : (
+              <div 
+                className="bg-white text-black p-4 rounded max-h-[80vh] overflow-auto"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <pre className="whitespace-pre-wrap">{enlargedContent.content}</pre>
+              </div>
+            )}
           </div>
         </div>
       )}

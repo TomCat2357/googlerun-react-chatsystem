@@ -1,27 +1,43 @@
+// apiTypes.ts
+import { FileData } from "../utils/fileUtils";
+
 export interface Message {
-  role: 'user' | 'assistant';
+  role: "user" | "assistant" | "system";
   content: string;
-  images?: string[]; // base64エンコード済み画像の配列
+  images?: string[]; // 従来の画像添付（base64文字列の配列）
+  files?: FileData[]; // 新しいファイル管理形式
+  audioFiles?: Array<{ name: string; content: string }>; // 音声ファイル
+  textFiles?: Array<{ name: string; type: string; content: string }>; // テキストファイル
 }
 
 export interface ChatRequest {
   messages: Message[];
   model: string;
+  chunked?: boolean;
+  chunkId?: string;
+  chunkIndex?: number;
+  totalChunks?: number;
+  chunkData?: string;
 }
 
-export interface ChatResponse {
-  choices: {
-    message: {
-      content: string;
-    };
-  }[];
-}
-
-// チャット履歴の型定義を修正
 export interface ChatHistory {
   id: number;
   title: string;
   messages: Message[];
-  date?: string;  // 後方互換性のため
   lastPromptDate: string;
+}
+
+export interface GeocodingRequest {
+  mode: string;
+  lines: string[];
+  options: Record<string, any>;
+}
+
+export interface Config {
+  MAX_IMAGES: number;
+  MAX_LONG_EDGE: number;
+  MAX_IMAGE_SIZE: number;
+  MAX_PAYLOAD_SIZE: number;
+  MODELS: string;
+  [key: string]: any;
 }
