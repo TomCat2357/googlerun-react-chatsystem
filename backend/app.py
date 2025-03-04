@@ -776,14 +776,36 @@ async def static_file(path: str):
 
 
 if __name__ == "__main__":
+    import hypercorn.asyncio
+    from hypercorn.config import Config
+    
+    # Hypercornの設定
+    config = Config()
+    config.bind = [f"0.0.0.0:{int(os.getenv('PORT', '8080'))}"]
+    config.loglevel = "info" if not int(os.getenv("DEBUG", 0)) else "debug"
+    config.accesslog = '-'
+    config.errorlog = '-'
+    config.workers = 1
+    
+    # SSL/TLS設定（証明書と秘密鍵のパスを指定）
+    cert_path = os.getenv("SSL_CERT_PATH")
+    key_path = os.getenv("SSL_KEY_PATH")
+    
+    if os.path.exists(cert_path) and os.path.exists(key_path):
+        config.certfile = cert_path
+        config.keyfile = key_path
+        logger.info("SSL/TLSが有効化されました")
+    else:
+        logger.warning("SSL/TLS証明書が見つかりません。HTTP/1.1のみで動作します")
+    
+    # HTTP/2を有効化
+    config.alpn_protocols = ["h2", "http/1.1"]
+    
     logger.info(
-        "Uvicornを使用してFastAPIアプリを起動します DEBUG: %s",
+        "Hypercornを使用してFastAPIアプリを起動します（HTTP/2対応） DEBUG: %s",
         bool(int(os.getenv("DEBUG", 0))),
     )
-    uvicorn.run(
-        "app:app",
-        host="0.0.0.0",
-        port=int(os.getenv("PORT", "8080")),
-        log_level="debug",
-        reload=False,
-    )
+    
+    # Hypercornでアプリを起動
+    import asyncio
+    asyncio.run(hypercorn.asyncio.serve(app, config))

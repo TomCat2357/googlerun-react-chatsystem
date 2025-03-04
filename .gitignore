@@ -13,8 +13,9 @@ public
 *secret*.json
 *service_account*.json
 *credentials*.json
-FolderStructure.txt
-
+!FolderStructure.txt
+*.pdf
+*.pem
 *.wav
 *.mp3
 *.txt
