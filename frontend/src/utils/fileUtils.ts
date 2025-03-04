@@ -10,7 +10,7 @@ import * as pdfjsLib from 'pdfjs-dist';
 // PDFJSの初期化
 if (typeof window !== 'undefined' && pdfjsLib) {
     pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.js`;
-  }
+}
   
 // ファイルタイプの定義
 export enum FileType {
@@ -35,7 +35,7 @@ export interface FileData {
 /**
  * ファイルをFileData形式に処理する
  */
-export async function processFile(file: File, maxImageSize: number, maxLongEdge: number): Promise<FileData> {
+export async function processFile(file: File, maxImageSize: number, maxLongEdge: number, acceptedTypes: string[]): Promise<FileData | FileData[]> {
   const fileExtension = file.name.split('.').pop()?.toLowerCase() || '';
   const fileId = `file_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
   
@@ -56,14 +56,23 @@ export async function processFile(file: File, maxImageSize: number, maxLongEdge:
     fileType = FileType.TEXT;
   }
   
+  // PDFの処理方法を選択
+  if (fileType === FileType.PDF) {
+    // テキストボタンからのアップロード（.txtなどと一緒にPDFが指定されている場合）
+    if (acceptedTypes.includes('.pdf') && (acceptedTypes.includes('.txt') || acceptedTypes.includes('.docx') || acceptedTypes.includes('.csv'))) {
+      return await processPdfAsText(file, fileId);
+    } else {
+      // 画像ボタンからのアップロード
+      return await processPdfAsImage(file, fileId, maxImageSize, maxLongEdge);
+    }
+  }
+  
   // ファイルの処理
   switch (fileType) {
     case FileType.IMAGE:
       return processImageFile(file, fileId, maxImageSize, maxLongEdge);
     case FileType.AUDIO:
       return processAudioFile(file, fileId);
-    case FileType.PDF:
-      return await processPdfAsImage(file, fileId, maxImageSize, maxLongEdge);
     case FileType.CSV:
       return await processCsvFile(file, fileId);
     case FileType.DOCX:
@@ -188,68 +197,116 @@ async function processAudioFile(file: File, fileId: string): Promise<FileData> {
 }
 
 /**
- * PDFをページ画像として処理
+ * PDFをページ画像として処理（複数ページ対応）
  */
-async function processPdfAsImage(file: File, fileId: string, maxImageSize: number, maxLongEdge: number): Promise<FileData> {
+async function processPdfAsImage(file: File, fileId: string, maxImageSize: number, maxLongEdge: number): Promise<FileData[]> {
   try {
     // ファイルをArrayBufferに読み込む
     const arrayBuffer = await file.arrayBuffer();
     
     // PDFを読み込む
-    const pdf = await pdfjs.getDocument({ data: arrayBuffer }).promise;
+    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
     
-    // 最初のページを取得
-    const page = await pdf.getPage(1);
+    // ページ数を取得
+    const pageCount = pdf.numPages;
+    const results: FileData[] = [];
     
-    // ビューポートを設定
-    const viewport = page.getViewport({ scale: 1.0 });
-    
-    // スケール調整
-    let scale = 1.0;
-    const longEdge = Math.max(viewport.width, viewport.height);
-    if (longEdge > maxLongEdge) {
-      scale = maxLongEdge / longEdge;
+    // 各ページを処理
+    for (let i = 1; i <= pageCount; i++) {
+      const page = await pdf.getPage(i);
+      
+      // ビューポートを設定
+      const viewport = page.getViewport({ scale: 1.0 });
+      
+      // スケール調整
+      let scale = 1.0;
+      const longEdge = Math.max(viewport.width, viewport.height);
+      if (longEdge > maxLongEdge) {
+        scale = maxLongEdge / longEdge;
+      }
+      
+      const scaledViewport = page.getViewport({ scale });
+      
+      // キャンバスを作成
+      const canvas = document.createElement('canvas');
+      const context = canvas.getContext('2d');
+      canvas.width = scaledViewport.width;
+      canvas.height = scaledViewport.height;
+      
+      if (!context) {
+        throw new Error('キャンバスの作成に失敗しました');
+      }
+      
+      // PDFをレンダリング
+      await page.render({
+        canvasContext: context,
+        viewport: scaledViewport
+      }).promise;
+      
+      // 画像を取得
+      let quality = 0.8;
+      let imageData = canvas.toDataURL('image/jpeg', quality);
+      
+      // サイズチェック
+      while (imageData.length > maxImageSize && quality > 0.3) {
+        quality -= 0.1;
+        imageData = canvas.toDataURL('image/jpeg', quality);
+      }
+      
+      results.push({
+        id: `${fileId}_page${i}`,
+        name: `${file.name} (ページ ${i}/${pageCount})`,
+        type: FileType.IMAGE,
+        content: imageData,
+        preview: `PDF ページ ${i}/${pageCount}`,
+        size: Math.floor(file.size / pageCount), // 概算
+      });
     }
     
-    const scaledViewport = page.getViewport({ scale });
+    return results;
+  } catch (error) {
+    console.error('PDF処理エラー:', error);
+    throw new Error('PDF処理に失敗しました');
+  }
+}
+
+/**
+ * PDFからテキストを抽出
+ */
+async function processPdfAsText(file: File, fileId: string): Promise<FileData> {
+  try {
+    // ファイルをArrayBufferに読み込む
+    const arrayBuffer = await file.arrayBuffer();
     
-    // キャンバスを作成
-    const canvas = document.createElement('canvas');
-    const context = canvas.getContext('2d');
-    canvas.width = scaledViewport.width;
-    canvas.height = scaledViewport.height;
+    // PDFを読み込む
+    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
     
-    if (!context) {
-      throw new Error('キャンバスの作成に失敗しました');
+    // ページ数を取得
+    const pageCount = pdf.numPages;
+    let fullText = '';
+    
+    // 全ページからテキスト抽出
+    for (let i = 1; i <= pageCount; i++) {
+      const page = await pdf.getPage(i);
+      const textContent = await page.getTextContent();
+      const pageText = textContent.items.map((item: any) => item.str).join(' ');
+      fullText += `--- ページ ${i} ---\n${pageText}\n\n`;
     }
     
-    // PDFをレンダリング
-    await page.render({
-      canvasContext: context,
-      viewport: scaledViewport
-    }).promise;
-    
-    // 画像を取得
-    let quality = 0.8;
-    let imageData = canvas.toDataURL('image/jpeg', quality);
-    
-    // サイズチェック
-    while (imageData.length > maxImageSize && quality > 0.3) {
-      quality -= 0.1;
-      imageData = canvas.toDataURL('image/jpeg', quality);
-    }
+    // プレビュー用のテキスト
+    const preview = fullText.substring(0, 200) + (fullText.length > 200 ? '...' : '');
     
     return {
       id: fileId,
       name: file.name,
-      type: FileType.IMAGE, // PDFも画像として扱う
-      content: imageData,
-      preview: 'PDF (1ページ目の画像)',
+      type: FileType.TEXT,
+      content: fullText,
+      preview: preview,
       size: file.size,
     };
   } catch (error) {
-    console.error('PDF処理エラー:', error);
-    throw new Error('PDF処理に失敗しました');
+    console.error('PDFテキスト抽出エラー:', error);
+    throw new Error('PDFからのテキスト抽出に失敗しました');
   }
 }
 

@@ -212,10 +212,21 @@ const ChatPage: React.FC = () => {
     
     try {
       const fileDataPromises = files.map(file => 
-        processFile(file, MAX_IMAGE_SIZE, MAX_LONG_EDGE)
+        processFile(file, MAX_IMAGE_SIZE, MAX_LONG_EDGE, fileTypes)
       );
       
-      const newFiles = await Promise.all(fileDataPromises);
+      const processedFiles = await Promise.all(fileDataPromises);
+      let newFiles: FileData[] = [];
+      
+      // 処理結果が配列（PDFの複数ページ）かどうかを確認
+      processedFiles.forEach(result => {
+        if (Array.isArray(result)) {
+          newFiles.push(...result);
+        } else {
+          newFiles.push(result);
+        }
+      });
+      
       console.log(`[handleFileUpload] ファイル処理完了:`, newFiles);
       
       setSelectedFiles(prev => [...prev, ...newFiles]);
@@ -633,13 +644,17 @@ const ChatPage: React.FC = () => {
                 {message.images && message.images.length > 0 && (
                   <div className="mt-2 flex flex-wrap gap-2">
                     {message.images.map((img, i) => (
-                      <img
+                      <div 
                         key={`legacy_img_${i}`}
-                        src={img}
-                        alt="Uploaded"
                         onClick={() => setEnlargedContent({ content: img, type: FileType.IMAGE })}
-                        className="max-w-xs rounded border cursor-pointer"
-                      />
+                        className="relative cursor-pointer"
+                      >
+                        <img
+                          src={img}
+                          alt="Uploaded"
+                          className="w-16 h-16 object-cover rounded border"
+                        />
+                      </div>
                     ))}
                   </div>
                 )}
@@ -659,7 +674,7 @@ const ChatPage: React.FC = () => {
                             <img 
                               src={file.content} 
                               alt={file.name}
-                              className="max-w-xs max-h-32 rounded border" 
+                              className="w-16 h-16 object-cover rounded border" 
                             />
                           ) : (
                             <div className="p-2 bg-gray-700 rounded border border-gray-600 flex items-center">
@@ -778,10 +793,10 @@ const ChatPage: React.FC = () => {
                 <span>📄</span>
                 <input
                   type="file"
-                  accept=".txt,.docx,.csv"
+                  accept=".txt,.docx,.csv,.pdf"
                   multiple
                   className="hidden"
-                  onChange={(e) => handleFileUpload(e, ['.txt', '.docx', '.csv'])}
+                  onChange={(e) => handleFileUpload(e, ['.txt', '.docx', '.csv', '.pdf'])}
                   disabled={isProcessing}
                 />
               </label>
