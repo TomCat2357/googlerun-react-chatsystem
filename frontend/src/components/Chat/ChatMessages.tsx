@@ -6,11 +6,13 @@ import { FileData } from "../../utils/fileUtils";
 interface ChatMessagesProps {
   messages: Message[];
   onEditPrompt: (index: number) => void;
+  onViewFile?: (content: string, mimeType: string) => void; // 新規追加：ファイル拡大表示用関数
 }
 
 const ChatMessages: React.FC<ChatMessagesProps> = ({ 
   messages, 
-  onEditPrompt 
+  onEditPrompt,
+  onViewFile 
 }) => {
   const messageContainerRef = useRef<HTMLDivElement>(null);
 
@@ -77,6 +79,7 @@ const ChatMessages: React.FC<ChatMessagesProps> = ({
                     <div
                       key={file.id}
                       className="relative cursor-pointer"
+                      onClick={() => onViewFile && file.content && onViewFile(file.content, file.mimeType)}
                     >
                       {file.mimeType.startsWith('image/') ? (
                         <img

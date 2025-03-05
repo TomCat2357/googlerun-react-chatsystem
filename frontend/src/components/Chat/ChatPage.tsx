@@ -572,6 +572,13 @@ const ChatPage: React.FC = () => {
   };
 
   // ==========================
+  //  メッセージ中のファイル表示ハンドラー（新規追加）
+  // ==========================
+  const handleViewFile = (content: string, mimeType: string) => {
+    setEnlargedContent({ content, mimeType });
+  };
+
+  // ==========================
   //  メッセージ送信
   // ==========================
   const sendMessage = async () => {
@@ -771,6 +778,7 @@ const ChatPage: React.FC = () => {
         <ChatMessages
           messages={messages}
           onEditPrompt={handleEditPrompt}
+          onViewFile={handleViewFile} // 新規追加：ファイル拡大表示用関数を渡す
         />
 
         {/* 入力エリア */}
