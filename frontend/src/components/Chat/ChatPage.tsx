@@ -926,6 +926,7 @@ const ChatPage: React.FC = () => {
                   <audio
                     src={enlargedContent.content}
                     controls
+                    autoPlay
                     className="w-full"
                     onClick={(e) => e.stopPropagation()}
                   />

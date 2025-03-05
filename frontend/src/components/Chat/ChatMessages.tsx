@@ -9,10 +9,10 @@ interface ChatMessagesProps {
   onViewFile?: (content: string, mimeType: string) => void; // 新規追加：ファイル拡大表示用関数
 }
 
-const ChatMessages: React.FC<ChatMessagesProps> = ({ 
-  messages, 
+const ChatMessages: React.FC<ChatMessagesProps> = ({
+  messages,
   onEditPrompt,
-  onViewFile 
+  onViewFile
 }) => {
   const messageContainerRef = useRef<HTMLDivElement>(null);
 
@@ -42,16 +42,14 @@ const ChatMessages: React.FC<ChatMessagesProps> = ({
       {messages.map((message, index) => (
         <div
           key={index}
-          className={`max-w-[80%] ${
-            message.role === "user" ? "ml-auto" : "mr-auto"
-          }`}
+          className={`max-w-[80%] ${message.role === "user" ? "ml-auto" : "mr-auto"
+            }`}
         >
           <div
-            className={`p-4 rounded-lg ${
-              message.role === "user"
+            className={`p-4 rounded-lg ${message.role === "user"
                 ? "bg-blue-900 text-gray-100"
                 : "bg-gray-800 border border-gray-700 text-gray-100"
-            }`}
+              }`}
           >
             {message.role === "user" ? (
               <div className="flex justify-between items-center">
@@ -80,6 +78,7 @@ const ChatMessages: React.FC<ChatMessagesProps> = ({
                       key={file.id}
                       className="relative cursor-pointer"
                       onClick={() => onViewFile && file.content && onViewFile(file.content, file.mimeType)}
+                      title={file.mimeType.startsWith('audio/') ? "クリックして再生" : "クリックして拡大表示"}
                     >
                       {file.mimeType.startsWith('image/') ? (
                         <img
@@ -104,9 +103,8 @@ const ChatMessages: React.FC<ChatMessagesProps> = ({
             )}
           </div>
           <div
-            className={`text-xs text-gray-400 mt-1 ${
-              message.role === "user" ? "text-right" : "text-left"
-            }`}
+            className={`text-xs text-gray-400 mt-1 ${message.role === "user" ? "text-right" : "text-left"
+              }`}
           >
             {message.role === "user" ? "あなた" : "アシスタント"}
           </div>
