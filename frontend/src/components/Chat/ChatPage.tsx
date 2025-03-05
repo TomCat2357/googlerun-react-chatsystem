@@ -290,6 +290,20 @@ const ChatPage: React.FC = () => {
     
     const files = Array.from(e.dataTransfer.files);
     
+    // 音声ファイルの制限チェック
+    const audioFiles = files.filter(file => file.type.startsWith('audio/'));
+    const existingAudioFiles = selectedFiles.filter(file => file.type === FileType.AUDIO);
+    
+    if (audioFiles.length > 0 && existingAudioFiles.length > 0) {
+      setErrorMessage("音声ファイルは1メッセージにつき1つだけ添付できます");
+      return;
+    }
+    
+    if (audioFiles.length > 1) {
+      setErrorMessage("音声ファイルは1メッセージにつき1つだけ添付できます");
+      return;
+    }
+    
     if (files.length > MAX_IMAGES - selectedFiles.length) {
       setErrorMessage(`アップロード可能なファイル数の上限(${MAX_IMAGES}件)を超えています`);
       return;
@@ -347,6 +361,27 @@ const ChatPage: React.FC = () => {
     if (!e.target.files) return;
 
     const files = Array.from(e.target.files);
+    
+    // 音声ファイルの場合の特別な処理
+    if (fileTypes.includes("audio/*")) {
+      // 既存の音声ファイルをチェック
+      const existingAudioFiles = selectedFiles.filter(file => file.type === FileType.AUDIO);
+      
+      if (existingAudioFiles.length > 0) {
+        setErrorMessage("音声ファイルは1メッセージにつき1つだけ添付できます");
+        e.target.value = ""; // 選択をリセット
+        return;
+      }
+      
+      // 複数の音声ファイルが選択されていた場合
+      const audioFiles = files.filter(file => file.type.startsWith('audio/'));
+      if (audioFiles.length > 1) {
+        setErrorMessage("音声ファイルは1メッセージにつき1つだけ添付できます");
+        e.target.value = ""; // 選択をリセット
+        return;
+      }
+    }
+
     const remainingSlots = MAX_IMAGES - selectedFiles.length;
 
     if (remainingSlots <= 0) {

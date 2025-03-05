@@ -6,11 +6,9 @@ litellm==1.59.0
 Pillow==11.0.0
 google-cloud-aiplatform==1.82.0
 google-cloud-speech==2.31.0
+google-cloud-secret-manager==2.23.1
 requests==2.32.3
-uvicorn==0.29.0
-asgiref==3.8.1
 h11==0.14.0
-httptools==0.6.1
 asgiref==3.8.1
 fastapi==0.115.11
 starlette==0.46.0
@@ -25,6 +23,9 @@ python-docx==0.8.11
 # 音声ファイル処理用
 lxml==5.3.1
 
+#生成AI用
+
+#hypercorn用
 hypercorn==0.17.3 
 priority==2.0.0 
 wsproto==1.2.0

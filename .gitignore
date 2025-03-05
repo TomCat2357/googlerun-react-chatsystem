@@ -19,5 +19,7 @@ public
 *.wav
 *.mp3
 *.txt
+*.jpg
+*.png
 !requirements.txt
 node_modules

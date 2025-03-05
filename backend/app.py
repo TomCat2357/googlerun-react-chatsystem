@@ -38,7 +38,7 @@ from typing import Dict, Any, List, Optional, Callable
 from firebase_admin import auth, credentials
 import firebase_admin
 from dotenv import load_dotenv
-import os, json, asyncio, base64, time, uvicorn
+import os, json, asyncio, base64, time
 
 
 from utils.websocket_manager import (
@@ -498,6 +498,20 @@ async def chat(request: Request, current_user: Dict = Depends(get_current_user))
             if error_keyword == content:
                 error_flag = True
                 break
+
+        # 各ユーザーメッセージの音声ファイルをフィルタリング
+        last_audio_file = None
+        for msg in messages:
+            if msg.get("role") == "user" and "audioFiles" in msg and msg["audioFiles"]:
+                last_audio_file = msg["audioFiles"][-1]  # 最後の音声ファイルを保存
+                msg["audioFiles"] = []  # すべての音声ファイルを一旦クリア
+        
+        # 最後の音声ファイルがある場合、最後のユーザーメッセージに追加
+        if last_audio_file:
+            for i in range(len(messages) - 1, -1, -1):
+                if messages[i].get("role") == "user":
+                    messages[i]["audioFiles"] = [last_audio_file]
+                    break
 
         # メッセージ変換処理を更新
         transformed_messages = []
