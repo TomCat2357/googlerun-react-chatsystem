@@ -5,7 +5,7 @@ import { useToken } from "../../hooks/useToken";
 import * as indexedDBUtils from "../../utils/indexedDBUtils";
 import * as Config from "../../config";
 import { sendChunkedRequest } from "../../utils/ChunkedUpload";
-import { FileData, convertFileDataForApi, processFile } from "../../utils/fileUtils";
+import { FileData, processFile } from "../../utils/fileUtils";
 import ChatSidebar from "./ChatSidebar";
 import ChatMessages from "./ChatMessages";
 
