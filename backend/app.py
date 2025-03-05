@@ -489,7 +489,7 @@ async def chat(request: Request, current_user: Dict = Depends(get_current_user))
                 status_code=400, detail="モデル情報が提供されていません"
             )
 
-        from utils.common import get_api_key_for_model
+        from utils.common import get_api_key_for_model, MAX_IMAGES, MAX_AUDIO_FILES, MAX_TEXT_FILES, MAX_LONG_EDGE, MAX_IMAGE_SIZE
 
         model_api_key = get_api_key_for_model(model)
         error_keyword = "@trigger_error"
@@ -501,43 +501,64 @@ async def chat(request: Request, current_user: Dict = Depends(get_current_user))
                 error_flag = True
                 break
 
-        # 各ユーザーメッセージの音声ファイルをフィルタリング
-        last_audio_file = None
+        # ②ファイル制限のチェック
+        # 各メッセージのファイルをチェック
         for msg in messages:
-            if msg.get("role") == "user" and "audioFiles" in msg and msg["audioFiles"]:
-                last_audio_file = msg["audioFiles"][-1]  # 最後の音声ファイルを保存
-                msg["audioFiles"] = []  # すべての音声ファイルを一旦クリア
-        
-        # 最後の音声ファイルがある場合、最後のユーザーメッセージに追加
-        if last_audio_file:
-            for i in range(len(messages) - 1, -1, -1):
-                if messages[i].get("role") == "user":
-                    messages[i]["audioFiles"] = [last_audio_file]
-                    break
-
-        # app.py のメッセージ変換処理部分の修正
+            if msg.get("role") == "user" and "files" in msg and msg["files"]:
+                # ファイルをタイプ別にカウント
+                image_files = []
+                audio_files = []
+                text_files = []
+                
+                for file in msg["files"]:
+                    mime_type = file.get("mimeType", "")
+                    
+                    if mime_type.startswith("image/"):
+                        # 画像ファイルのサイズと大きさをチェック
+                        if file.get("size", 0) > MAX_IMAGE_SIZE:
+                            raise HTTPException(
+                                status_code=400, 
+                                detail=f"画像ファイル '{file.get('name')}' のサイズが上限（{MAX_IMAGE_SIZE}バイト）を超えています"
+                            )
+                        image_files.append(file)
+                    elif mime_type.startswith("audio/"):
+                        audio_files.append(file)
+                    else:
+                        text_files.append(file)
+                
+                # 各ファイルタイプの数をチェック
+                if len(image_files) > MAX_IMAGES:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"画像ファイルの数が上限（{MAX_IMAGES}個）を超えています"
+                    )
+                
+                if len(text_files) > MAX_TEXT_FILES:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"テキストファイルの数が上限（{MAX_TEXT_FILES}個）を超えています"
+                    )
+                
+                # ③音声ファイルの処理（MAX_AUDIO_FILESを超える場合は最新のファイルのみ保持）
+                if len(audio_files) > MAX_AUDIO_FILES:
+                    logger.info(f"音声ファイル数が上限（{MAX_AUDIO_FILES}個）を超えています。最新の{MAX_AUDIO_FILES}個のみ保持します。")
+                    audio_files = audio_files[-MAX_AUDIO_FILES:]  # 最新のMAX_AUDIO_FILES個だけ保持
+                
+                # ファイルリストを更新
+                msg["files"] = image_files + audio_files + text_files
 
         # メッセージ変換処理を更新
         transformed_messages = []
         for msg in messages:
             # ユーザーメッセージに添付ファイルがある場合の処理
             if msg.get("role") == "user":
-                # 最後の音声ファイルがある場合、それを特別に処理
-                if "audioFiles" in msg and msg["audioFiles"]:
-                    # 音声ファイルのMIMEタイプを確実に保存
-                    for audio_file in msg["audioFiles"]:
-                        if "content" in audio_file and audio_file["content"].startswith("data:"):
-                            mime_parts = audio_file["content"].split(",", 1)[0]
-                            if ";" in mime_parts and ":" in mime_parts:
-                                audio_file["mime_type"] = mime_parts.split(":", 1)[1].split(";", 1)[0]
-                            audio_file["data"] = audio_file["content"].split(",", 1)[1]
-                
                 # prepare_message_for_ai を使ってメッセージ全体を変換
                 processed_msg = prepare_message_for_ai(msg)
                 transformed_messages.append(processed_msg)
             else:
                 # システムメッセージまたはアシスタントメッセージはそのまま
                 transformed_messages.append(msg)
+        
         logger.info(f"選択されたモデル: {model}")
         logger.debug(f"messages: {transformed_messages}")
 

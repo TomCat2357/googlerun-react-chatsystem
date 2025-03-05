@@ -28,15 +28,8 @@ except Exception as e:
 def prepare_messages_for_vertex(messages: List[Dict[str, Any]]) -> List[Content]:
     """
     メッセージをVertexAI用のContent形式に変換する
-    音声ファイルは最後のものだけ保持する
     """
     content_list = []
-    last_audio_file = None
-    
-    # すべてのメッセージから最後の音声ファイルを見つける
-    for msg in messages:
-        if msg.get("role") == "user" and "audioFiles" in msg and msg["audioFiles"]:
-            last_audio_file = msg["audioFiles"][-1]
     
     for msg in messages:
         role = msg.get("role", "user")
@@ -47,15 +40,29 @@ def prepare_messages_for_vertex(messages: List[Dict[str, Any]]) -> List[Content]
             # テキストだけの場合
             parts = [Part.from_text(content)]
             
-            # 音声ファイルの処理（最後のユーザーメッセージにのみ適用）
-            if role == "user" and last_audio_file and msg == messages[-1]:
-                audio_data = last_audio_file.get("data", "")
-                mime_type = last_audio_file.get("mime_type", "audio/wav")
-                
-                if audio_data:
-                    # test.pyと同じように音声データをPart.from_dataとして追加
-                    parts.append(Part.from_text("文字起こししてください。日本語音声です。"))
-                    parts.append(Part.from_data(mime_type=mime_type, data=audio_data))
+            # ファイルデータがある場合の処理
+            if role == "user" and msg.get("files"):
+                for file in msg.get("files", []):
+                    # ファイルのMIMEタイプとデータを取得
+                    mime_type = file.get("mimeType", "")
+                    file_data = file.get("content", "")
+                    
+                    # base64エンコードデータを取得
+                    if file_data.startswith("data:") and "," in file_data:
+                        _, base64_data = file_data.split(",", 1)
+                    else:
+                        base64_data = file_data
+                    
+                    # MIMEタイプに基づいて処理
+                    if mime_type.startswith("image/") or mime_type.startswith("audio/"):
+                        # 画像または音声ファイルはPart.from_dataとして追加
+                        # ④「文字起こししてください」というテキストの削除
+                        parts.append(Part.from_data(mime_type=mime_type, data=base64_data))
+                    else:
+                        # テキスト系ファイルは内容をテキストとして追加
+                        file_name = file.get("name", "ファイル")
+                        file_content = file.get("content", "")
+                        parts.append(Part.from_text(f"\n--- {file_name} ---\n{file_content}\n--- ファイル終了 ---\n"))
             
             content_list.append(Content(role=role, parts=parts))
         elif isinstance(content, list):
@@ -70,16 +77,6 @@ def prepare_messages_for_vertex(messages: List[Dict[str, Any]]) -> List[Content]
                         mime_type, base64_data = image_url.split(',', 1)
                         mime_type = mime_type.split(':')[1].split(';')[0]
                         parts.append(Part.from_data(mime_type=mime_type, data=base64_data))
-            
-            # 音声ファイルの追加（最後のユーザーメッセージのみ）
-            if role == "user" and last_audio_file and msg == messages[-1]:
-                audio_data = last_audio_file.get("data", "")
-                mime_type = last_audio_file.get("mime_type", "audio/wav")
-                
-                if audio_data:
-                    # test.pyと同じように音声データをPart.from_dataとして追加
-                    parts.append(Part.from_text("文字起こししてください。日本語音声です。"))
-                    parts.append(Part.from_data(mime_type=mime_type, data=audio_data))
             
             content_list.append(Content(role=role, parts=parts))
     
