@@ -508,11 +508,7 @@ async def chat(request: Request, current_user: Dict = Depends(get_current_user))
         for msg in messages:
             # ユーザーメッセージに添付ファイルがある場合の処理
             if msg.get("role") == "user":
-                # prepare_message_for_ai を使ってメッセージ全体を変換
-                processed_msg = prepare_message_for_ai(msg)
-                transformed_messages.append(processed_msg)
-                
-                # ファイル添付がある場合はログに出力
+                # ファイルデータの処理とログ出力
                 if "files" in msg and msg["files"]:
                     file_types = []
                     for file in msg["files"]:
@@ -520,10 +516,12 @@ async def chat(request: Request, current_user: Dict = Depends(get_current_user))
                         name = file.get("name", "")
                         file_types.append(f"{name} ({mime_type})")
                     logger.info(f"添付ファイル: {', '.join(file_types)}")
+                
+                # メッセージをそのまま追加（prepare_message_for_aiは使わない）
+                transformed_messages.append(msg)
             else:
                 # システムメッセージまたはアシスタントメッセージはそのまま
-                transformed_messages.append(msg)
-        
+                transformed_messages.append(msg)        
         logger.info(f"選択されたモデル: {model}")
         
         # プロンプト内容の概要をログに出力

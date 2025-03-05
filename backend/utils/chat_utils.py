@@ -42,12 +42,17 @@ def prepare_messages_for_vertex(messages: List[Dict[str, Any]]) -> List[Content]
             
             # ファイルデータがある場合の処理
             if role == "user" and msg.get("files"):
+                logger.info(f"ファイルデータを検出: {len(msg['files'])}個のファイル")
                 for file in msg.get("files", []):
                     # ファイルのMIMEタイプとデータを取得
                     mime_type = file.get("mimeType", "")
                     file_data = file.get("content", "")
+                    file_name = file.get("name", "不明なファイル")
+                    
+                    logger.info(f"ファイル処理: {file_name} ({mime_type})")
                     
                     # base64エンコードデータを取得
+                    base64_data = ""
                     if file_data.startswith("data:") and "," in file_data:
                         _, base64_data = file_data.split(",", 1)
                     else:
@@ -55,30 +60,32 @@ def prepare_messages_for_vertex(messages: List[Dict[str, Any]]) -> List[Content]
                     
                     # MIMEタイプに基づいて処理
                     if mime_type.startswith("image/") or mime_type.startswith("audio/"):
-                        # 画像ファイルはPart.from_dataとして追加
-                        parts.append(Part.from_data(mime_type=mime_type, data=base64_data))
-
+                        # 画像/音声ファイルはPart.from_dataとして追加
+                        logger.info(f"{mime_type}ファイルをバイナリデータとして処理: {file_name}")
+                        file_part = Part.from_data(mime_type=mime_type, data=base64_data)
+                        parts.append(file_part)
+                        logger.info(f"{mime_type}ファイルをVertexAIに送信するpartsに追加しました")
                     else:
                         # テキスト系ファイルは内容をテキストとして追加
-                        file_name = file.get("name", "ファイル")
-                        file_content = file.get("content", "")
-                        parts.append(Part.from_text(f"\n--- {file_name} ---\n{file_content}\n--- ファイル終了 ---\n"))
+                        logger.info(f"テキストファイルをテキストデータとして処理: {file_name}")
+                        file_part = Part.from_text(f"\n--- {file_name} ---\n{file_data}\n--- ファイル終了 ---\n")
+                        parts.append(file_part)
             
-            # ログ出力: 送信するプロンプトの概要（修正版）
+            # parts配列の内容をログ出力
             log_parts = []
             for part in parts:
                 if hasattr(part, "text") and part.text:
                     # テキストの場合は先頭20文字程度をログに出力
                     log_parts.append(f"テキスト: {part.text[:20]}{'...' if len(part.text) > 20 else ''}")
-                elif hasattr(part, "data") and part.data:
-                    # 画像や音声の場合はMIMEタイプとbase64の先頭10文字を出力
+                elif hasattr(part, "mime_type") and hasattr(part, "data"):
+                    # 画像や音声の場合はMIMEタイプとデータサイズを出力
                     mime_type = getattr(part, "mime_type", "unknown")
-                    base64_preview = part.data[:10] + "..." if part.data else ""
-                    log_parts.append(f"データ: {mime_type} base64={base64_preview}[サイズ: {len(part.data)//1024}KB]")
+                    data_size = len(getattr(part, "data", "")) // 1024
+                    log_parts.append(f"バイナリ: {mime_type} [サイズ: {data_size}KB]")
             
             logger.info(f"VertexAIへ送信するContent: role={role}, parts={log_parts}")
-            
             content_list.append(Content(role=role, parts=parts))
+            
         elif isinstance(content, list):
             # 複数パーツ（テキスト+画像など）の場合
             parts = []
@@ -97,13 +104,12 @@ def prepare_messages_for_vertex(messages: List[Dict[str, Any]]) -> List[Content]
             for part in parts:
                 if hasattr(part, "text") and part.text:
                     log_parts.append(f"テキスト: {part.text[:20]}{'...' if len(part.text) > 20 else ''}")
-                elif hasattr(part, "data") and part.data:
+                elif hasattr(part, "mime_type") and hasattr(part, "data"):
                     mime_type = getattr(part, "mime_type", "unknown")
-                    base64_preview = part.data[:10] + "..." if part.data else ""
-                    log_parts.append(f"データ: {mime_type} base64={base64_preview}[サイズ: {len(part.data)//1024}KB]")
+                    data_size = len(getattr(part, "data", "")) // 1024
+                    log_parts.append(f"バイナリ: {mime_type} [サイズ: {data_size}KB]")
             
             logger.info(f"VertexAIへ送信するContent: role={role}, parts={log_parts}")
-            
             content_list.append(Content(role=role, parts=parts))
     
     return content_list
