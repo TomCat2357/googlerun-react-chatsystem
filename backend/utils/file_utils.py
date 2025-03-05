@@ -86,9 +86,11 @@ def process_audio_file(audio_data: Dict[str, str]) -> Dict[str, str]:
                 mime_type = mime_parts.split(":", 1)[1].split(";", 1)[0]
             content = content.split(",", 1)[1]
         
+        logger.info(f"音声ファイル処理: {name}, MIMEタイプ: {mime_type}, サイズ: {len(content)//1024}KB")
+        
         return {
             "name": name,
-            "content": f"[Audio: {name}]",  # チャット履歴用表示テキスト
+            "content": f"[Audio: {name}] 文字起こししてください",  # チャット履歴用表示テキストに文字起こし指示を追加
             "data": content,  # base64エンコードされたデータ
             "mime_type": mime_type  # MIMEタイプを保存
         }

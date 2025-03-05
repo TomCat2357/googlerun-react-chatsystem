@@ -30,6 +30,10 @@ GEOCODING_NO_IMAGE_MAX_BATCH_SIZE = int(os.getenv("GEOCODING_NO_IMAGE_MAX_BATCH_
 GEOCODING_WITH_IMAGE_MAX_BATCH_SIZE = int(os.getenv("GEOCODING_WITH_IMAGE_MAX_BATCH_SIZE", "20"))
 SPEECH_MAX_SECONDS = int(os.getenv("SPEECH_MAX_SECONDS", "300"))
 MAX_PAYLOAD_SIZE = int(os.getenv("MAX_PAYLOAD_SIZE", "10485760"))  # 10MB
+# チャットで添付できる音声データ数
+MAX_AUDIO_FILES=int(os.getenv("MAX_AUDIO_FILES", "1"))
+# チャットで添付できるテキストデータ数
+MAX_TEXT_FILES=int(os.getenv("MAX_TEXT_FILES", "10"))
 
 # グローバルなチャンク保存用辞書
 CHUNK_STORE = {}

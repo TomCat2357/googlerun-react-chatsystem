@@ -55,14 +55,27 @@ def prepare_messages_for_vertex(messages: List[Dict[str, Any]]) -> List[Content]
                     
                     # MIMEタイプに基づいて処理
                     if mime_type.startswith("image/") or mime_type.startswith("audio/"):
-                        # 画像または音声ファイルはPart.from_dataとして追加
-                        # ④「文字起こししてください」というテキストの削除
+                        # 画像ファイルはPart.from_dataとして追加
                         parts.append(Part.from_data(mime_type=mime_type, data=base64_data))
+
                     else:
                         # テキスト系ファイルは内容をテキストとして追加
                         file_name = file.get("name", "ファイル")
                         file_content = file.get("content", "")
                         parts.append(Part.from_text(f"\n--- {file_name} ---\n{file_content}\n--- ファイル終了 ---\n"))
+            
+            # ログ出力: 送信するプロンプトの概要
+            log_parts = []
+            for part in parts:
+                if hasattr(part, "text") and part.text:
+                    # テキストの場合は先頭20文字程度をログに出力
+                    log_parts.append(f"テキスト: {part.text[:20]}{'...' if len(part.text) > 20 else ''}")
+                elif hasattr(part, "data") and part.data:
+                    # 画像や音声の場合はMIMEタイプのみをログに出力
+                    mime_type = getattr(part, "mime_type", "unknown")
+                    log_parts.append(f"データ: {mime_type}[サイズ: {len(part.data)//1024}KB]")
+            
+            logger.info(f"VertexAIへ送信するContent: role={role}, parts={log_parts}")
             
             content_list.append(Content(role=role, parts=parts))
         elif isinstance(content, list):
@@ -78,6 +91,17 @@ def prepare_messages_for_vertex(messages: List[Dict[str, Any]]) -> List[Content]
                         mime_type = mime_type.split(':')[1].split(';')[0]
                         parts.append(Part.from_data(mime_type=mime_type, data=base64_data))
             
+            # ログ出力
+            log_parts = []
+            for part in parts:
+                if hasattr(part, "text") and part.text:
+                    log_parts.append(f"テキスト: {part.text[:20]}{'...' if len(part.text) > 20 else ''}")
+                elif hasattr(part, "data") and part.data:
+                    mime_type = getattr(part, "mime_type", "unknown")
+                    log_parts.append(f"データ: {mime_type}[サイズ: {len(part.data)//1024}KB]")
+            
+            logger.info(f"VertexAIへ送信するContent: role={role}, parts={log_parts}")
+            
             content_list.append(Content(role=role, parts=parts))
     
     return content_list
@@ -87,6 +111,21 @@ def common_message_function(*, model: str, messages: List[Dict[str, Any]], strea
     VertexAI GenerativeModel経由でチャットメッセージを送信し応答を取得する
     """
     try:
+        # モデル検証: フロントエンドから送られてきたモデルが環境変数MODELSに含まれているか確認
+        allowed_models = os.getenv("MODELS", "").split(",")
+        # モデル名がデフォルト値でないか確認（カンマ区切りでオプション:デフォルト値の形式）
+        model_options = []
+        for model_option in allowed_models:
+            if ":" in model_option:
+                model_name, is_default = model_option.split(":", 1)
+                model_options.append(model_name.strip())
+            else:
+                model_options.append(model_option.strip())
+        
+        if model not in model_options:
+            logger.error(f"指定されたモデル '{model}' は許可されていません。許可モデル: {model_options}")
+            raise ValueError(f"指定されたモデル '{model}' は許可されていません。")
+        
         # メッセージをVertexAI用に変換
         content_list = prepare_messages_for_vertex(messages)
         

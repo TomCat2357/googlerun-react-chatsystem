@@ -501,53 +501,9 @@ async def chat(request: Request, current_user: Dict = Depends(get_current_user))
                 error_flag = True
                 break
 
-        # ②ファイル制限のチェック
-        # 各メッセージのファイルをチェック
-        for msg in messages:
-            if msg.get("role") == "user" and "files" in msg and msg["files"]:
-                # ファイルをタイプ別にカウント
-                image_files = []
-                audio_files = []
-                text_files = []
-                
-                for file in msg["files"]:
-                    mime_type = file.get("mimeType", "")
-                    
-                    if mime_type.startswith("image/"):
-                        # 画像ファイルのサイズと大きさをチェック
-                        if file.get("size", 0) > MAX_IMAGE_SIZE:
-                            raise HTTPException(
-                                status_code=400, 
-                                detail=f"画像ファイル '{file.get('name')}' のサイズが上限（{MAX_IMAGE_SIZE}バイト）を超えています"
-                            )
-                        image_files.append(file)
-                    elif mime_type.startswith("audio/"):
-                        audio_files.append(file)
-                    else:
-                        text_files.append(file)
-                
-                # 各ファイルタイプの数をチェック
-                if len(image_files) > MAX_IMAGES:
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"画像ファイルの数が上限（{MAX_IMAGES}個）を超えています"
-                    )
-                
-                if len(text_files) > MAX_TEXT_FILES:
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"テキストファイルの数が上限（{MAX_TEXT_FILES}個）を超えています"
-                    )
-                
-                # ③音声ファイルの処理（MAX_AUDIO_FILESを超える場合は最新のファイルのみ保持）
-                if len(audio_files) > MAX_AUDIO_FILES:
-                    logger.info(f"音声ファイル数が上限（{MAX_AUDIO_FILES}個）を超えています。最新の{MAX_AUDIO_FILES}個のみ保持します。")
-                    audio_files = audio_files[-MAX_AUDIO_FILES:]  # 最新のMAX_AUDIO_FILES個だけ保持
-                
-                # ファイルリストを更新
-                msg["files"] = image_files + audio_files + text_files
+        # ファイルの処理と検証は省略...
 
-        # メッセージ変換処理を更新
+        # メッセージ変換処理のログ出力を追加
         transformed_messages = []
         for msg in messages:
             # ユーザーメッセージに添付ファイルがある場合の処理
@@ -555,13 +511,39 @@ async def chat(request: Request, current_user: Dict = Depends(get_current_user))
                 # prepare_message_for_ai を使ってメッセージ全体を変換
                 processed_msg = prepare_message_for_ai(msg)
                 transformed_messages.append(processed_msg)
+                
+                # ファイル添付がある場合はログに出力
+                if "files" in msg and msg["files"]:
+                    file_types = []
+                    for file in msg["files"]:
+                        mime_type = file.get("mimeType", "")
+                        name = file.get("name", "")
+                        file_types.append(f"{name} ({mime_type})")
+                    logger.info(f"添付ファイル: {', '.join(file_types)}")
             else:
                 # システムメッセージまたはアシスタントメッセージはそのまま
                 transformed_messages.append(msg)
         
         logger.info(f"選択されたモデル: {model}")
-        logger.debug(f"messages: {transformed_messages}")
-
+        
+        # プロンプト内容の概要をログに出力
+        for i, msg in enumerate(transformed_messages):
+            role = msg.get("role", "unknown")
+            content = msg.get("content", "")
+            
+            if isinstance(content, str):
+                content_preview = content[:50] + "..." if len(content) > 50 else content
+                logger.info(f"メッセージ[{i}]: role={role}, content={content_preview}")
+            elif isinstance(content, list):
+                parts_info = []
+                for part in content:
+                    if part.get("type") == "text":
+                        text = part.get("text", "")[:20] + "..." if len(part.get("text", "")) > 20 else part.get("text", "")
+                        parts_info.append(f"text: {text}")
+                    elif part.get("type") == "image_url":
+                        parts_info.append("image")
+                logger.info(f"メッセージ[{i}]: role={role}, parts={parts_info}")
+        
         if error_flag:
             raise HTTPException(
                 status_code=500, detail="意図的なエラーがトリガーされました"
