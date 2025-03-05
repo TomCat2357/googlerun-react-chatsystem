@@ -4,10 +4,7 @@ import { FileData } from "../utils/fileUtils";
 export interface Message {
   role: "user" | "assistant" | "system";
   content: string;
-  images?: string[]; // 従来の画像添付（base64文字列の配列）
-  files?: FileData[]; // 新しいファイル管理形式
-  audioFiles?: Array<{ name: string; content: string }>; // 音声ファイル
-  textFiles?: Array<{ name: string; type: string; content: string }>; // テキストファイル
+  files?: FileData[]; // 統一されたファイル管理形式
 }
 
 export interface ChatRequest {
@@ -35,6 +32,8 @@ export interface GeocodingRequest {
 
 export interface Config {
   MAX_IMAGES: number;
+  MAX_AUDIO_FILES: number;
+  MAX_TEXT_FILES: number;
   MAX_LONG_EDGE: number;
   MAX_IMAGE_SIZE: number;
   MAX_PAYLOAD_SIZE: number;

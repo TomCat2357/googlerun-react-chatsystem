@@ -47,13 +47,15 @@ def prepare_messages_for_vertex(messages: List[Dict[str, Any]]) -> List[Content]
             # テキストだけの場合
             parts = [Part.from_text(content)]
             
-            # この処理は最後のユーザーメッセージにのみ適用
+            # 音声ファイルの処理（最後のユーザーメッセージにのみ適用）
             if role == "user" and last_audio_file and msg == messages[-1]:
-                audio_content = last_audio_file.get("content", "")
-                if audio_content.startswith("data:"):
-                    mime_type, base64_data = audio_content.split(',', 1)
-                    mime_type = mime_type.split(':')[1].split(';')[0]
-                    parts.append(Part.from_data(mime_type=mime_type, data=base64_data))
+                audio_data = last_audio_file.get("data", "")
+                mime_type = last_audio_file.get("mime_type", "audio/wav")
+                
+                if audio_data:
+                    # test.pyと同じように音声データをPart.from_dataとして追加
+                    parts.append(Part.from_text("文字起こししてください。日本語音声です。"))
+                    parts.append(Part.from_data(mime_type=mime_type, data=audio_data))
             
             content_list.append(Content(role=role, parts=parts))
         elif isinstance(content, list):
@@ -71,11 +73,13 @@ def prepare_messages_for_vertex(messages: List[Dict[str, Any]]) -> List[Content]
             
             # 音声ファイルの追加（最後のユーザーメッセージのみ）
             if role == "user" and last_audio_file and msg == messages[-1]:
-                audio_content = last_audio_file.get("content", "")
-                if audio_content.startswith("data:"):
-                    mime_type, base64_data = audio_content.split(',', 1)
-                    mime_type = mime_type.split(':')[1].split(';')[0]
-                    parts.append(Part.from_data(mime_type=mime_type, data=base64_data))
+                audio_data = last_audio_file.get("data", "")
+                mime_type = last_audio_file.get("mime_type", "audio/wav")
+                
+                if audio_data:
+                    # test.pyと同じように音声データをPart.from_dataとして追加
+                    parts.append(Part.from_text("文字起こししてください。日本語音声です。"))
+                    parts.append(Part.from_data(mime_type=mime_type, data=audio_data))
             
             content_list.append(Content(role=role, parts=parts))
     

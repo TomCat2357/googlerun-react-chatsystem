@@ -75,25 +75,30 @@ def process_audio_file(audio_data: Dict[str, str]) -> Dict[str, str]:
     音声ファイルを処理する
     """
     try:
-        name = audio_data.get("name", "audio.mp3")
+        name = audio_data.get("name", "audio.wav")
         content = audio_data.get("content", "")
         
         # ヘッダー除去（"data:audio/～;base64,..."形式の場合）
+        mime_type = "audio/wav"  # デフォルト
         if content.startswith("data:"):
-            _, content = content.split(",", 1)
+            mime_parts = content.split(",", 1)[0]
+            if ";" in mime_parts and ":" in mime_parts:
+                mime_type = mime_parts.split(":", 1)[1].split(";", 1)[0]
+            content = content.split(",", 1)[1]
         
-        # 内容を文字列で残す（チャット履歴用）
         return {
             "name": name,
-            "content": f"[Audio: {name}]",
-            "data": content  # base64エンコードされたデータ
+            "content": f"[Audio: {name}]",  # チャット履歴用表示テキスト
+            "data": content,  # base64エンコードされたデータ
+            "mime_type": mime_type  # MIMEタイプを保存
         }
     except Exception as e:
         logger.error("音声ファイル処理エラー: %s", str(e), exc_info=True)
         return {
             "name": audio_data.get("name", "audio.mp3"),
             "content": "[Audio file processing error]",
-            "data": ""
+            "data": "",
+            "mime_type": "audio/mpeg"
         }
 
 def process_text_file(text_file: Dict[str, str]) -> Dict[str, str]:

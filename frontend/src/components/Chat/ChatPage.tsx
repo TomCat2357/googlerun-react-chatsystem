@@ -5,7 +5,7 @@ import { useToken } from "../../hooks/useToken";
 import * as indexedDBUtils from "../../utils/indexedDBUtils";
 import * as Config from "../../config";
 import { sendChunkedRequest } from "../../utils/ChunkedUpload";
-import { FileData, convertFileDataForApi, FileType, processFile } from "../../utils/fileUtils";
+import { FileData, convertFileDataForApi, processFile } from "../../utils/fileUtils";
 import ChatSidebar from "./ChatSidebar";
 import ChatMessages from "./ChatMessages";
 
@@ -27,7 +27,7 @@ const ChatPage: React.FC = () => {
   // 拡大表示用状態
   const [enlargedContent, setEnlargedContent] = useState<{
     content: string;
-    type: FileType;
+    mimeType: string;
   } | null>(null);
 
   const [errorMessage, setErrorMessage] = useState<string>("");
@@ -42,6 +42,8 @@ const ChatPage: React.FC = () => {
   //  設定の読み込み
   // ==========================
   const MAX_IMAGES = Config.getServerConfig().MAX_IMAGES || 5;
+  const MAX_AUDIO_FILES = Config.getServerConfig().MAX_AUDIO_FILES || 1;
+  const MAX_TEXT_FILES = Config.getServerConfig().MAX_TEXT_FILES || 5;
   const MAX_LONG_EDGE = Config.getServerConfig().MAX_LONG_EDGE || 1568;
   const MAX_IMAGE_SIZE = Config.getServerConfig().MAX_IMAGE_SIZE || 5242880;
   const MAX_PAYLOAD_SIZE = Config.getServerConfig().MAX_PAYLOAD_SIZE || 500000;
@@ -237,20 +239,8 @@ const ChatPage: React.FC = () => {
     setBackupMessages(messages);
     setInput(messageToEdit.content);
 
-    // 古い形式の画像を新しい形式に変換
+    // ファイルデータの処理
     const newFiles: FileData[] = [];
-
-    if (messageToEdit.images && messageToEdit.images.length > 0) {
-      messageToEdit.images.forEach((img, i) => {
-        newFiles.push({
-          id: `legacy_img_${i}`,
-          name: `image_${i}.jpg`,
-          type: FileType.IMAGE,
-          content: img,
-          size: 0, // サイズ不明
-        });
-      });
-    }
 
     // 新形式のファイルがあれば追加
     if (messageToEdit.files && messageToEdit.files.length > 0) {
@@ -273,6 +263,29 @@ const ChatPage: React.FC = () => {
   };
 
   // ==========================
+  //  ファイルタイプ別の数をカウント
+  // ==========================
+  const countFilesByType = (files: FileData[]) => {
+    const counts = {
+      image: 0,
+      audio: 0,
+      text: 0
+    };
+    
+    files.forEach(file => {
+      if (file.mimeType.startsWith('image/')) {
+        counts.image++;
+      } else if (file.mimeType.startsWith('audio/')) {
+        counts.audio++;
+      } else {
+        counts.text++;
+      }
+    });
+    
+    return counts;
+  };
+
+  // ==========================
   //  ドラッグアンドドロップ処理
   // ==========================
   const handleDragOver = (e: React.DragEvent<HTMLTextAreaElement>) => {
@@ -290,22 +303,15 @@ const ChatPage: React.FC = () => {
     
     const files = Array.from(e.dataTransfer.files);
     
-    // 音声ファイルの制限チェック
+    // 現在のファイル数をカウント
+    const currentCounts = countFilesByType(selectedFiles);
+    
+    // ドロップされたファイルの種類と数を確認
     const audioFiles = files.filter(file => file.type.startsWith('audio/'));
-    const existingAudioFiles = selectedFiles.filter(file => file.type === FileType.AUDIO);
     
-    if (audioFiles.length > 0 && existingAudioFiles.length > 0) {
-      setErrorMessage("音声ファイルは1メッセージにつき1つだけ添付できます");
-      return;
-    }
-    
-    if (audioFiles.length > 1) {
-      setErrorMessage("音声ファイルは1メッセージにつき1つだけ添付できます");
-      return;
-    }
-    
-    if (files.length > MAX_IMAGES - selectedFiles.length) {
-      setErrorMessage(`アップロード可能なファイル数の上限(${MAX_IMAGES}件)を超えています`);
+    // 音声ファイルの上限チェック
+    if (audioFiles.length + currentCounts.audio > MAX_AUDIO_FILES) {
+      setErrorMessage(`音声ファイルは1メッセージにつき最大${MAX_AUDIO_FILES}件まで添付できます`);
       return;
     }
     
@@ -341,7 +347,53 @@ const ChatPage: React.FC = () => {
         }
       });
       
-      setSelectedFiles([...selectedFiles, ...newFiles]);
+      // 処理されたファイルのカウント
+      const newCounts = countFilesByType(newFiles);
+      
+      // 各ファイルタイプごとに上限チェック
+      const totalImageCount = currentCounts.image + newCounts.image;
+      const totalAudioCount = currentCounts.audio + newCounts.audio;
+      const totalTextCount = currentCounts.text + newCounts.text;
+      
+      let filteredFiles: FileData[] = [];
+      let errorMessages: string[] = [];
+      
+      // 画像ファイルの上限チェック
+      if (totalImageCount > MAX_IMAGES) {
+        const remainingImageSlots = Math.max(0, MAX_IMAGES - currentCounts.image);
+        const imageFiles = newFiles.filter(file => file.mimeType.startsWith('image/'));
+        filteredFiles = [...filteredFiles, ...imageFiles.slice(0, remainingImageSlots)];
+        errorMessages.push(`画像ファイルは最大${MAX_IMAGES}件まで（${remainingImageSlots}件追加可能）`);
+      } else {
+        filteredFiles = [...filteredFiles, ...newFiles.filter(file => file.mimeType.startsWith('image/'))];
+      }
+      
+      // 音声ファイルの上限チェック
+      if (totalAudioCount > MAX_AUDIO_FILES) {
+        const remainingAudioSlots = Math.max(0, MAX_AUDIO_FILES - currentCounts.audio);
+        const audioFiles = newFiles.filter(file => file.mimeType.startsWith('audio/'));
+        filteredFiles = [...filteredFiles, ...audioFiles.slice(0, remainingAudioSlots)];
+        errorMessages.push(`音声ファイルは最大${MAX_AUDIO_FILES}件まで（${remainingAudioSlots}件追加可能）`);
+      } else {
+        filteredFiles = [...filteredFiles, ...newFiles.filter(file => file.mimeType.startsWith('audio/'))];
+      }
+      
+      // テキストファイルの上限チェック
+      if (totalTextCount > MAX_TEXT_FILES) {
+        const remainingTextSlots = Math.max(0, MAX_TEXT_FILES - currentCounts.text);
+        const textFiles = newFiles.filter(file => !file.mimeType.startsWith('image/') && !file.mimeType.startsWith('audio/'));
+        filteredFiles = [...filteredFiles, ...textFiles.slice(0, remainingTextSlots)];
+        errorMessages.push(`テキストファイルは最大${MAX_TEXT_FILES}件まで（${remainingTextSlots}件追加可能）`);
+      } else {
+        filteredFiles = [...filteredFiles, ...newFiles.filter(file => !file.mimeType.startsWith('image/') && !file.mimeType.startsWith('audio/'))];
+      }
+      
+      // エラーメッセージがあれば表示
+      if (errorMessages.length > 0) {
+        setErrorMessage(errorMessages.join('\n'));
+      }
+      
+      setSelectedFiles([...selectedFiles, ...filteredFiles]);
     } catch (error) {
       console.error('ファイルのドロップ処理エラー:', error);
       setErrorMessage('ファイルの処理中にエラーが発生しました');
@@ -362,30 +414,42 @@ const ChatPage: React.FC = () => {
 
     const files = Array.from(e.target.files);
     
-    // 音声ファイルの場合の特別な処理
-    if (fileTypes.includes("audio/*")) {
-      // 既存の音声ファイルをチェック
-      const existingAudioFiles = selectedFiles.filter(file => file.type === FileType.AUDIO);
+    // 現在のファイル数をカウント
+    const currentCounts = countFilesByType(selectedFiles);
+    
+    // ファイルタイプの判定
+    const isImageUpload = fileTypes.includes("image/*");
+    const isAudioUpload = fileTypes.includes("audio/*");
+    const isTextUpload = fileTypes.some(type => ['.txt', '.docx', '.csv', '.pdf'].includes(type));
+    
+    // 上限チェック
+    if (isAudioUpload) {
+      // 音声ファイルの上限チェック
+      const audioFiles = files.filter(file => file.type.startsWith('audio/'));
       
-      if (existingAudioFiles.length > 0) {
-        setErrorMessage("音声ファイルは1メッセージにつき1つだけ添付できます");
-        e.target.value = ""; // 選択をリセット
+      if (audioFiles.length + currentCounts.audio > MAX_AUDIO_FILES) {
+        setErrorMessage(`音声ファイルは1メッセージにつき最大${MAX_AUDIO_FILES}件まで添付できます`);
+        e.target.value = ''; // 選択をリセット
         return;
       }
       
       // 複数の音声ファイルが選択されていた場合
-      const audioFiles = files.filter(file => file.type.startsWith('audio/'));
-      if (audioFiles.length > 1) {
-        setErrorMessage("音声ファイルは1メッセージにつき1つだけ添付できます");
-        e.target.value = ""; // 選択をリセット
+      if (audioFiles.length > MAX_AUDIO_FILES) {
+        setErrorMessage(`音声ファイルは1メッセージにつき最大${MAX_AUDIO_FILES}件まで添付できます`);
+        e.target.value = ''; // 選択をリセット
         return;
       }
     }
-
-    const remainingSlots = MAX_IMAGES - selectedFiles.length;
-
-    if (remainingSlots <= 0) {
-      setErrorMessage(`アップロード可能な画像数の上限(${MAX_IMAGES}件)に達しています`);
+    
+    if (isImageUpload && currentCounts.image >= MAX_IMAGES) {
+      setErrorMessage(`画像ファイルは最大${MAX_IMAGES}件まで添付できます`);
+      e.target.value = ''; // 選択をリセット
+      return;
+    }
+    
+    if (isTextUpload && currentCounts.text >= MAX_TEXT_FILES) {
+      setErrorMessage(`テキストファイルは最大${MAX_TEXT_FILES}件まで添付できます`);
+      e.target.value = ''; // 選択をリセット
       return;
     }
 
@@ -394,14 +458,6 @@ const ChatPage: React.FC = () => {
       const isPdfAsImage =
         fileTypes.includes("image/*") && fileTypes.includes("application/pdf");
       const hasPdf = files.some((file) => file.type === "application/pdf");
-
-      // 非PDFファイルの場合、単純なファイル数チェック
-      if (!hasPdf && files.length > remainingSlots) {
-        setErrorMessage(
-          `一度にアップロードできるファイルは最大${MAX_IMAGES}件です（残り${remainingSlots}件まで追加可能）`
-        );
-        files.splice(remainingSlots); // 超過分を削除
-      }
 
       // ファイル処理
       const fileDataPromises = files.map((file) =>
@@ -420,29 +476,73 @@ const ChatPage: React.FC = () => {
         }
       });
 
-      // 上限チェックと警告
-      if (newFiles.length > remainingSlots) {
-        const totalItems = newFiles.length;
-
-        // PDFファイルからのアップロードの場合
-        if (hasPdf && isPdfAsImage) {
-          const pdfPageCount = totalItems;
-          newFiles = newFiles.slice(0, remainingSlots);
-
-          setErrorMessage(
-            `PDFの合計ページ数(${pdfPageCount}ページ)が追加可能な上限(${remainingSlots}ページ)を超えています。最初の${remainingSlots}ページのみが追加されました。`
-          );
+      // 処理されたファイルのカウント
+      const newCounts = countFilesByType(newFiles);
+      
+      // 各ファイルタイプごとに上限チェック
+      const totalImageCount = currentCounts.image + newCounts.image;
+      const totalAudioCount = currentCounts.audio + newCounts.audio;
+      const totalTextCount = currentCounts.text + newCounts.text;
+      
+      let filteredFiles: FileData[] = [];
+      let errorMessages: string[] = [];
+      
+      // 画像ファイルの上限チェック（画像アップロードの場合）
+      if (isImageUpload) {
+        if (totalImageCount > MAX_IMAGES) {
+          const remainingImageSlots = Math.max(0, MAX_IMAGES - currentCounts.image);
+          
+          // PDFファイルからのアップロードで画像として処理する場合
+          if (hasPdf && isPdfAsImage) {
+            const pdfImageFiles = newFiles.filter(file => file.mimeType.startsWith('image/'));
+            const pdfPageCount = pdfImageFiles.length;
+            filteredFiles = [...filteredFiles, ...pdfImageFiles.slice(0, remainingImageSlots)];
+            
+            errorMessages.push(
+              `PDFの合計ページ数(${pdfPageCount}ページ)が追加可能な上限(${remainingImageSlots}ページ)を超えています。最初の${remainingImageSlots}ページのみが追加されました。`
+            );
+          } else {
+            const imageFiles = newFiles.filter(file => file.mimeType.startsWith('image/'));
+            filteredFiles = [...filteredFiles, ...imageFiles.slice(0, remainingImageSlots)];
+            errorMessages.push(`画像ファイルは最大${MAX_IMAGES}件まで（あと${remainingImageSlots}件追加可能）`);
+          }
         } else {
-          newFiles = newFiles.slice(0, remainingSlots);
-          setErrorMessage(
-            `アップロードしたファイル(${totalItems}件)が追加可能な上限(${remainingSlots}件)を超えています。一部のファイルのみが追加されました。`
-          );
+          filteredFiles = [...filteredFiles, ...newFiles.filter(file => file.mimeType.startsWith('image/'))];
         }
       }
+      
+      // 音声ファイルの上限チェック（音声アップロードの場合）
+      if (isAudioUpload) {
+        if (totalAudioCount > MAX_AUDIO_FILES) {
+          const remainingAudioSlots = Math.max(0, MAX_AUDIO_FILES - currentCounts.audio);
+          const audioFiles = newFiles.filter(file => file.mimeType.startsWith('audio/'));
+          filteredFiles = [...filteredFiles, ...audioFiles.slice(0, remainingAudioSlots)];
+          errorMessages.push(`音声ファイルは最大${MAX_AUDIO_FILES}件まで（あと${remainingAudioSlots}件追加可能）`);
+        } else {
+          filteredFiles = [...filteredFiles, ...newFiles.filter(file => file.mimeType.startsWith('audio/'))];
+        }
+      }
+      
+      // テキストファイルの上限チェック（テキストアップロードの場合）
+      if (isTextUpload) {
+        if (totalTextCount > MAX_TEXT_FILES) {
+          const remainingTextSlots = Math.max(0, MAX_TEXT_FILES - currentCounts.text);
+          const textFiles = newFiles.filter(file => !file.mimeType.startsWith('image/') && !file.mimeType.startsWith('audio/'));
+          filteredFiles = [...filteredFiles, ...textFiles.slice(0, remainingTextSlots)];
+          errorMessages.push(`テキストファイルは最大${MAX_TEXT_FILES}件まで（あと${remainingTextSlots}件追加可能）`);
+        } else {
+          filteredFiles = [...filteredFiles, ...newFiles.filter(file => !file.mimeType.startsWith('image/') && !file.mimeType.startsWith('audio/'))];
+        }
+      }
+      
+      // エラーメッセージがあれば表示
+      if (errorMessages.length > 0) {
+        setErrorMessage(errorMessages.join('\n'));
+      }
 
-      console.log(`[handleFileUpload] ファイル処理完了:`, newFiles);
+      console.log(`[handleFileUpload] ファイル処理完了:`, filteredFiles);
 
-      setSelectedFiles([...selectedFiles, ...newFiles]);
+      setSelectedFiles([...selectedFiles, ...filteredFiles]);
     } catch (error) {
       console.error(`[handleFileUpload] ファイルアップロードエラー:`, error);
       setErrorMessage("ファイルの処理中にエラーが発生しました");
@@ -462,15 +562,13 @@ const ChatPage: React.FC = () => {
   // ==========================
   //  ファイルタイプに応じたアイコン表示
   // ==========================
-  const getFileIcon = (type: FileType) => {
-    switch (type) {
-      case FileType.IMAGE: return "🖼️";
-      case FileType.AUDIO: return "🔊";
-      case FileType.TEXT: return "📄";
-      case FileType.CSV: return "📊";
-      case FileType.DOCX: return "📝";
-      default: return "📎";
-    }
+  const getFileIcon = (mimeType: string) => {
+    if (mimeType.startsWith('image/')) return "🖼️";
+    if (mimeType.startsWith('audio/')) return "🔊";
+    if (mimeType === 'text/csv') return "📊";
+    if (mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') return "📝";
+    if (mimeType === 'application/pdf') return "📄";
+    return "📎";
   };
 
   // ==========================
@@ -492,16 +590,10 @@ const ChatPage: React.FC = () => {
       backupFiles = [...selectedFiles];
       backupMsgs = [...messages];
 
-      // API用にファイルデータを変換
-      const apiFileData = convertFileDataForApi(selectedFiles);
-
       const newUserMessage: Message = {
         role: "user",
         content: input.trim() || "[Files Uploaded]",
-        images: apiFileData.images || [],
-        files: selectedFiles,
-        audioFiles: apiFileData.audioFiles || [],
-        textFiles: apiFileData.textFiles || [],
+        files: selectedFiles
       };
 
       let updatedMessages: Message[] = [...messages, newUserMessage];
@@ -629,7 +721,7 @@ const ChatPage: React.FC = () => {
         <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50 z-10">
           <div className="bg-white p-6 rounded shadow">
             <h2 className="text-xl font-semibold mb-4 text-black">エラー</h2>
-            <p className="mb-4 text-black">{errorMessage}</p>
+            <p className="mb-4 text-black whitespace-pre-line">{errorMessage}</p>
             <button
               onClick={() => setErrorMessage("")}
               className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
@@ -679,19 +771,19 @@ const ChatPage: React.FC = () => {
             <div className="flex flex-wrap mb-4 gap-2">
               {selectedFiles.map((file) => (
                 <div key={file.id} className="relative inline-block">
-                  {file.type === FileType.IMAGE ? (
+                  {file.mimeType.startsWith('image/') ? (
                     <img
                       src={file.content}
                       alt={file.name}
                       className="w-16 h-16 object-cover rounded border cursor-pointer"
-                      onClick={() => file.content && setEnlargedContent({ content: file.content, type: file.type })}
+                      onClick={() => file.content && setEnlargedContent({ content: file.content, mimeType: file.mimeType })}
                     />
                   ) : (
                     <div
                       className="w-16 h-16 bg-gray-700 flex flex-col items-center justify-center rounded border cursor-pointer"
-                      onClick={() => file.content && setEnlargedContent({ content: file.content, type: file.type })}
+                      onClick={() => file.content && setEnlargedContent({ content: file.content, mimeType: file.mimeType })}
                     >
-                      <div>{getFileIcon(file.type)}</div>
+                      <div>{getFileIcon(file.mimeType)}</div>
                       <div className="text-xs truncate w-full text-center px-1">
                         {file.name.length > 8
                           ? file.name.substring(0, 8) + "..."
@@ -794,14 +886,14 @@ const ChatPage: React.FC = () => {
                   ×
                 </button>
 
-                {enlargedContent.type === FileType.IMAGE ? (
+                {enlargedContent.mimeType.startsWith('image/') ? (
                   <img
                     src={enlargedContent.content}
                     alt="Enlarged content"
                     className="max-h-[80vh]"
                     onClick={(e) => e.stopPropagation()}
                   />
-                ) : enlargedContent.type === FileType.AUDIO ? (
+                ) : enlargedContent.mimeType.startsWith('audio/') ? (
                   <audio
                     src={enlargedContent.content}
                     controls

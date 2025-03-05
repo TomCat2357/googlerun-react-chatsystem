@@ -11,25 +11,15 @@ import * as pdfjsLib from 'pdfjs-dist';
 if (typeof window !== 'undefined' && pdfjsLib) {
     pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.js`;
 }
-  
-// ファイルタイプの定義
-export enum FileType {
-  IMAGE = 'image',
-  AUDIO = 'audio',
-  TEXT = 'text',
-  CSV = 'csv',
-  DOCX = 'docx',
-  PDF = 'pdf',
-}
 
 // ファイル情報の型定義
 export interface FileData {
   id: string;
   name: string;
-  type: FileType;
   content: string; // base64 or text content
   preview?: string; // プレビュー表示用（テキストの場合は冒頭部分など）
   size: number; // 元のファイルサイズ（バイト）
+  mimeType: string; // ファイルのMIMEタイプ
 }
 
 /**
@@ -39,25 +29,8 @@ export async function processFile(file: File, maxImageSize: number, maxLongEdge:
   const fileExtension = file.name.split('.').pop()?.toLowerCase() || '';
   const fileId = `file_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
   
-  // ファイルの種類を判定
-  let fileType: FileType;
-  
-  if (file.type.startsWith('image/')) {
-    fileType = FileType.IMAGE;
-  } else if (file.type.startsWith('audio/')) {
-    fileType = FileType.AUDIO;
-  } else if (file.type === 'application/pdf') {
-    fileType = FileType.PDF;
-  } else if (fileExtension === 'csv' || file.type === 'text/csv') {
-    fileType = FileType.CSV;
-  } else if (fileExtension === 'docx' || file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
-    fileType = FileType.DOCX;
-  } else {
-    fileType = FileType.TEXT;
-  }
-  
   // PDFの処理方法を選択
-  if (fileType === FileType.PDF) {
+  if (file.type === 'application/pdf' || fileExtension === 'pdf') {
     // テキストボタンからのアップロード（.txtなどと一緒にPDFが指定されている場合）
     if (acceptedTypes.includes('.pdf') && (acceptedTypes.includes('.txt') || acceptedTypes.includes('.docx') || acceptedTypes.includes('.csv'))) {
       return await processPdfAsText(file, fileId);
@@ -68,18 +41,16 @@ export async function processFile(file: File, maxImageSize: number, maxLongEdge:
   }
   
   // ファイルの処理
-  switch (fileType) {
-    case FileType.IMAGE:
-      return processImageFile(file, fileId, maxImageSize, maxLongEdge);
-    case FileType.AUDIO:
-      return processAudioFile(file, fileId);
-    case FileType.CSV:
-      return await processCsvFile(file, fileId);
-    case FileType.DOCX:
-      return await processDocxFile(file, fileId);
-    case FileType.TEXT:
-    default:
-      return await processTextFile(file, fileId);
+  if (file.type.startsWith('image/')) {
+    return processImageFile(file, fileId, maxImageSize, maxLongEdge);
+  } else if (file.type.startsWith('audio/')) {
+    return processAudioFile(file, fileId);
+  } else if (fileExtension === 'csv' || file.type === 'text/csv') {
+    return await processCsvFile(file, fileId);
+  } else if (fileExtension === 'docx' || file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+    return await processDocxFile(file, fileId);
+  } else {
+    return await processTextFile(file, fileId);
   }
 }
 
@@ -140,9 +111,9 @@ async function processImageFile(file: File, fileId: string, maxImageSize: number
               resolve({
                 id: fileId,
                 name: file.name,
-                type: FileType.IMAGE,
                 content: newDataUrl,
                 size: file.size,
+                mimeType: 'image/jpeg'
               });
             }
           };
@@ -177,13 +148,16 @@ async function processAudioFile(file: File, fileId: string): Promise<FileData> {
     reader.onload = (event) => {
       if (event.target?.result) {
         const dataUrl = event.target.result as string;
+        // MIMEタイプの取得と保存
+        const mimeType = file.type || 'audio/wav';
+        
         resolve({
           id: fileId,
           name: file.name,
-          type: FileType.AUDIO,
-          content: dataUrl,
+          content: dataUrl,  // データURLをそのまま保存
           preview: '🔊 音声ファイル',
           size: file.size,
+          mimeType: mimeType  // MIMEタイプを追加保存
         });
       } else {
         reject(new Error('ファイル読み込みエラー'));
@@ -192,7 +166,7 @@ async function processAudioFile(file: File, fileId: string): Promise<FileData> {
     reader.onerror = () => {
       reject(new Error('ファイル読み込みエラー'));
     };
-    reader.readAsDataURL(file);
+    reader.readAsDataURL(file);  // データURLとして読み込み
   });
 }
 
@@ -256,10 +230,10 @@ async function processPdfAsImage(file: File, fileId: string, maxImageSize: numbe
       results.push({
         id: `${fileId}_page${i}`,
         name: `${file.name} (ページ ${i}/${pageCount})`,
-        type: FileType.IMAGE,
         content: imageData,
         preview: `PDF ページ ${i}/${pageCount}`,
         size: Math.floor(file.size / pageCount), // 概算
+        mimeType: 'image/jpeg'
       });
     }
     
@@ -299,10 +273,10 @@ async function processPdfAsText(file: File, fileId: string): Promise<FileData> {
     return {
       id: fileId,
       name: file.name,
-      type: FileType.TEXT,
       content: fullText,
       preview: preview,
       size: file.size,
+      mimeType: 'application/pdf'
     };
   } catch (error) {
     console.error('PDFテキスト抽出エラー:', error);
@@ -335,10 +309,10 @@ async function processCsvFile(file: File, fileId: string): Promise<FileData> {
           resolve({
             id: fileId,
             name: file.name,
-            type: FileType.CSV,
             content: content,
             preview: preview,
             size: file.size,
+            mimeType: 'text/csv'
           });
         } else {
           reject(new Error('ファイル読み込みエラー'));
@@ -369,10 +343,10 @@ async function processDocxFile(file: File, fileId: string): Promise<FileData> {
     return {
       id: fileId,
       name: file.name,
-      type: FileType.DOCX,
       content: text,
       preview: preview,
       size: file.size,
+      mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
     };
   } catch (error) {
     console.error('DOCX処理エラー:', error);
@@ -394,10 +368,10 @@ async function processTextFile(file: File, fileId: string): Promise<FileData> {
         resolve({
           id: fileId,
           name: file.name,
-          type: FileType.TEXT,
           content: content,
           preview: preview,
           size: file.size,
+          mimeType: 'text/plain'
         });
       } else {
         reject(new Error('ファイル読み込みエラー'));
@@ -415,33 +389,8 @@ async function processTextFile(file: File, fileId: string): Promise<FileData> {
  */
 export function convertFileDataForApi(files: FileData[]): any {
   const apiData: any = {
-    images: [],
-    audioFiles: [],
-    textFiles: [],
+    files: files
   };
-  
-  files.forEach(file => {
-    switch (file.type) {
-      case FileType.IMAGE:
-        apiData.images.push(file.content);
-        break;
-      case FileType.AUDIO:
-        apiData.audioFiles.push({
-          name: file.name,
-          content: file.content,
-        });
-        break;
-      case FileType.TEXT:
-      case FileType.CSV:
-      case FileType.DOCX:
-        apiData.textFiles.push({
-          name: file.name,
-          type: file.type,
-          content: file.content,
-        });
-        break;
-    }
-  });
   
   return apiData;
 }

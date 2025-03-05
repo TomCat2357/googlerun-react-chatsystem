@@ -25,6 +25,8 @@ const CONFIG_KEY = "serverConfig";
 // サーバー側設定値の初期値（ログイン時にサーバーから取得し IndexedDB に保存する）
 let serverConfig = {
   MAX_IMAGES: 0,
+  MAX_AUDIO_FILES: 0,  // 音声ファイルの最大数
+  MAX_TEXT_FILES: 0,   // テキストファイルの最大数
   MAX_LONG_EDGE: 0,
   MAX_IMAGE_SIZE: 0,
   MAX_PAYLOAD_SIZE: 0,

@@ -1,7 +1,7 @@
 // frontend/src/components/Chat/ChatMessages.tsx
 import React, { useRef, useEffect } from "react";
 import { Message } from "../../types/apiTypes";
-import { FileType, FileData } from "../../utils/fileUtils";
+import { FileData } from "../../utils/fileUtils";
 
 interface ChatMessagesProps {
   messages: Message[];
@@ -23,15 +23,13 @@ const ChatMessages: React.FC<ChatMessagesProps> = ({
   }, [messages]);
 
   // ファイルタイプに応じたアイコン表示
-  const getFileIcon = (type: FileType) => {
-    switch (type) {
-      case FileType.IMAGE: return "🖼️";
-      case FileType.AUDIO: return "🔊";
-      case FileType.TEXT: return "📄";
-      case FileType.CSV: return "📊";
-      case FileType.DOCX: return "📝";
-      default: return "📎";
-    }
+  const getFileIcon = (mimeType: string) => {
+    if (mimeType.startsWith('image/')) return "🖼️";
+    if (mimeType.startsWith('audio/')) return "🔊";
+    if (mimeType === 'text/csv') return "📊";
+    if (mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') return "📝";
+    if (mimeType === 'application/pdf') return "📄";
+    return "📎";
   };
 
   return (
@@ -80,7 +78,7 @@ const ChatMessages: React.FC<ChatMessagesProps> = ({
                       key={file.id}
                       className="relative cursor-pointer"
                     >
-                      {file.type === FileType.IMAGE ? (
+                      {file.mimeType.startsWith('image/') ? (
                         <img
                           src={file.content}
                           alt={file.name}
@@ -89,7 +87,7 @@ const ChatMessages: React.FC<ChatMessagesProps> = ({
                       ) : (
                         <div className="p-2 bg-gray-700 rounded border border-gray-600 flex items-center">
                           <span className="mr-2">
-                            {getFileIcon(file.type)}
+                            {getFileIcon(file.mimeType)}
                           </span>
                           <span className="text-sm truncate max-w-[150px]">
                             {file.name}

@@ -258,6 +258,8 @@ async def get_config(current_user: Dict = Depends(get_current_user)):
     try:
         config_values = {
             "MAX_IMAGES": os.getenv("MAX_IMAGES"),
+            "MAX_AUDIO_FILES": os.getenv("MAX_AUDIO_FILES"),  # 音声ファイル最大数
+            "MAX_TEXT_FILES": os.getenv("MAX_TEXT_FILES"),    # テキストファイル最大数
             "MAX_LONG_EDGE": os.getenv("MAX_LONG_EDGE"),
             "MAX_IMAGE_SIZE": os.getenv("MAX_IMAGE_SIZE"),
             "MAX_PAYLOAD_SIZE": os.getenv("MAX_PAYLOAD_SIZE"),
@@ -513,18 +515,29 @@ async def chat(request: Request, current_user: Dict = Depends(get_current_user))
                     messages[i]["audioFiles"] = [last_audio_file]
                     break
 
+        # app.py のメッセージ変換処理部分の修正
+
         # メッセージ変換処理を更新
         transformed_messages = []
         for msg in messages:
             # ユーザーメッセージに添付ファイルがある場合の処理
             if msg.get("role") == "user":
+                # 最後の音声ファイルがある場合、それを特別に処理
+                if "audioFiles" in msg and msg["audioFiles"]:
+                    # 音声ファイルのMIMEタイプを確実に保存
+                    for audio_file in msg["audioFiles"]:
+                        if "content" in audio_file and audio_file["content"].startswith("data:"):
+                            mime_parts = audio_file["content"].split(",", 1)[0]
+                            if ";" in mime_parts and ":" in mime_parts:
+                                audio_file["mime_type"] = mime_parts.split(":", 1)[1].split(";", 1)[0]
+                            audio_file["data"] = audio_file["content"].split(",", 1)[1]
+                
                 # prepare_message_for_ai を使ってメッセージ全体を変換
                 processed_msg = prepare_message_for_ai(msg)
                 transformed_messages.append(processed_msg)
             else:
                 # システムメッセージまたはアシスタントメッセージはそのまま
                 transformed_messages.append(msg)
-
         logger.info(f"選択されたモデル: {model}")
         logger.debug(f"messages: {transformed_messages}")
 
