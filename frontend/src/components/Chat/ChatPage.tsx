@@ -610,6 +610,27 @@ const ChatPage: React.FC = () => {
         model: selectedModel,
       };
 
+      // 【変更箇所】送信前にログ出力する処理を追加
+      // 添付ファイルのbase64データは最初の10文字だけにする
+      const logMessages = updatedMessages.map(msg => {
+        // filesがある場合のみ処理
+        if (msg.files && msg.files.length > 0) {
+          return {
+            ...msg,
+            files: msg.files.map(file => ({
+              ...file,
+              content: file.content.substring(0, 10) + '...' // 最初の10文字だけ表示
+            }))
+          };
+        }
+        return msg;
+      });
+      
+      console.log('バックエンドに送信するチャットデータ:', {
+        ...chatRequest,
+        messages: logMessages
+      });
+
       // 送信データサイズチェック
       const jsonStr = JSON.stringify(chatRequest);
       const encoder = new TextEncoder();

@@ -64,16 +64,17 @@ def prepare_messages_for_vertex(messages: List[Dict[str, Any]]) -> List[Content]
                         file_content = file.get("content", "")
                         parts.append(Part.from_text(f"\n--- {file_name} ---\n{file_content}\n--- ファイル終了 ---\n"))
             
-            # ログ出力: 送信するプロンプトの概要
+            # ログ出力: 送信するプロンプトの概要（修正版）
             log_parts = []
             for part in parts:
                 if hasattr(part, "text") and part.text:
                     # テキストの場合は先頭20文字程度をログに出力
                     log_parts.append(f"テキスト: {part.text[:20]}{'...' if len(part.text) > 20 else ''}")
                 elif hasattr(part, "data") and part.data:
-                    # 画像や音声の場合はMIMEタイプのみをログに出力
+                    # 画像や音声の場合はMIMEタイプとbase64の先頭10文字を出力
                     mime_type = getattr(part, "mime_type", "unknown")
-                    log_parts.append(f"データ: {mime_type}[サイズ: {len(part.data)//1024}KB]")
+                    base64_preview = part.data[:10] + "..." if part.data else ""
+                    log_parts.append(f"データ: {mime_type} base64={base64_preview}[サイズ: {len(part.data)//1024}KB]")
             
             logger.info(f"VertexAIへ送信するContent: role={role}, parts={log_parts}")
             
@@ -91,14 +92,15 @@ def prepare_messages_for_vertex(messages: List[Dict[str, Any]]) -> List[Content]
                         mime_type = mime_type.split(':')[1].split(';')[0]
                         parts.append(Part.from_data(mime_type=mime_type, data=base64_data))
             
-            # ログ出力
+            # ログ出力（修正版）
             log_parts = []
             for part in parts:
                 if hasattr(part, "text") and part.text:
                     log_parts.append(f"テキスト: {part.text[:20]}{'...' if len(part.text) > 20 else ''}")
                 elif hasattr(part, "data") and part.data:
                     mime_type = getattr(part, "mime_type", "unknown")
-                    log_parts.append(f"データ: {mime_type}[サイズ: {len(part.data)//1024}KB]")
+                    base64_preview = part.data[:10] + "..." if part.data else ""
+                    log_parts.append(f"データ: {mime_type} base64={base64_preview}[サイズ: {len(part.data)//1024}KB]")
             
             logger.info(f"VertexAIへ送信するContent: role={role}, parts={log_parts}")
             
