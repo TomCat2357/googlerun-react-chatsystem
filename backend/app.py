@@ -79,8 +79,7 @@ manager = ConnectionManager()
 
 # CORS設定
 origins = [org for org in os.getenv("ORIGINS", "").split(",")]
-if int(os.getenv("DEBUG", 0)):
-    origins.append("http://localhost:5173")
+
 logger.info("ORIGINS: %s", origins)
 
 # FastAPIのCORS設定
@@ -819,20 +818,26 @@ if __name__ == "__main__":
     cert_path = os.getenv("SSL_CERT_PATH")
     key_path = os.getenv("SSL_KEY_PATH")
     
-    if os.path.exists(cert_path) and os.path.exists(key_path):
+    if cert_path and key_path and os.path.exists(cert_path) and os.path.exists(key_path):
         config.certfile = cert_path
         config.keyfile = key_path
-        # SSLプロトコルを明示的に設定して安定性を向上
-        config.ciphers = "HIGH:!aNULL:!MD5"
+        # SSLプロトコルを明示的に設定して安全性と互換性を確保
+        config.ciphers = "ECDHE+AESGCM:ECDHE+CHACHA20:DHE+AESGCM:DHE+CHACHA20"
         logger.info("SSL/TLSが有効化されました")
+        
+        # HTTP/2を有効化し優先する
+        config.alpn_protocols = ["h2", "http/1.1"]
+        config.h2_max_concurrent_streams = 250  # HTTP/2の同時ストリーム数を設定
+        config.h2_max_inbound_frame_size = 2**14  # HTTP/2フレームの最大サイズを設定
+        logger.info("HTTP/2が有効化されました")
     else:
-        logger.warning("SSL/TLS証明書が見つかりません。HTTP/1.1のみで動作します")
-    
-    # HTTP/2を有効化
-    config.alpn_protocols = ["h2", "http/1.1"]
+        logger.warning("SSL/TLS証明書が見つからないか設定されていません。HTTP/1.1のみで動作します")
+        # HTTP/1.1のみを使用
+        config.alpn_protocols = ["http/1.1"]
     
     logger.info(
-        "Hypercornを使用してFastAPIアプリを起動します（HTTP/2対応） DEBUG: %s",
+        "Hypercornを使用してFastAPIアプリを起動します（TLS設定：%s） DEBUG: %s",
+        "有効" if hasattr(config, "certfile") else "無効",
         bool(int(os.getenv("DEBUG", 0))),
     )
     

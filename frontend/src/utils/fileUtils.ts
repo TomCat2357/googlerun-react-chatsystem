@@ -412,13 +412,3 @@ async function processTextFile(file: File, fileId: string): Promise<FileData> {
   });
 }
 
-/**
- * ファイルデータをAPIリクエスト用に変換
- */
-export function convertFileDataForApi(files: FileData[]): any {
-  const apiData: any = {
-    files: files
-  };
-
-  return apiData;
-}
