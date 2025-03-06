@@ -307,9 +307,9 @@ const ChatPage: React.FC = () => {
     const optimizedMessages = JSON.parse(JSON.stringify(messages));
     
     // 古い音声ファイルを削除
-    optimizedMessages.forEach(msg => {
+    optimizedMessages.forEach((msg : Message) => {
       if (msg.role === "user" && msg.files) {
-        msg.files = msg.files.filter(file => {
+        msg.files = msg.files.filter((file : FileData) => {
           // 音声ファイルでない場合は残す
           if (!file.mimeType.startsWith('audio/')) {
             return true;
