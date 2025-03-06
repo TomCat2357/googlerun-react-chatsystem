@@ -9,7 +9,8 @@ import * as pdfjsLib from 'pdfjs-dist';
 
 // PDFJSの初期化
 if (typeof window !== 'undefined' && pdfjsLib) {
-  pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.js`;
+  // CDNはhttpsで明示的に指定し、.min.jsを使用する
+  pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
 }
 
 // ファイル情報の型定義

@@ -1,0 +1,26 @@
+// frontend/src/components/Chat/ErrorModal.tsx
+import React from "react";
+
+interface ErrorModalProps {
+  message: string;
+  onClose: () => void;
+}
+
+const ErrorModal: React.FC<ErrorModalProps> = ({ message, onClose }) => {
+  return (
+    <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50 z-10">
+      <div className="bg-white p-6 rounded shadow">
+        <h2 className="text-xl font-semibold mb-4 text-black">エラー</h2>
+        <p className="mb-4 text-black whitespace-pre-line">{message}</p>
+        <button
+          onClick={onClose}
+          className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+        >
+          閉じる
+        </button>
+      </div>
+    </div>
+  );
+};
+
+export default ErrorModal;
