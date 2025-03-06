@@ -272,6 +272,58 @@ const ChatPage: React.FC = () => {
   };
 
   // ==========================
+  //  音声ファイル最適化関数
+  // ==========================
+  // 音声ファイルを最適化する（最新のMAX_AUDIO_FILES個だけを残す）
+  const optimizeAudioFiles = (messages: Message[], maxAudioFiles: number): Message[] => {
+    // すべての音声ファイルを抽出
+    const allAudioFiles: {messageIndex: number, fileId: string}[] = [];
+    
+    messages.forEach((msg, msgIndex) => {
+      if (msg.role === "user" && msg.files) {
+        msg.files.forEach(file => {
+          if (file.mimeType.startsWith('audio/')) {
+            allAudioFiles.push({
+              messageIndex: msgIndex,
+              fileId: file.id
+            });
+          }
+        });
+      }
+    });
+    
+    if (allAudioFiles.length <= maxAudioFiles) {
+      return messages; // 最適化の必要なし
+    }
+    
+    // 保持する最新の音声ファイルのIDを特定（最後のmaxAudioFiles個）
+    const keepAudioFileIds = new Set(
+      allAudioFiles
+        .slice(-maxAudioFiles) // 最後のmaxAudioFiles個を取得（最新のものたち）
+        .map(item => item.fileId) // ファイルIDを抽出
+    );
+    
+    // メッセージ配列をディープコピー
+    const optimizedMessages = JSON.parse(JSON.stringify(messages));
+    
+    // 古い音声ファイルを削除
+    optimizedMessages.forEach(msg => {
+      if (msg.role === "user" && msg.files) {
+        msg.files = msg.files.filter(file => {
+          // 音声ファイルでない場合は残す
+          if (!file.mimeType.startsWith('audio/')) {
+            return true;
+          }
+          // 音声ファイルの場合、keepAudioFileIdsに含まれているかチェック
+          return keepAudioFileIds.has(file.id);
+        });
+      }
+    });
+    
+    return optimizedMessages;
+  };
+
+  // ==========================
   //  メッセージ送信処理
   // ==========================
   const sendMessage = async () => {
@@ -296,7 +348,12 @@ const ChatPage: React.FC = () => {
         files: selectedFiles
       };
 
+      // メッセージ配列に追加
       let updatedMessages: Message[] = [...messages, newUserMessage];
+      
+      // 音声ファイルの最適化（最新のMAX_AUDIO_FILES個だけを残す）
+      updatedMessages = optimizeAudioFiles(updatedMessages, MAX_AUDIO_FILES);
+      
       setMessages(updatedMessages);
       setInput("");
       setSelectedFiles([]);
