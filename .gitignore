@@ -1,6 +1,7 @@
 *test*
 *.git*
 .env
+*key*.json
 .env.local
 .env.*
 !*.sample

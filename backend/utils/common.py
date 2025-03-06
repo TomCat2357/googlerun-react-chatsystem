@@ -43,8 +43,8 @@ ALLOWED_IPS = os.getenv("ALLOWED_IPS")
 # ===== Google Cloud 設定 =====
 VERTEX_PROJECT = os.getenv("VERTEX_PROJECT")
 VERTEX_LOCATION = os.getenv("VERTEX_LOCATION")
-#デプロイ時にコンソールで指定する場合もあるため、空白許容どころかいらない？
-#GOOGLE_APPLICATION_CREDENTIALS = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "")
+# デプロイ時にコンソールで指定する場合もあるため、空白許容どころかいらない？
+# GOOGLE_APPLICATION_CREDENTIALS = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "")
 
 # ===== Firebase設定 =====
 FIREBASE_CLIENT_SECRET_PATH = os.getenv("FIREBASE_CLIENT_SECRET_PATH")
@@ -56,10 +56,12 @@ SSL_KEY_PATH = os.getenv("SSL_KEY_PATH", "")
 
 # ===== API制限設定 =====
 # シークレットサービスから取得する場合があるため、空白許容
-GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY", "")
+GOOGLE_MAPS_API_KEY_PATH = os.getenv("GOOGLE_MAPS_API_KEY_PATH", "")
 GOOGLE_MAPS_API_CACHE_TTL = int(os.getenv("GOOGLE_MAPS_API_CACHE_TTL"))
 GEOCODING_NO_IMAGE_MAX_BATCH_SIZE = int(os.getenv("GEOCODING_NO_IMAGE_MAX_BATCH_SIZE"))
-GEOCODING_WITH_IMAGE_MAX_BATCH_SIZE = int(os.getenv("GEOCODING_WITH_IMAGE_MAX_BATCH_SIZE"))
+GEOCODING_WITH_IMAGE_MAX_BATCH_SIZE = int(
+    os.getenv("GEOCODING_WITH_IMAGE_MAX_BATCH_SIZE")
+)
 
 # ===== データ制限設定 =====
 MAX_PAYLOAD_SIZE = int(os.getenv("MAX_PAYLOAD_SIZE"))
@@ -81,6 +83,8 @@ IMAGEN_LANGUAGES = os.getenv("IMAGEN_LANGUAGES")
 IMAGEN_ADD_WATERMARK = os.getenv("IMAGEN_ADD_WATERMARK")
 IMAGEN_SAFETY_FILTER_LEVELS = os.getenv("IMAGEN_SAFETY_FILTER_LEVELS")
 IMAGEN_PERSON_GENERATIONS = os.getenv("IMAGEN_PERSON_GENERATIONS")
+
+
 # Secret Managerからシークレットを取得するための関数
 def access_secret(secret_id, version_id="latest"):
     """
@@ -92,17 +96,20 @@ def access_secret(secret_id, version_id="latest"):
         if not project_id:
             # プロジェクトIDが環境変数に設定されていない場合はメタデータから取得
             import requests
+
             project_id = requests.get(
                 "http://metadata.google.internal/computeMetadata/v1/project/project-id",
-                headers={"Metadata-Flavor": "Google"}
+                headers={"Metadata-Flavor": "Google"},
             ).text
-        
+
         client = secretmanager.SecretManagerServiceClient()
         name = f"projects/{project_id}/secrets/{secret_id}/versions/{version_id}"
         response = client.access_secret_version(request={"name": name})
         return response.payload.data.decode("UTF-8")
     except Exception as e:
-        logger.error(f"Secret Managerからのシークレット取得に失敗: {str(e)}", exc_info=True)
+        logger.error(
+            f"Secret Managerからのシークレット取得に失敗: {str(e)}", exc_info=True
+        )
         return None
 
 
@@ -111,9 +118,17 @@ def get_google_maps_api_key():
     """
     環境変数からGoogle Maps APIキーを取得し、なければSecret Managerから取得する
     """
-    api_key = GOOGLE_MAPS_API_KEY
-    if not api_key:
-        logger.info("環境変数にGoogle Maps APIキーが設定されていないため、Secret Managerから取得します")
+
+    if GOOGLE_MAPS_API_KEY_PATH and os.path.exists(GOOGLE_MAPS_API_KEY_PATH):
+        with open(GOOGLE_MAPS_API_KEY_PATH, "rt") as f:
+            logger.info(
+                "環境変数にGoogle Maps APIキーが設定されているため、ファイルから取得します"
+            )
+            api_key = json.load(f)["GOOGLE_MAPS_API_KEY"]
+    else:
+        logger.info(
+            "環境変数にGoogle Maps APIキーが設定されていないため、Secret Managerから取得します"
+        )
         api_key = access_secret("google-maps-api-key")
         if not api_key:
             raise Exception("Google Maps APIキーが見つかりません")
@@ -197,37 +212,41 @@ def limit_remote_addr(request: Request):
     if not remote_addr:
         client_host = request.client.host if request.client else None
         remote_addr = client_host
-        
+
     logger.info(f"X-Forwarded-For: {remote_addr}")
-    if remote_addr and ',' in remote_addr:
-        remote_addr = remote_addr.split(',')[0].strip()
+    if remote_addr and "," in remote_addr:
+        remote_addr = remote_addr.split(",")[0].strip()
     try:
         client_ip = ipaddress.ip_address(remote_addr)
         logger.info(f"リクエスト送信元IP: {client_ip}")
     except ValueError:
         time.sleep(0.05)
         raise HTTPException(status_code=400, detail="不正なIPアドレス形式です")
-    
+
     # ALLOWED_IPSは.envから取得する設定とする
     allowed_tokens = ALLOWED_IPS
     allowed_networks = []
-    for token in allowed_tokens.split(','):
+    for token in allowed_tokens.split(","):
         token = token.strip()
         if token:
             try:
-                if '/' in token:
+                if "/" in token:
                     network = ipaddress.ip_network(token, strict=False)
                 else:
                     ip = ipaddress.ip_address(token)
-                    network = ipaddress.ip_network(f"{ip}/{'32' if ip.version == 4 else '128'}")
+                    network = ipaddress.ip_network(
+                        f"{ip}/{'32' if ip.version == 4 else '128'}"
+                    )
                 allowed_networks.append(network)
             except ValueError as e:
-                logger.error(f"無効なIPアドレスまたはネットワーク形式: {token}, エラー: {e}")
-    
+                logger.error(
+                    f"無効なIPアドレスまたはネットワーク形式: {token}, エラー: {e}"
+                )
+
     # IPがいずれかの許可されたネットワークに含まれているかチェック
     for network in allowed_networks:
         if client_ip in network:
             return  # 許可されている場合、処理継続
-    
+
     time.sleep(0.05)
     raise HTTPException(status_code=403, detail="アクセスが許可されていません")
