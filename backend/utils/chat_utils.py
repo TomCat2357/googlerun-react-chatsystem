@@ -123,7 +123,7 @@ def common_message_function(*, model: str, messages: List[Dict[str, Any]], strea
     """
     try:
         # モデル検証: フロントエンドから送られてきたモデルが環境変数MODELSに含まれているか確認
-        allowed_models = MODELS.replace('{','').replace('}','').split(",")
+        allowed_models = MODELS.strip('{}').split(",")
         # モデル名がデフォルト値でないか確認（カンマ区切りでオプション:デフォルト値の形式）
         model_options = []
         for model_option in allowed_models:
