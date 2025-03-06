@@ -43,8 +43,8 @@ ALLOWED_IPS = os.getenv("ALLOWED_IPS")
 # ===== Google Cloud 設定 =====
 VERTEX_PROJECT = os.getenv("VERTEX_PROJECT")
 VERTEX_LOCATION = os.getenv("VERTEX_LOCATION")
-#デプロイ時にコンソールで指定する場合もあるため、空白許容
-GOOGLE_APPLICATION_CREDENTIALS = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "")
+#デプロイ時にコンソールで指定する場合もあるため、空白許容どころかいらない？
+#GOOGLE_APPLICATION_CREDENTIALS = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "")
 
 # ===== Firebase設定 =====
 FIREBASE_CLIENT_SECRET_PATH = os.getenv("FIREBASE_CLIENT_SECRET_PATH")
