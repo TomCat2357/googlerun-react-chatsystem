@@ -30,55 +30,57 @@ logger = logging.getLogger(__name__)
 CHUNK_STORE = {}
 
 # ===== アプリケーション設定 =====
-PORT = int(os.getenv("PORT", "8080"))
-FRONTEND_PATH = os.getenv("FRONTEND_PATH", "../frontend/dist")
+PORT = int(os.getenv("PORT"))
+FRONTEND_PATH = os.getenv("FRONTEND_PATH")
 DEBUG = bool(int(os.getenv("DEBUG", "0")))
 
 # CORS設定
-ORIGINS = [org for org in os.getenv("ORIGINS", "").split(",") if org]
+ORIGINS = [org for org in os.getenv("ORIGINS").split(",") if org]
 
 # IPアクセス制限
-ALLOWED_IPS = os.getenv("ALLOWED_IPS", "127.0.0.0/24")
+ALLOWED_IPS = os.getenv("ALLOWED_IPS")
 
 # ===== Google Cloud 設定 =====
-VERTEX_PROJECT = os.getenv("VERTEX_PROJECT", "")
-VERTEX_LOCATION = os.getenv("VERTEX_LOCATION", "us-central1")
-GOOGLE_APPLICATION_CREDENTIALS = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "./credentials/vertexai_service_account.json")
+VERTEX_PROJECT = os.getenv("VERTEX_PROJECT")
+VERTEX_LOCATION = os.getenv("VERTEX_LOCATION")
+#デプロイ時にコンソールで指定する場合もあるため、空白許容
+GOOGLE_APPLICATION_CREDENTIALS = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "")
 
 # ===== Firebase設定 =====
-FIREBASE_CLIENT_SECRET_PATH = os.getenv("FIREBASE_CLIENT_SECRET_PATH", "./credentials/KKH_client_secret.json")
+FIREBASE_CLIENT_SECRET_PATH = os.getenv("FIREBASE_CLIENT_SECRET_PATH")
 
 # ===== SSL/TLS設定 =====
+# Cloud RunではSSL証明書を使用しないため、空白許容
 SSL_CERT_PATH = os.getenv("SSL_CERT_PATH", "")
 SSL_KEY_PATH = os.getenv("SSL_KEY_PATH", "")
 
 # ===== API制限設定 =====
+# シークレットサービスから取得する場合があるため、空白許容
 GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY", "")
-GOOGLE_MAPS_API_CACHE_TTL = int(os.getenv("GOOGLE_MAPS_API_CACHE_TTL", "2592000"))
-GEOCODING_NO_IMAGE_MAX_BATCH_SIZE = int(os.getenv("GEOCODING_NO_IMAGE_MAX_BATCH_SIZE", "300"))
-GEOCODING_WITH_IMAGE_MAX_BATCH_SIZE = int(os.getenv("GEOCODING_WITH_IMAGE_MAX_BATCH_SIZE", "30"))
+GOOGLE_MAPS_API_CACHE_TTL = int(os.getenv("GOOGLE_MAPS_API_CACHE_TTL"))
+GEOCODING_NO_IMAGE_MAX_BATCH_SIZE = int(os.getenv("GEOCODING_NO_IMAGE_MAX_BATCH_SIZE"))
+GEOCODING_WITH_IMAGE_MAX_BATCH_SIZE = int(os.getenv("GEOCODING_WITH_IMAGE_MAX_BATCH_SIZE"))
 
 # ===== データ制限設定 =====
-MAX_PAYLOAD_SIZE = int(os.getenv("MAX_PAYLOAD_SIZE", "268435456"))  # 256MB
-MAX_IMAGES = int(os.getenv("MAX_IMAGES", "10"))
-MAX_LONG_EDGE = int(os.getenv("MAX_LONG_EDGE", "1568"))
-MAX_IMAGE_SIZE = int(os.getenv("MAX_IMAGE_SIZE", "5242880"))  # 5MB
-MAX_AUDIO_FILES = int(os.getenv("MAX_AUDIO_FILES", "1"))
-MAX_TEXT_FILES = int(os.getenv("MAX_TEXT_FILES", "10"))
-SPEECH_MAX_SECONDS = int(os.getenv("SPEECH_MAX_SECONDS", "10800"))  # 3時間
+MAX_PAYLOAD_SIZE = int(os.getenv("MAX_PAYLOAD_SIZE"))
+MAX_IMAGES = int(os.getenv("MAX_IMAGES"))
+MAX_LONG_EDGE = int(os.getenv("MAX_LONG_EDGE"))
+MAX_IMAGE_SIZE = int(os.getenv("MAX_IMAGE_SIZE"))
+MAX_AUDIO_FILES = int(os.getenv("MAX_AUDIO_FILES"))
+MAX_TEXT_FILES = int(os.getenv("MAX_TEXT_FILES"))
+SPEECH_MAX_SECONDS = int(os.getenv("SPEECH_MAX_SECONDS"))
 
 # ===== モデル設定 =====
-MODELS = os.getenv("MODELS", "gemini-2.0-flash-001")
+MODELS = os.getenv("MODELS")
 
 # Imagen設定
-IMAGEN_MODELS = os.getenv("IMAGEN_MODELS", "imagen-3.0-generate-002")
-IMAGEN_NUMBER_OF_IMAGES = os.getenv("IMAGEN_NUMBER_OF_IMAGES", "1")
-IMAGEN_ASPECT_RATIOS = os.getenv("IMAGEN_ASPECT_RATIOS", "1:1,9:16,16:9,4:3,3:4")
-IMAGEN_LANGUAGES = os.getenv("IMAGEN_LANGUAGES", "auto,en,ja")
-IMAGEN_ADD_WATERMARK = os.getenv("IMAGEN_ADD_WATERMARK", "true,false")
-IMAGEN_SAFETY_FILTER_LEVELS = os.getenv("IMAGEN_SAFETY_FILTER_LEVELS", "block_medium_and_above")
-IMAGEN_PERSON_GENERATIONS = os.getenv("IMAGEN_PERSON_GENERATIONS", "allow_adult")
-
+IMAGEN_MODELS = os.getenv("IMAGEN_MODELS")
+IMAGEN_NUMBER_OF_IMAGES = os.getenv("IMAGEN_NUMBER_OF_IMAGES")
+IMAGEN_ASPECT_RATIOS = os.getenv("IMAGEN_ASPECT_RATIOS")
+IMAGEN_LANGUAGES = os.getenv("IMAGEN_LANGUAGES")
+IMAGEN_ADD_WATERMARK = os.getenv("IMAGEN_ADD_WATERMARK")
+IMAGEN_SAFETY_FILTER_LEVELS = os.getenv("IMAGEN_SAFETY_FILTER_LEVELS")
+IMAGEN_PERSON_GENERATIONS = os.getenv("IMAGEN_PERSON_GENERATIONS")
 # Secret Managerからシークレットを取得するための関数
 def access_secret(secret_id, version_id="latest"):
     """

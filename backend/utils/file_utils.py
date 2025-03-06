@@ -10,7 +10,6 @@ from typing import Dict, List, Any, Optional, Tuple
 import docx2txt
 from utils.common import (
     logger,
-    MAX_IMAGES,
     MAX_LONG_EDGE,
     MAX_IMAGE_SIZE
 )

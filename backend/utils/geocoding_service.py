@@ -8,7 +8,7 @@ from utils.common import (
     get_google_maps_api_key
 )
 from utils.maps import get_coordinates, get_address, get_static_map, get_street_view
-from utils.websocket_manager import ConnectionManager, WebSocketMessageType
+from utils.websocket_manager import ConnectionManager
 
 
 async def process_geocoding(
