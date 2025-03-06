@@ -10,6 +10,7 @@ from utils.common import (
     VERTEX_LOCATION
 )
 
+
 # VertexAIの初期化
 def init_vertex_ai():
     try:
@@ -123,16 +124,17 @@ def common_message_function(*, model: str, messages: List[Dict[str, Any]], strea
     """
     try:
         # モデル検証: フロントエンドから送られてきたモデルが環境変数MODELSに含まれているか確認
-        allowed_models = MODELS.strip('{}').split(",")
+        allowed_models = MODELS.split(",")
         # モデル名がデフォルト値でないか確認（カンマ区切りでオプション:デフォルト値の形式）
         model_options = []
         for model_option in allowed_models:
             if ":" in model_option:
                 model_name, is_default = model_option.split(":", 1)
-                model_options.append(model_name.strip())
+                model_options.append(model_name.strip('{}'))
             else:
-                model_options.append(model_option.strip())
+                model_options.append(model_option.strip('{}'))
         
+        logger.info(f'MODELS : {model_options}', )
         if model not in model_options:
             logger.error(f"指定されたモデル '{model}' は許可されていません。許可モデル: {model_options}")
             raise ValueError(f"指定されたモデル '{model}' は許可されていません。")
