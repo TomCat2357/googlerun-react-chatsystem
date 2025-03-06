@@ -7,7 +7,6 @@ interface ChatInputProps {
   setInput: (input: string) => void;
   isProcessing: boolean;
   selectedFiles: FileData[];
-  setSelectedFiles: (files: FileData[]) => void;
   addFiles: (files: FileData[]) => void;
   sendMessage: () => void;
   stopGeneration: () => void;
@@ -26,7 +25,6 @@ const ChatInput: React.FC<ChatInputProps> = ({
   setInput,
   isProcessing,
   selectedFiles,
-  setSelectedFiles,
   addFiles,
   sendMessage,
   stopGeneration,

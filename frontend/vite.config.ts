@@ -12,67 +12,104 @@ export default defineConfig({
   build: {
     rollupOptions: {
       output: {
-        manualChunks: {
-          // Reactとルーティング関連
-          'vendor-react': [
-            'react',
-            'react-dom',
-            'react-router-dom'
-          ],
+        manualChunks: (id) => {
+          // ライブラリごとに異なるチャンクに分ける
+          if (id.includes('node_modules/pdfjs-dist')) {
+            return 'vendor-pdf';
+          }
+          if (id.includes('node_modules/mammoth')) {
+            return 'vendor-mammoth';
+          }
+          if (id.includes('node_modules/xlsx')) {
+            return 'vendor-xlsx';
+          }
+          
+          // React関連
+          if (id.includes('node_modules/react') || 
+              id.includes('node_modules/react-dom') ||
+              id.includes('node_modules/react-router-dom')) {
+            return 'vendor-react';
+          }
+          
           // Firebase関連
-          'vendor-firebase': [
-            'firebase/app',
-            'firebase/auth'
-          ],
+          if (id.includes('node_modules/firebase')) {
+            return 'vendor-firebase';
+          }
           
-          // チャット機能を細かく分割
-          'feature-chat-core': [
-            './src/components/Chat/ChatPage.tsx'
-          ],
-          'feature-chat-messages': [
-            './src/components/Chat/ChatMessages.tsx'
-          ],
-          'feature-chat-sidebar': [
-            './src/components/Chat/ChatSidebar.tsx'
-          ],
+          // チャット関連のコンポーネント
+          if (id.includes('src/components/Chat/ChatPage.tsx')) {
+            return 'feature-chat-core';
+          }
+          if (id.includes('src/components/Chat/ChatMessages.tsx')) {
+            return 'feature-chat-messages';
+          }
+          if (id.includes('src/components/Chat/ChatSidebar.tsx')) {
+            return 'feature-chat-sidebar';
+          }
+          if (id.includes('src/components/Chat/ChatInput.tsx')) {
+            return 'feature-chat-input';
+          }
+          if (id.includes('src/components/Chat/FilePreview.tsx') || 
+              id.includes('src/components/Chat/FileViewerModal.tsx')) {
+            return 'feature-chat-file-preview';
+          }
           
-          // ジオコーディング機能
-          'feature-geocoding': [
-            './src/components/Geocoding/GeocodingPage.tsx',
-            './src/components/Geocoding/MapControls.tsx'
-          ],
-          // 音声文字起こし機能
-          'feature-speech': [
-            './src/components/SpeechToText/SpeechToTextPage.tsx'
-          ],
+          // ファイル処理関連のロジックを分離
+          if (id.includes('src/utils/fileUtils.ts')) {
+            // fileUtilsの実装内容から判断して適切なチャンクに割り当てる
+            if (id.includes('processImageFile')) {
+              return 'utils-file-image';
+            }
+            if (id.includes('processAudioFile')) {
+              return 'utils-file-audio';
+            }
+            if (id.includes('processPdf')) {
+              return 'utils-file-pdf';
+            }
+            if (id.includes('processDocx')) {
+              return 'utils-file-docx';
+            }
+            if (id.includes('processCsv') || id.includes('processText')) {
+              return 'utils-file-text';
+            }
+            return 'utils-file-common'; // その他のコード
+          }
+          
+          // ジオコーディング関連
+          if (id.includes('src/components/Geocoding/GeocodingPage.tsx')) {
+            return 'feature-geocoding-page';
+          }
+          if (id.includes('src/components/Geocoding/MapControls.tsx')) {
+            return 'feature-geocoding-map';
+          }
+          
+          // 音声関連
+          if (id.includes('src/components/SpeechToText/SpeechToTextPage.tsx')) {
+            return 'feature-speech-page';
+          }
+          if (id.includes('src/components/SpeechToText') && 
+              !id.includes('SpeechToTextPage.tsx')) {
+            return 'feature-speech-components';
+          }
+          
           // 認証関連
-          'feature-auth': [
-            './src/components/Auth/LoginButton.tsx',
-            './src/components/Auth/LogoutButton.tsx',
-            './src/contexts/AuthContext.tsx'
-          ],
+          if (id.includes('src/components/Auth') || 
+              id.includes('src/contexts/AuthContext.tsx')) {
+            return 'feature-auth';
+          }
           
-          // ユーティリティ関数を分割
-          'utils-file-processing': [
-            './src/utils/fileUtils.ts'
-          ],
-          'utils-chunked-upload': [
-            './src/utils/ChunkedUpload.tsx'
-          ],
-          'utils-db': [
-            './src/utils/indexedDBUtils.ts',
-            './src/utils/imageCache.ts'
-          ],
-          
-          // 大きなライブラリを別チャンクに
-          'vendor-pdf': ['pdfjs-dist'],
-          'vendor-doc': ['mammoth', 'xlsx'],
-          'vendor-encoding': ['encoding-japanese'],
-          'vendor-axios': ['axios']
+          // その他のユーティリティ
+          if (id.includes('src/utils/ChunkedUpload.tsx')) {
+            return 'utils-chunked-upload';
+          }
+          if (id.includes('src/utils/indexedDBUtils.ts') || 
+              id.includes('src/utils/imageCache.ts')) {
+            return 'utils-db';
+          }
         }
       }
     },
-    // チャンクサイズの警告閾値を引き上げ（一時的な対策）
+    // チャンクサイズの警告閾値を引き上げ
     chunkSizeWarningLimit: 1000
   }
 })

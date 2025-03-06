@@ -484,7 +484,6 @@ const ChatPage: React.FC = () => {
             setInput={setInput}
             isProcessing={isProcessing}
             selectedFiles={selectedFiles}
-            setSelectedFiles={setSelectedFiles}
             addFiles={addFiles}
             sendMessage={sendMessage}
             stopGeneration={stopGeneration}
