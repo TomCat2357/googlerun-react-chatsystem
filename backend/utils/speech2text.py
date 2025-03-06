@@ -1,7 +1,10 @@
-import os
+# utils/speech2text.py
 from google.cloud.speech_v2 import SpeechClient
 from google.cloud.speech_v2.types import cloud_speech as cloud_speech_types
-from utils.logger import logger
+from utils.common import (
+    logger,
+    VERTEX_PROJECT
+)
 
 
 def transcribe_streaming_v2(
@@ -14,7 +17,7 @@ def transcribe_streaming_v2(
     戻り値:
         list[cloud_speech_types.StreamingRecognizeResponse]: 文字起こしされたセグメントを含む認識結果のリスト。
     """
-    project_id = os.getenv("VERTEX_PROJECT")  # プロジェクトIDの取得
+    project_id = VERTEX_PROJECT  # プロジェクトIDの取得
     client = SpeechClient()
 
     # API の制限に合わせ、各チャンクサイズを25600バイト（約25KB）に固定

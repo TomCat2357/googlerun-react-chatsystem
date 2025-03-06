@@ -3,7 +3,10 @@ import base64
 import asyncio
 import time
 from typing import Dict, List, Any, Optional, Tuple
-from utils.common import logger, get_google_maps_api_key
+from utils.common import (
+    logger, 
+    get_google_maps_api_key
+)
 from utils.maps import get_coordinates, get_address, get_static_map, get_street_view
 from utils.websocket_manager import ConnectionManager, WebSocketMessageType
 

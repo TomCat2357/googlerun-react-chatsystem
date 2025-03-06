@@ -17,6 +17,32 @@ from utils.common import (
     limit_remote_addr,
     verify_firebase_token,
     MAX_IMAGES,
+    MAX_AUDIO_FILES,
+    MAX_TEXT_FILES,
+    MAX_LONG_EDGE,
+    MAX_IMAGE_SIZE,
+    FRONTEND_PATH,
+    PORT,
+    DEBUG,
+    ORIGINS,
+    SSL_CERT_PATH,
+    SSL_KEY_PATH,
+    MODELS,
+    FIREBASE_CLIENT_SECRET_PATH,
+    CHUNK_STORE,
+    GOOGLE_MAPS_API_CACHE_TTL,
+    GEOCODING_NO_IMAGE_MAX_BATCH_SIZE,
+    GEOCODING_WITH_IMAGE_MAX_BATCH_SIZE,
+    SPEECH_MAX_SECONDS,
+    MAX_PAYLOAD_SIZE,
+    IMAGEN_MODELS,
+    IMAGEN_NUMBER_OF_IMAGES,
+    IMAGEN_ASPECT_RATIOS,
+    IMAGEN_LANGUAGES,
+    IMAGEN_ADD_WATERMARK,
+    IMAGEN_SAFETY_FILTER_LEVELS,
+    IMAGEN_PERSON_GENERATIONS,
+    get_api_key_for_model,
 )
 
 # 新規追加
@@ -37,7 +63,6 @@ from pydantic import BaseModel, Field
 from typing import Dict, Any, List, Optional, Callable
 from firebase_admin import auth, credentials
 import firebase_admin
-from dotenv import load_dotenv
 import os, json, asyncio, base64, time
 
 
@@ -51,10 +76,6 @@ from utils.chat_utils import common_message_function
 from utils.speech2text import transcribe_streaming_v2
 from utils.generate_image import generate_image
 
-# .envファイルを読み込み
-load_dotenv("./config/.env.server")
-load_dotenv("../.env")
-
 # Firebase Admin SDKの初期化
 try:
     # 初期化されているかチェック
@@ -62,10 +83,9 @@ try:
     logger.info("Firebase既に初期化済み")
 except ValueError:
     # 初期化されていない場合のみ初期化
-    client_secret_path = "./credentials/KKH_client_secret.json"
-    if os.path.exists(client_secret_path):
-        logger.info(f"Firebase認証情報を読み込み: {client_secret_path}")
-        cred = credentials.Certificate(client_secret_path)
+    if os.path.exists(FIREBASE_CLIENT_SECRET_PATH):
+        logger.info(f"Firebase認証情報を読み込み: {FIREBASE_CLIENT_SECRET_PATH}")
+        cred = credentials.Certificate(FIREBASE_CLIENT_SECRET_PATH)
         firebase_admin.initialize_app(cred)  # 名前を指定しない
     else:
         logger.info("Firebase認証情報なしで初期化")
@@ -77,15 +97,12 @@ app = FastAPI()
 # 接続マネージャのインスタンス作成
 manager = ConnectionManager()
 
-# CORS設定
-origins = [org for org in os.getenv("ORIGINS", "").split(",")]
-
-logger.info("ORIGINS: %s", origins)
+logger.info("ORIGINS: %s", ORIGINS)
 
 # FastAPIのCORS設定
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=ORIGINS,
     allow_credentials=True,
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["Content-Type", "Authorization"],
@@ -195,11 +212,6 @@ async def websocket_geocoding(websocket: WebSocket):
                 options = payload.get("options", {})
 
                 # 上限件数のチェック
-                from utils.common import (
-                    GEOCODING_WITH_IMAGE_MAX_BATCH_SIZE,
-                    GEOCODING_NO_IMAGE_MAX_BATCH_SIZE,
-                )
-
                 max_batch_size = (
                     GEOCODING_WITH_IMAGE_MAX_BATCH_SIZE
                     if options.get("showSatellite") or options.get("showStreetView")
@@ -256,29 +268,24 @@ async def websocket_echo(websocket: WebSocket):
 async def get_config(current_user: Dict = Depends(get_current_user)):
     try:
         config_values = {
-            "MAX_IMAGES": os.getenv("MAX_IMAGES"),
-            "MAX_AUDIO_FILES": os.getenv("MAX_AUDIO_FILES"),  # 音声ファイル最大数
-            "MAX_TEXT_FILES": os.getenv("MAX_TEXT_FILES"),    # テキストファイル最大数
-            "MAX_LONG_EDGE": os.getenv("MAX_LONG_EDGE"),
-            "MAX_IMAGE_SIZE": os.getenv("MAX_IMAGE_SIZE"),
-            "MAX_PAYLOAD_SIZE": os.getenv("MAX_PAYLOAD_SIZE"),
-            "GOOGLE_MAPS_API_CACHE_TTL": os.getenv("GOOGLE_MAPS_API_CACHE_TTL"),
-            "GEOCODING_NO_IMAGE_MAX_BATCH_SIZE": os.getenv(
-                "GEOCODING_NO_IMAGE_MAX_BATCH_SIZE"
-            ),
-            "GEOCODING_WITH_IMAGE_MAX_BATCH_SIZE": os.getenv(
-                "GEOCODING_WITH_IMAGE_MAX_BATCH_SIZE"
-            ),
-            "SPEECH_CHUNK_SIZE": os.getenv("SPEECH_CHUNK_SIZE"),
-            "SPEECH_MAX_SECONDS": os.getenv("SPEECH_MAX_SECONDS"),
-            "MODELS": os.getenv("MODELS"),
-            "IMAGEN_MODELS": os.getenv("IMAGEN_MODELS"),
-            "IMAGEN_NUMBER_OF_IMAGES": os.getenv("IMAGEN_NUMBER_OF_IMAGES"),
-            "IMAGEN_ASPECT_RATIOS": os.getenv("IMAGEN_ASPECT_RATIOS"),
-            "IMAGEN_LANGUAGES": os.getenv("IMAGEN_LANGUAGES"),
-            "IMAGEN_ADD_WATERMARK": os.getenv("IMAGEN_ADD_WATERMARK"),
-            "IMAGEN_SAFETY_FILTER_LEVELS": os.getenv("IMAGEN_SAFETY_FILTER_LEVELS"),
-            "IMAGEN_PERSON_GENERATIONS": os.getenv("IMAGEN_PERSON_GENERATIONS"),
+            "MAX_IMAGES": MAX_IMAGES,
+            "MAX_AUDIO_FILES": MAX_AUDIO_FILES,
+            "MAX_TEXT_FILES": MAX_TEXT_FILES,
+            "MAX_LONG_EDGE": MAX_LONG_EDGE,
+            "MAX_IMAGE_SIZE": MAX_IMAGE_SIZE,
+            "MAX_PAYLOAD_SIZE": MAX_PAYLOAD_SIZE,
+            "GOOGLE_MAPS_API_CACHE_TTL": GOOGLE_MAPS_API_CACHE_TTL,
+            "GEOCODING_NO_IMAGE_MAX_BATCH_SIZE": GEOCODING_NO_IMAGE_MAX_BATCH_SIZE,
+            "GEOCODING_WITH_IMAGE_MAX_BATCH_SIZE": GEOCODING_WITH_IMAGE_MAX_BATCH_SIZE,
+            "SPEECH_MAX_SECONDS": SPEECH_MAX_SECONDS,
+            "MODELS": MODELS,
+            "IMAGEN_MODELS": IMAGEN_MODELS,
+            "IMAGEN_NUMBER_OF_IMAGES": IMAGEN_NUMBER_OF_IMAGES,
+            "IMAGEN_ASPECT_RATIOS": IMAGEN_ASPECT_RATIOS,
+            "IMAGEN_LANGUAGES": IMAGEN_LANGUAGES,
+            "IMAGEN_ADD_WATERMARK": IMAGEN_ADD_WATERMARK,
+            "IMAGEN_SAFETY_FILTER_LEVELS": IMAGEN_SAFETY_FILTER_LEVELS,
+            "IMAGEN_PERSON_GENERATIONS": IMAGEN_PERSON_GENERATIONS,
         }
         return config_values
     except Exception as e:
@@ -308,8 +315,6 @@ async def verify_auth(current_user: Dict = Depends(get_current_user)):
 
 # チャンクデータ処理関数を修正
 async def process_chunked_data(data: Dict[str, Any]):
-    from utils.common import CHUNK_STORE
-
     chunk_id = data.get("chunkId")
     chunk_index = data.get("chunkIndex")
     total_chunks = data.get("totalChunks")
@@ -487,8 +492,6 @@ async def chat(request: Request, current_user: Dict = Depends(get_current_user))
             raise HTTPException(
                 status_code=400, detail="モデル情報が提供されていません"
             )
-
-        from utils.common import get_api_key_for_model, MAX_IMAGES, MAX_AUDIO_FILES, MAX_TEXT_FILES, MAX_LONG_EDGE, MAX_IMAGE_SIZE
 
         model_api_key = get_api_key_for_model(model)
         error_keyword = "@trigger_error"
@@ -763,8 +766,6 @@ async def logout():
 
 
 # 静的ファイル配信設定
-FRONTEND_PATH = os.getenv("FRONTEND_PATH", "../frontend/dist")
-
 # 静的ファイルのマウント
 app.mount(
     "/assets",
@@ -808,19 +809,16 @@ if __name__ == "__main__":
     
     # Hypercornの設定
     config = Config()
-    config.bind = [f"0.0.0.0:{int(os.getenv('PORT', '8080'))}"]
-    config.loglevel = "info" if not int(os.getenv("DEBUG", 0)) else "debug"
+    config.bind = [f"0.0.0.0:{PORT}"]
+    config.loglevel = "info" if not DEBUG else "debug"
     config.accesslog = '-'
     config.errorlog = '-'
     config.workers = 1
     
     # SSL/TLS設定（証明書と秘密鍵のパスを指定）
-    cert_path = os.getenv("SSL_CERT_PATH")
-    key_path = os.getenv("SSL_KEY_PATH")
-    
-    if cert_path and key_path and os.path.exists(cert_path) and os.path.exists(key_path):
-        config.certfile = cert_path
-        config.keyfile = key_path
+    if SSL_CERT_PATH and SSL_KEY_PATH and os.path.exists(SSL_CERT_PATH) and os.path.exists(SSL_KEY_PATH):
+        config.certfile = SSL_CERT_PATH
+        config.keyfile = SSL_KEY_PATH
         # SSLプロトコルを明示的に設定して安全性と互換性を確保
         config.ciphers = "ECDHE+AESGCM:ECDHE+CHACHA20:DHE+AESGCM:DHE+CHACHA20"
         logger.info("SSL/TLSが有効化されました")
@@ -838,7 +836,7 @@ if __name__ == "__main__":
     logger.info(
         "Hypercornを使用してFastAPIアプリを起動します（TLS設定：%s） DEBUG: %s",
         "有効" if hasattr(config, "certfile") else "無効",
-        bool(int(os.getenv("DEBUG", 0))),
+        bool(DEBUG),
     )
     
     # Hypercornでアプリを起動

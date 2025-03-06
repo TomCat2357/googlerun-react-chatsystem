@@ -1,18 +1,21 @@
 # utils/chat_utils.py
-import os
 import logging
 import vertexai
 from vertexai.generative_models import GenerativeModel, GenerationConfig, Part, Content
 from typing import List, Dict, Any, Generator, Optional
-
-logger = logging.getLogger(__name__)
+from utils.common import (
+    logger, 
+    MODELS, 
+    VERTEX_PROJECT, 
+    VERTEX_LOCATION
+)
 
 # VertexAIの初期化
 def init_vertex_ai():
     try:
         vertexai.init(
-            project=os.getenv("VERTEX_PROJECT"),
-            location=os.getenv("VERTEX_LOCATION")
+            project=VERTEX_PROJECT,
+            location=VERTEX_LOCATION
         )
         logger.info("VertexAI初期化完了")
     except Exception as e:
@@ -120,7 +123,7 @@ def common_message_function(*, model: str, messages: List[Dict[str, Any]], strea
     """
     try:
         # モデル検証: フロントエンドから送られてきたモデルが環境変数MODELSに含まれているか確認
-        allowed_models = os.getenv("MODELS", "").split(",")
+        allowed_models = MODELS.replace('{','').replace('}','').split(",")
         # モデル名がデフォルト値でないか確認（カンマ区切りでオプション:デフォルト値の形式）
         model_options = []
         for model_option in allowed_models:

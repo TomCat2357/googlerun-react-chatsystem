@@ -8,13 +8,12 @@ import csv
 from PIL import Image
 from typing import Dict, List, Any, Optional, Tuple
 import docx2txt
-
-logger = logging.getLogger(__name__)
-
-# 環境変数から設定を読み込み
-MAX_IMAGES = int(os.getenv("MAX_IMAGES", "4"))
-MAX_LONG_EDGE = int(os.getenv("MAX_LONG_EDGE", "1024"))
-MAX_IMAGE_SIZE = int(os.getenv("MAX_IMAGE_SIZE", "1048576"))  # 1MB
+from utils.common import (
+    logger,
+    MAX_IMAGES,
+    MAX_LONG_EDGE,
+    MAX_IMAGE_SIZE
+)
 
 def process_uploaded_image(image_data: str) -> str:
     """
