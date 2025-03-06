@@ -142,60 +142,46 @@ async function processImageFile(file: File, fileId: string, maxImageSize: number
 
 /**
  * 音声ファイルの処理
+ * 注: ブラウザ上での実際のMP3変換は技術的制約によりほとんど不可能なため、
+ * ここでは変換ではなく処理を簡略化しています
  */
 async function processAudioFile(file: File, fileId: string): Promise<FileData> {
+  console.log(`音声ファイル処理開始: ${file.name} (${file.type})`);
+  
+  // ファイルをデータURLに変換（シンプル処理）
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
+    
     reader.onload = (event) => {
-      try {
-        if (event.target?.result) {
-          const dataUrl = event.target.result as string;
-          // MIMEタイプの取得と保存
-          const mimeType = file.type || 'audio/mpeg';
-
-          // 音声ファイル用のプレビュー作成
-          const audio = new Audio();
-          audio.src = dataUrl;
-
-          // オーディオファイルのメタデータをロード
-          audio.onloadedmetadata = () => {
-            console.log(`音声ファイル読み込み成功: ${file.name}, 長さ: ${audio.duration}秒`);
-
-            resolve({
-              id: fileId,
-              name: file.name,
-              content: dataUrl,
-              preview: `🔊 音声ファイル (${Math.round(audio.duration)}秒)`,
-              size: file.size,
-              mimeType: mimeType
-            });
-          };
-
-          // エラー処理
-          audio.onerror = (e) => {
-            console.error('音声ファイル読み込みエラー:', e);
-            // エラーが発生しても処理を継続する
-            resolve({
-              id: fileId,
-              name: file.name,
-              content: dataUrl,
-              preview: '🔊 音声ファイル',
-              size: file.size,
-              mimeType: mimeType
-            });
-          };
-        } else {
-          reject(new Error('ファイル読み込みエラー'));
-        }
-      } catch (error) {
-        console.error('音声ファイル処理エラー:', error);
-        reject(error);
+      if (!event.target?.result) {
+        reject(new Error('ファイル読み込みエラー'));
+        return;
       }
+      
+      const dataUrl = event.target.result as string;
+      console.log(`音声ファイル読み込み完了: ${file.name}, サイズ: ${dataUrl.length} 文字`);
+      
+      // ファイル名と拡張子の処理
+      const fileName = file.name;
+      
+      // ファイルデータを即座に返す（サムネイル表示のため）
+      resolve({
+        id: fileId,
+        name: fileName,
+        content: dataUrl,
+        preview: `🔊 音声ファイル`, // これが重要: サムネイルに表示されるテキスト
+        size: file.size,
+        mimeType: file.type
+      });
     };
-    reader.onerror = () => {
+    
+    reader.onerror = (error) => {
+      console.error('ファイル読み込みエラー:', error);
       reject(new Error('ファイル読み込みエラー'));
     };
-    reader.readAsDataURL(file);  // データURLとして読み込み
+    
+    // データURLとして読み込み
+    reader.readAsDataURL(file);
   });
 }
 
@@ -412,4 +398,3 @@ async function processTextFile(file: File, fileId: string): Promise<FileData> {
     reader.readAsText(file);
   });
 }
-
