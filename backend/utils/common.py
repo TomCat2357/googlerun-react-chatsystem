@@ -62,6 +62,8 @@ GEOCODING_NO_IMAGE_MAX_BATCH_SIZE = int(os.getenv("GEOCODING_NO_IMAGE_MAX_BATCH_
 GEOCODING_WITH_IMAGE_MAX_BATCH_SIZE = int(
     os.getenv("GEOCODING_WITH_IMAGE_MAX_BATCH_SIZE")
 )
+# ===== Secret Manager設定 ===== 環境変数から取得する場合があるので空白許容
+SECRET_MANAGER_ID_FOR_GOOGLE_MAPS_API_KEY = os.getenv("SECRET_MANAGER_ID_FOR_GOOGLE_MAPS_API_KEY", "")
 
 # ===== データ制限設定 =====
 MAX_PAYLOAD_SIZE = int(os.getenv("MAX_PAYLOAD_SIZE"))
@@ -129,7 +131,7 @@ def get_google_maps_api_key():
         logger.info(
             "環境変数にGoogle Maps APIキーが設定されていないため、Secret Managerから取得します"
         )
-        api_key = access_secret("google-maps-api-key")
+        api_key = access_secret(SECRET_MANAGER_ID_FOR_GOOGLE_MAPS_API_KEY)
         if not api_key:
             raise Exception("Google Maps APIキーが見つかりません")
     return api_key
