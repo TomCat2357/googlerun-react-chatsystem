@@ -1,0 +1,39 @@
+steps:
+  # ステップ1: Dockerイメージをビルド
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - 'us-central1-docker.pkg.dev/marine-lane-20190317-1192/google-cloud-run-20250308/react-fastapi-chat-app:latest'
+      - '--build-arg'
+      - 'PORT=8080'
+      - '--build-arg'
+      - 'DEBUG=0'
+      - '--build-arg'
+      - 'CREDENTIALS_PATH=credentials_always'
+      - '.'
+  
+  # ステップ2: ビルドしたイメージをArtifact Registryにプッシュ
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - 'us-central1-docker.pkg.dev/marine-lane-20190317-1192/google-cloud-run-20250308/react-fastapi-chat-app:latest'
+  
+  # ステップ3: Cloud Runにサービスをデプロイ
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'gcloud'
+    args:
+      - 'run'
+      - 'deploy'
+      - 'chat-system-service'  # Cloud Runサービス名
+      - '--image'
+      - 'us-central1-docker.pkg.dev/marine-lane-20190317-1192/google-cloud-run-20250308/react-fastapi-chat-app:latest'
+      - '--region'
+      - 'us-central1'
+      - '--platform'
+      - 'managed'
+      - '--allow-unauthenticated'
+
+# ビルドプロセスで作成されるイメージの一覧
+images:
+  - 'us-central1-docker.pkg.dev/marine-lane-20190317-1192/google-cloud-run-20250308/react-fastapi-chat-app:latest'
