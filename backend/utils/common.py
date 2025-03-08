@@ -91,21 +91,18 @@ IMAGEN_PERSON_GENERATIONS = os.getenv("IMAGEN_PERSON_GENERATIONS")
 def access_secret(secret_id, version_id="latest"):
     """
     Secret Managerからシークレットを取得する関数
+    グーグルに問い合わせるときのnameは以下の構造になっている。
+    projects/{PROJECT_ID}/secrets/{secret_id}/versions/{version_id}
+    シークレットマネージャーで作成した場合は、
+    projects/{PROJECT_ID}/secrets/{secret_id}
+    が得られるが、PROJECT_IDは数値であるが、文字列の方のIDでもOK
+    versions情報も下記コードのとおりで支障ない。
     """
     try:
         logger.info(f"Secret Managerから{secret_id}を取得しています")
-        project_id = os.getenv("GOOGLE_CLOUD_PROJECT")
-        if not project_id:
-            # プロジェクトIDが環境変数に設定されていない場合はメタデータから取得
-            import requests
-
-            project_id = requests.get(
-                "http://metadata.google.internal/computeMetadata/v1/project/project-id",
-                headers={"Metadata-Flavor": "Google"},
-            ).text
-
+        
         client = secretmanager.SecretManagerServiceClient()
-        name = f"projects/{project_id}/secrets/{secret_id}/versions/{version_id}"
+        name = f"projects/{VERTEX_PROJECT}/secrets/{secret_id}/versions/{version_id}"
         response = client.access_secret_version(request={"name": name})
         return response.payload.data.decode("UTF-8")
     except Exception as e:
@@ -126,7 +123,7 @@ def get_google_maps_api_key():
             logger.info(
                 "環境変数にGoogle Maps APIキーが設定されているため、ファイルから取得します"
             )
-            api_key = json.load(f)["GOOGLE_MAPS_API_KEY"]
+            api_key = f.read()
     else:
         logger.info(
             "環境変数にGoogle Maps APIキーが設定されていないため、Secret Managerから取得します"

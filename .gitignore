@@ -2,6 +2,7 @@
 *.git*
 .env
 *key*.json
+*.key
 .env.local
 .env.*
 !*.sample
