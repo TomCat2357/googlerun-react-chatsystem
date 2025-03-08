@@ -7,12 +7,12 @@ COPY backend/config/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
 # ビルド時にARGで環境変数を受け取る
-ARG PORT=7777
+ARG PORT=8000
 ARG DEBUG=0
 ARG CREDENTIALS_PATH=credentials_gcr
 
 #受け取った環境変数をENVに設定
-ENV PORT=${PORT:-7777}
+ENV PORT=${PORT:-8000}
 ENV DEBUG=${DEBUG:-0}
 ENV CREDENTIALS_PATH=${CREDENTIALS_PATH:-credentials_gcr}
 
