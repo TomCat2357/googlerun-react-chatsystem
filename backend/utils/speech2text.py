@@ -61,6 +61,6 @@ def transcribe_streaming_v2(
     for response in responses_iterator:
         responses.append(response)
         for result in response.results:
-            logger.info(f"Transcript: {result.alternatives[0].transcript}")
+            logger.debug(f"Transcript: {result.alternatives[0].transcript}")
 
     return responses

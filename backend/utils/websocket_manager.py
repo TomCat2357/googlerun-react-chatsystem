@@ -26,7 +26,7 @@ class ConnectionManager:
     async def connect(self, websocket: WebSocket, client_id: str):
         # 接続は既にacceptされていると仮定
         self.active_connections[client_id] = websocket
-        logger.info(f"WebSocket接続: {client_id}")
+        logger.debug(f"WebSocket接続: {client_id}")
 
     async def disconnect(self, client_id: str):
         try:
@@ -113,11 +113,11 @@ async def verify_token(websocket: WebSocket):
     WebSocketの認証を行う
     """
     try:
-        logger.info("WebSocket認証: クライアントからの認証メッセージ待機中")
+        logger.debug("WebSocket認証: クライアントからの認証メッセージ待機中")
         # タイムアウト設定の追加
         try:
             data = await asyncio.wait_for(websocket.receive_json(), timeout=15.0)  # タイムアウト時間を延長
-            logger.info(f"WebSocket認証: メッセージ受信 type={data.get('type')}")
+            logger.debug(f"WebSocket認証: メッセージ受信 type={data.get('type')}")
             
             if data.get("type") != "AUTH":
                 logger.error(f"WebSocket認証: 不正なメッセージタイプ {data.get('type')}")
@@ -133,7 +133,7 @@ async def verify_token(websocket: WebSocket):
             # Firebase認証トークンを検証
             try:
                 decoded_token = verify_firebase_token(token)
-                logger.info(f"WebSocket認証成功: {decoded_token.get('email')}")
+                logger.debug(f"WebSocket認証成功: {decoded_token.get('email')}")
                 return decoded_token
             except Exception as auth_error:
                 logger.error(f"Firebase認証エラー: {str(auth_error)}")

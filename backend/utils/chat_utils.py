@@ -18,7 +18,7 @@ def init_vertex_ai():
             project=VERTEX_PROJECT,
             location=VERTEX_LOCATION
         )
-        logger.info("VertexAI初期化完了")
+        logger.debug("VertexAI初期化完了")
     except Exception as e:
         logger.error(f"VertexAI初期化エラー: {str(e)}", exc_info=True)
         raise
@@ -46,14 +46,14 @@ def prepare_messages_for_vertex(messages: List[Dict[str, Any]]) -> List[Content]
             
             # ファイルデータがある場合の処理
             if role == "user" and msg.get("files"):
-                logger.info(f"ファイルデータを検出: {len(msg['files'])}個のファイル")
+                logger.debug(f"ファイルデータを検出: {len(msg['files'])}個のファイル")
                 for file in msg.get("files", []):
                     # ファイルのMIMEタイプとデータを取得
                     mime_type = file.get("mimeType", "")
                     file_data = file.get("content", "")
                     file_name = file.get("name", "不明なファイル")
                     
-                    logger.info(f"ファイル処理: {file_name} ({mime_type})")
+                    logger.debug(f"ファイル処理: {file_name} ({mime_type})")
                     
                     # base64エンコードデータを取得
                     base64_data = ""
@@ -65,13 +65,13 @@ def prepare_messages_for_vertex(messages: List[Dict[str, Any]]) -> List[Content]
                     # MIMEタイプに基づいて処理
                     if mime_type.startswith("image/") or mime_type.startswith("audio/"):
                         # 画像/音声ファイルはPart.from_dataとして追加
-                        logger.info(f"{mime_type}ファイルをバイナリデータとして処理: {file_name}")
+                        logger.debug(f"{mime_type}ファイルをバイナリデータとして処理: {file_name}")
                         file_part = Part.from_data(mime_type=mime_type, data=base64_data)
                         parts.append(file_part)
-                        logger.info(f"{mime_type}ファイルをVertexAIに送信するpartsに追加しました")
+                        logger.debug(f"{mime_type}ファイルをVertexAIに送信するpartsに追加しました")
                     else:
                         # テキスト系ファイルは内容をテキストとして追加
-                        logger.info(f"テキストファイルをテキストデータとして処理: {file_name}")
+                        logger.debug(f"テキストファイルをテキストデータとして処理: {file_name}")
                         file_part = Part.from_text(f"\n--- {file_name} ---\n{file_data}\n--- ファイル終了 ---\n")
                         parts.append(file_part)
             
@@ -87,7 +87,7 @@ def prepare_messages_for_vertex(messages: List[Dict[str, Any]]) -> List[Content]
                     data_size = len(getattr(part, "data", "")) // 1024
                     log_parts.append(f"バイナリ: {mime_type} [サイズ: {data_size}KB]")
             
-            logger.info(f"VertexAIへ送信するContent: role={role}, parts={log_parts}")
+            logger.debug(f"VertexAIへ送信するContent: role={role}, parts={log_parts}")
             content_list.append(Content(role=role, parts=parts))
             
         elif isinstance(content, list):
@@ -113,7 +113,7 @@ def prepare_messages_for_vertex(messages: List[Dict[str, Any]]) -> List[Content]
                     data_size = len(getattr(part, "data", "")) // 1024
                     log_parts.append(f"バイナリ: {mime_type} [サイズ: {data_size}KB]")
             
-            logger.info(f"VertexAIへ送信するContent: role={role}, parts={log_parts}")
+            logger.debug(f"VertexAIへ送信するContent: role={role}, parts={log_parts}")
             content_list.append(Content(role=role, parts=parts))
     
     return content_list
@@ -134,7 +134,7 @@ def common_message_function(*, model: str, messages: List[Dict[str, Any]], strea
             else:
                 model_options.append(model_option.strip('{}'))
         
-        logger.info(f'MODELS : {model_options}', )
+        logger.debug(f'MODELS : {model_options}', )
         if model not in model_options:
             logger.error(f"指定されたモデル '{model}' は許可されていません。許可モデル: {model_options}")
             raise ValueError(f"指定されたモデル '{model}' は許可されていません。")

@@ -80,15 +80,15 @@ from utils.generate_image import generate_image
 try:
     # 初期化されているかチェック
     firebase_admin.get_app()
-    logger.info("Firebase既に初期化済み")
+    logger.debug("Firebase既に初期化済み")
 except ValueError:
     # 初期化されていない場合のみ初期化
     if os.path.exists(FIREBASE_CLIENT_SECRET_PATH):
-        logger.info(f"Firebase認証情報を読み込み: {FIREBASE_CLIENT_SECRET_PATH}")
+        logger.debug(f"Firebase認証情報を読み込み: {FIREBASE_CLIENT_SECRET_PATH}")
         cred = credentials.Certificate(FIREBASE_CLIENT_SECRET_PATH)
         firebase_admin.initialize_app(cred)  # 名前を指定しない
     else:
-        logger.info("Firebase認証情報なしで初期化")
+        logger.debug("Firebase認証情報なしで初期化")
         firebase_admin.initialize_app()  # 名前を指定しない
 
 # FastAPIアプリケーションの初期化
@@ -97,7 +97,7 @@ app = FastAPI()
 # 接続マネージャのインスタンス作成
 manager = ConnectionManager()
 
-logger.info("ORIGINS: %s", ORIGINS)
+logger.debug("ORIGINS: %s", ORIGINS)
 
 # FastAPIのCORS設定
 app.add_middleware(
@@ -179,31 +179,31 @@ class GenerateImageRequest(BaseModel):
 # WebSocketエンドポイント
 @app.websocket("/ws/geocoding")
 async def websocket_geocoding(websocket: WebSocket):
-    logger.info("WebSocket接続リクエスト受信")
+    logger.debug("WebSocket接続リクエスト受信")
     await websocket.accept()
 
     client_id = f"client_{id(websocket)}"
-    logger.info(f"WebSocketクライアントID割り当て: {client_id}")
+    logger.debug(f"WebSocketクライアントID割り当て: {client_id}")
 
     try:
         # 接続の確立
         await manager.connect(websocket, client_id)
-        logger.info(f"クライアント {client_id} が接続しました")
+        logger.debug(f"クライアント {client_id} が接続しました")
         # 認証処理を復活させる
-        logger.info("WebSocket認証処理開始")
+        logger.debug("WebSocket認証処理開始")
         decoded_token = await verify_token(websocket)
         if not decoded_token:
             logger.error("WebSocket認証失敗")
             await manager.send_error(client_id, "認証に失敗しました")
             return
 
-        logger.info(f"WebSocket認証成功: {decoded_token.get('email')}")
+        logger.debug(f"WebSocket認証成功: {decoded_token.get('email')}")
 
         # メッセージの処理
         while True:
-            logger.info("WebSocketメッセージ待機中")
+            logger.debug("WebSocketメッセージ待機中")
             data = await websocket.receive_json()
-            logger.info(f"WebSocketメッセージ受信: {data.get('type', 'unknown')}")
+            logger.debug(f"WebSocketメッセージ受信: {data.get('type', 'unknown')}")
 
             if data.get("type") == WebSocketMessageType.GEOCODE_REQUEST:
                 payload = data.get("payload", {})
@@ -236,13 +236,13 @@ async def websocket_geocoding(websocket: WebSocket):
                     )
                 )
     except WebSocketDisconnect:
-        logger.info(f"クライアント切断: {client_id}")
+        logger.debug(f"クライアント切断: {client_id}")
     except Exception as e:
         logger.error(f"WebSocketエラー: {str(e)}", exc_info=True)
     finally:
         try:
             manager.disconnect(client_id)
-            logger.info(f"クライアント {client_id} との接続を解除しました")
+            logger.debug(f"クライアント {client_id} との接続を解除しました")
         except Exception as e:
             logger.error(f"接続解除エラー: {str(e)}")
 
@@ -250,16 +250,16 @@ async def websocket_geocoding(websocket: WebSocket):
 # テスト用のWebSocketエンドポイント
 @app.websocket("/ws/echo")
 async def websocket_echo(websocket: WebSocket):
-    logger.info("Echoテスト: WebSocket接続リクエスト受信")
+    logger.debug("Echoテスト: WebSocket接続リクエスト受信")
     await websocket.accept()
-    logger.info("Echoテスト: WebSocket接続確立")
+    logger.debug("Echoテスト: WebSocket接続確立")
     try:
         while True:
             data = await websocket.receive_text()
-            logger.info(f"Echoテスト: メッセージ受信: {data}")
+            logger.debug(f"Echoテスト: メッセージ受信: {data}")
             await websocket.send_text(f"Echo: {data}")
     except WebSocketDisconnect:
-        logger.info("Echoテスト: クライアント切断")
+        logger.debug("Echoテスト: クライアント切断")
     except Exception as e:
         logger.error(f"Echoテスト: エラー: {str(e)}", exc_info=True)
 
@@ -296,8 +296,8 @@ async def get_config(current_user: Dict = Depends(get_current_user)):
 @app.get("/backend/verify-auth")
 async def verify_auth(current_user: Dict = Depends(get_current_user)):
     try:
-        logger.info("認証検証開始")
-        logger.info("トークンの復号化成功。ユーザー: %s", current_user.get("email"))
+        logger.debug("認証検証開始")
+        logger.debug("トークンの復号化成功。ユーザー: %s", current_user.get("email"))
         response_data = {
             "status": "success",
             "user": {
@@ -306,7 +306,7 @@ async def verify_auth(current_user: Dict = Depends(get_current_user)):
             },
             "expire_time": current_user.get("exp"),
         }
-        logger.info("認証検証完了")
+        logger.debug("認証検証完了")
         return response_data
     except Exception as e:
         logger.error("認証エラー: %s", str(e), exc_info=True)
@@ -354,7 +354,7 @@ async def process_chunked_data(data: Dict[str, Any]):
             raise HTTPException(status_code=400, detail=f"不正なBase64データ: {str(e)}")
 
         # チャンク情報のログ出力
-        logger.info(
+        logger.debug(
             "チャンク受信: %s - インデックス %d/%d (サイズ: %.2f KB)",
             chunk_id,
             chunk_index,
@@ -384,7 +384,7 @@ async def process_chunked_data(data: Dict[str, Any]):
 
         for expired_id in expired_chunk_ids:
             del CHUNK_STORE[expired_id]
-            logger.info("期限切れチャンクを削除: %s", expired_id)
+            logger.debug("期限切れチャンクを削除: %s", expired_id)
 
         # 全チャンク受信チェック
         received_count = len(CHUNK_STORE[chunk_id]["chunks"])
@@ -399,7 +399,7 @@ async def process_chunked_data(data: Dict[str, Any]):
 
         # 全チャンク受信済みの場合、順次再構築
         try:
-            logger.info("全チャンク受信完了。データ組み立て開始: %s", chunk_id)
+            logger.debug("全チャンク受信完了。データ組み立て開始: %s", chunk_id)
 
             # チャンクを順番通りに結合
             assembled_bytes = b""
@@ -423,7 +423,7 @@ async def process_chunked_data(data: Dict[str, Any]):
 
             # バイナリデータの場合は変換せずに返す
             if is_binary:
-                logger.info(
+                logger.debug(
                     "バイナリデータ組み立て完了: %.2f KB", len(assembled_bytes) / 1024
                 )
                 return {"binary_data": assembled_bytes}
@@ -432,7 +432,7 @@ async def process_chunked_data(data: Dict[str, Any]):
             try:
                 assembled_str = assembled_bytes.decode("utf-8")
                 parsed_json = json.loads(assembled_str)
-                logger.info("JSONデータ組み立て完了")
+                logger.debug("JSONデータ組み立て完了")
                 return parsed_json
             except UnicodeDecodeError as e:
                 logger.error("UTF-8デコードエラー: %s", str(e))
@@ -458,21 +458,21 @@ async def process_chunked_data(data: Dict[str, Any]):
 
 @app.post("/backend/chat")
 async def chat(request: Request, current_user: Dict = Depends(get_current_user)):
-    logger.info("チャットリクエストを処理中")
+    logger.debug("チャットリクエストを処理中")
     try:
         # リクエストボディの読み込み
         body = await request.json()
 
         # チャンク処理の確認
         if body.get("chunked"):
-            logger.info("チャンクされたデータです")
+            logger.debug("チャンクされたデータです")
             try:
                 # チャンクデータの処理
                 data = await process_chunked_data(body)
 
                 # 追加: 中間チャンクレスポンスの場合はそのまま返す
                 if data.get("status") == "chunk_received":
-                    logger.info(
+                    logger.debug(
                         f"中間チャンク処理: {data.get('received')}/{data.get('total')}"
                     )
                     return data
@@ -481,12 +481,12 @@ async def chat(request: Request, current_user: Dict = Depends(get_current_user))
                 logger.error("チャンク組み立てエラー: %s", str(e), exc_info=True)
                 raise HTTPException(status_code=500, detail=str(e))
         else:
-            logger.info("チャンクされていないデータです")
+            logger.debug("チャンクされていないデータです")
             data = body
 
         messages = data.get("messages", [])
         model = data.get("model")
-        logger.info(f"モデル: {model}")
+        logger.debug(f"モデル: {model}")
 
         if model is None:
             raise HTTPException(
@@ -503,8 +503,6 @@ async def chat(request: Request, current_user: Dict = Depends(get_current_user))
                 error_flag = True
                 break
 
-        # ファイルの処理と検証は省略...
-
         # メッセージ変換処理のログ出力を追加
         transformed_messages = []
         for msg in messages:
@@ -517,14 +515,14 @@ async def chat(request: Request, current_user: Dict = Depends(get_current_user))
                         mime_type = file.get("mimeType", "")
                         name = file.get("name", "")
                         file_types.append(f"{name} ({mime_type})")
-                    logger.info(f"添付ファイル: {', '.join(file_types)}")
+                    logger.debug(f"添付ファイル: {', '.join(file_types)}")
                 
                 # メッセージをそのまま追加（prepare_message_for_aiは使わない）
                 transformed_messages.append(msg)
             else:
                 # システムメッセージまたはアシスタントメッセージはそのまま
                 transformed_messages.append(msg)        
-        logger.info(f"選択されたモデル: {model}")
+        logger.debug(f"選択されたモデル: {model}")
         
         # プロンプト内容の概要をログに出力
         for i, msg in enumerate(transformed_messages):
@@ -533,7 +531,7 @@ async def chat(request: Request, current_user: Dict = Depends(get_current_user))
             
             if isinstance(content, str):
                 content_preview = content[:50] + "..." if len(content) > 50 else content
-                logger.info(f"メッセージ[{i}]: role={role}, content={content_preview}")
+                logger.debug(f"メッセージ[{i}]: role={role}, content={content_preview}")
             elif isinstance(content, list):
                 parts_info = []
                 for part in content:
@@ -542,7 +540,7 @@ async def chat(request: Request, current_user: Dict = Depends(get_current_user))
                         parts_info.append(f"text: {text}")
                     elif part.get("type") == "image_url":
                         parts_info.append("image")
-                logger.info(f"メッセージ[{i}]: role={role}, parts={parts_info}")
+                logger.debug(f"メッセージ[{i}]: role={role}, parts={parts_info}")
         
         if error_flag:
             raise HTTPException(
@@ -574,14 +572,14 @@ async def chat(request: Request, current_user: Dict = Depends(get_current_user))
 
 @app.post("/backend/speech2text")
 async def speech2text(request: Request, current_user: Dict = Depends(get_current_user)):
-    logger.info("音声認識処理開始")
+    logger.debug("音声認識処理開始")
     try:
         # リクエストボディの読み込み
         body = await request.json()
 
         # チャンク処理の確認
         if body.get("chunked"):
-            logger.info("チャンクされたデータです")
+            logger.debug("チャンクされたデータです")
             try:
                 # チャンクデータの処理（isBinaryフラグを追加）
                 body["isBinary"] = True  # 音声データはバイナリとして処理
@@ -590,7 +588,7 @@ async def speech2text(request: Request, current_user: Dict = Depends(get_current
                 # 中間ステータスのチェック - これが重要な修正部分
                 if data.get("status") == "chunk_received":
                     # 中間チャンクの場合は、そのままステータスを返す
-                    logger.info(
+                    logger.debug(
                         f"チャンク中間状態: {data.get('received')}/{data.get('total')} 受信済み"
                     )
                     return data
@@ -598,7 +596,7 @@ async def speech2text(request: Request, current_user: Dict = Depends(get_current
                 # バイナリデータが返された場合の処理
                 if "binary_data" in data:
                     audio_bytes = data["binary_data"]
-                    logger.info(
+                    logger.debug(
                         f"バイナリデータ受信完了: {len(audio_bytes) / 1024:.2f} KB"
                     )
                     audio_data_b64 = base64.b64encode(audio_bytes).decode("utf-8")
@@ -612,7 +610,7 @@ async def speech2text(request: Request, current_user: Dict = Depends(get_current
                 logger.error(f"チャンク組み立てエラー: {str(e)}", exc_info=True)
                 raise HTTPException(status_code=500, detail=str(e))
         else:
-            logger.info("チャンクされていないデータです")
+            logger.debug("チャンクされていないデータです")
             data = body
 
         audio_data = data.get("audio_data", "")
@@ -628,7 +626,7 @@ async def speech2text(request: Request, current_user: Dict = Depends(get_current
 
         try:
             audio_bytes = base64.b64decode(audio_data)
-            logger.info(f"受信した音声サイズ: {len(audio_bytes) / 1024:.2f} KB")
+            logger.debug(f"受信した音声サイズ: {len(audio_bytes) / 1024:.2f} KB")
         except Exception as e:
             logger.error(f"音声データのBase64デコードエラー: {str(e)}")
             raise HTTPException(
@@ -642,9 +640,9 @@ async def speech2text(request: Request, current_user: Dict = Depends(get_current
 
         try:
             # 音声認識処理
-            logger.info("音声認識処理を開始します")
+            logger.debug("音声認識処理を開始します")
             responses = transcribe_streaming_v2(audio_bytes, language_codes=["ja-JP"])
-            logger.info("音声認識完了")
+            logger.debug("音声認識完了")
         except Exception as e:
             logger.error(f"音声認識エラー: {str(e)}", exc_info=True)
             raise HTTPException(status_code=500, detail=f"音声認識エラー: {str(e)}")
@@ -683,7 +681,7 @@ async def speech2text(request: Request, current_user: Dict = Depends(get_current
                         }
                     )
 
-        logger.info(
+        logger.debug(
             f"文字起こし結果: {len(full_transcript)} 文字, {len(timed_transcription)} セグメント"
         )
         return {
@@ -724,7 +722,7 @@ async def generate_image_endpoint(
         safety_filter_level=safety_filter_level,
         person_generation=person_generation,
     )
-    logger.info(f"generate_image 関数の引数: {kwargs}")
+    logger.debug(f"generate_image 関数の引数: {kwargs}")
 
     # 必須パラメータのチェック
     none_parameters = [
@@ -758,7 +756,7 @@ async def generate_image_endpoint(
 @app.post("/backend/logout")
 async def logout():
     try:
-        logger.info("ログアウト処理開始")
+        logger.debug("ログアウト処理開始")
         return {"status": "success", "message": "ログアウトに成功しました"}
     except Exception as e:
         logger.error("ログアウト処理中にエラーが発生: %s", str(e), exc_info=True)
@@ -776,15 +774,15 @@ app.mount(
 
 @app.get("/vite.svg")
 async def vite_svg():
-    logger.info("vite.svg リクエスト")
+    logger.debug("vite.svg リクエスト")
     svg_path = os.path.join(FRONTEND_PATH, "vite.svg")
     if os.path.isfile(svg_path):
         return FileResponse(svg_path, media_type="image/svg+xml")
 
     logger.warning(f"vite.svg が見つかりません。確認パス: {svg_path}")
     try:
-        logger.info(f"FRONTEND_PATH: {FRONTEND_PATH}")
-        logger.info(f"FRONTEND_PATH内のファイル一覧: {os.listdir(FRONTEND_PATH)}")
+        logger.debug(f"FRONTEND_PATH: {FRONTEND_PATH}")
+        logger.debug(f"FRONTEND_PATH内のファイル一覧: {os.listdir(FRONTEND_PATH)}")
     except Exception as e:
         logger.error(f"FRONTEND_PATH内のファイル一覧取得エラー: {e}")
 
@@ -793,13 +791,13 @@ async def vite_svg():
 
 @app.get("/")
 async def index():
-    logger.info("インデックスページリクエスト: %s", FRONTEND_PATH)
+    logger.debug("インデックスページリクエスト: %s", FRONTEND_PATH)
     return FileResponse(os.path.join(FRONTEND_PATH, "index.html"))
 
 
 @app.get("/{path:path}")
 async def static_file(path: str):
-    logger.info(f"パスリクエスト: /{path}")
+    logger.debug(f"パスリクエスト: /{path}")
     return FileResponse(os.path.join(FRONTEND_PATH, "index.html"))
 
 

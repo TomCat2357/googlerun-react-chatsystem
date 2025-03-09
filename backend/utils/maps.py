@@ -16,7 +16,7 @@ def get_static_map(
     :param size: 画像サイズ（幅, 高さ）最大640x640ピクセル
     :param map_type: マップタイプ（roadmap, satellite, hybrid, terrain）
     """
-    logger.info(
+    logger.debug(
         "静的地図取得リクエスト開始: 緯度=%s, 経度=%s, ズーム=%s",
         latitude,
         longitude,
@@ -33,7 +33,7 @@ def get_static_map(
 
     response = requests.get(base_url, params=params)
     if response.ok:
-        logger.info("静的地図取得成功。ステータスコード: %s", response.status_code)
+        logger.debug("静的地図取得成功。ステータスコード: %s", response.status_code)
     else:
         logger.error("静的地図取得失敗。ステータスコード: %s", response.status_code)
     return response
@@ -47,12 +47,12 @@ def get_coordinates(api_key, address):
     :param address: 住所または建物名などのキーワード
     :return: (緯度, 経度) のタプル。取得できなかった場合は None を返します。
     """
-    logger.info("ジオコーディングリクエスト開始: 住所=%s", address)
+    logger.debug("ジオコーディングリクエスト開始: 住所=%s", address)
     base_url = "https://maps.googleapis.com/maps/api/geocode/json"
     params = {"address": address, "key": api_key}
     response = requests.get(base_url, params=params)
     if response.ok:
-        logger.info("ジオコーディング成功。ステータスコード: %s", response.status_code)
+        logger.debug("ジオコーディング成功。ステータスコード: %s", response.status_code)
     else:
         logger.error("ジオコーディング失敗。ステータスコード: %s", response.status_code)
     data = response.json()
@@ -68,15 +68,15 @@ def get_address(api_key, latitude, longitude):
     :param longitude: 経度
     :return: 住所（文字列）。取得できなかった場合は None を返します。
     """
-    logger.info(
+    logger.debug(
         "リバースジオコーディングリクエスト開始: 緯度=%s, 経度=%s", latitude, longitude
     )
     base_url = "https://maps.googleapis.com/maps/api/geocode/json"
     params = {"latlng": f"{latitude},{longitude}", "key": api_key}
     response = requests.get(base_url, params=params)
     if response.ok:
-        logger.info(
-            "リバースジオコーディング成功。ステータスコード: %s", response.status_code
+        logger.debug(
+"リバースジオコーディング成功。ステータスコード: %s", response.status_code
         )
     else:
         logger.error(
@@ -100,7 +100,7 @@ def get_street_view(
     :param pitch: カメラの上下角度（-90〜90度）
     :param fov: 画像の視野（1〜120度）
     """
-    logger.info(
+    logger.debug(
         "ストリートビュー静止画像取得リクエスト開始: 緯度=%s, 経度=%s, heading=%s, pitch=%s, fov=%s",
         latitude,
         longitude,
@@ -120,7 +120,7 @@ def get_street_view(
         params["heading"] = heading
     response = requests.get(base_url, params=params)
     if response.ok:
-        logger.info(
+        logger.debug(
             "ストリートビュー静止画像取得成功。ステータスコード: %s",
             response.status_code,
         )

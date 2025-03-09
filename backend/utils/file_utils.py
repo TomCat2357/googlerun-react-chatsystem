@@ -27,7 +27,7 @@ def process_uploaded_image(image_data: str) -> str:
         if image.mode not in ("RGB", "RGBA"):
             image = image.convert("RGB")
         width, height = image.size
-        logger.info(
+        logger.debug(
             "元の画像サイズ: %dx%dpx, 容量: %.1fKB",
             width,
             height,
@@ -38,7 +38,7 @@ def process_uploaded_image(image_data: str) -> str:
             new_width = int(width * scale)
             new_height = int(height * scale)
             image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
-            logger.info("リサイズ後: %dx%dpx", new_width, new_height)
+            logger.debug("リサイズ後: %dx%dpx", new_width, new_height)
         quality = 85
         output = io.BytesIO()
         output_format = "JPEG"
@@ -51,7 +51,7 @@ def process_uploaded_image(image_data: str) -> str:
             image = image.convert("RGB")
             image.save(output, format=output_format, quality=quality, optimize=True)
         output_data = output.getvalue()
-        logger.info(
+        logger.debug(
             "圧縮後の容量: %.1fKB (quality=%d)", len(output_data) / 1024, quality
         )
         while len(output_data) > MAX_IMAGE_SIZE and quality > 30:
@@ -59,7 +59,7 @@ def process_uploaded_image(image_data: str) -> str:
             output = io.BytesIO()
             image.save(output, format=output_format, quality=quality, optimize=True)
             output_data = output.getvalue()
-            logger.info(
+            logger.debug(
                 "再圧縮後の容量: %.1fKB (quality=%d)", len(output_data) / 1024, quality
             )
         processed_base64 = base64.b64encode(output_data).decode("utf-8")
@@ -84,7 +84,7 @@ def process_audio_file(audio_data: Dict[str, str]) -> Dict[str, str]:
                 mime_type = mime_parts.split(":", 1)[1].split(";", 1)[0]
             content = content.split(",", 1)[1]
         
-        logger.info(f"音声ファイル処理: {name}, MIMEタイプ: {mime_type}, サイズ: {len(content)//1024}KB")
+        logger.debug(f"音声ファイル処理: {name}, MIMEタイプ: {mime_type}, サイズ: {len(content)//1024}KB")
         
         return {
             "name": name,

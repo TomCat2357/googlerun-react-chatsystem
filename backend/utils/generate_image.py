@@ -45,6 +45,5 @@ def generate_image(
         kwargs["seed"] = seed
     images = model.generate_images(**kwargs)
     image_list = images.images
-    logger.info("画像の数：%d", len(image_list))
+    logger.debug("画像の数：%d", len(image_list))
     return image_list
-

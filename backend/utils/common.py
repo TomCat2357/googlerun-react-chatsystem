@@ -103,7 +103,7 @@ def access_secret(secret_id, version_id="latest"):
     versions情報も下記コードのとおりで支障ない。
     """
     try:
-        logger.info(f"Secret Managerから{secret_id}を取得しています")
+        logger.debug(f"Secret Managerから{secret_id}を取得しています")
         
         client = secretmanager.SecretManagerServiceClient()
         name = f"projects/{VERTEX_PROJECT}/secrets/{secret_id}/versions/{version_id}"
@@ -124,12 +124,12 @@ def get_google_maps_api_key():
 
     if GOOGLE_MAPS_API_KEY_PATH and os.path.exists(GOOGLE_MAPS_API_KEY_PATH):
         with open(GOOGLE_MAPS_API_KEY_PATH, "rt") as f:
-            logger.info(
+            logger.debug(
                 "環境変数にGoogle Maps APIキーが設定されているため、ファイルから取得します"
             )
             api_key = f.read()
     else:
-        logger.info(
+        logger.debug(
             "環境変数にGoogle Maps APIキーが設定されていないため、Secret Managerから取得します"
         )
         api_key = access_secret(SECRET_MANAGER_ID_FOR_GOOGLE_MAPS_API_KEY)
@@ -151,7 +151,7 @@ def process_uploaded_image(image_data: str) -> str:
         if image.mode not in ("RGB", "RGBA"):
             image = image.convert("RGB")
         width, height = image.size
-        logger.info(
+        logger.debug(
             "元の画像サイズ: %dx%dpx, 容量: %.1fKB",
             width,
             height,
@@ -162,7 +162,7 @@ def process_uploaded_image(image_data: str) -> str:
             new_width = int(width * scale)
             new_height = int(height * scale)
             image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
-            logger.info("リサイズ後: %dx%dpx", new_width, new_height)
+            logger.debug("リサイズ後: %dx%dpx", new_width, new_height)
         quality = 85
         output = io.BytesIO()
         output_format = "JPEG"
@@ -175,7 +175,7 @@ def process_uploaded_image(image_data: str) -> str:
             image = image.convert("RGB")
             image.save(output, format=output_format, quality=quality, optimize=True)
         output_data = output.getvalue()
-        logger.info(
+        logger.debug(
             "圧縮後の容量: %.1fKB (quality=%d)", len(output_data) / 1024, quality
         )
         while len(output_data) > MAX_IMAGE_SIZE and quality > 30:
@@ -183,7 +183,7 @@ def process_uploaded_image(image_data: str) -> str:
             output = io.BytesIO()
             image.save(output, format=output_format, quality=quality, optimize=True)
             output_data = output.getvalue()
-            logger.info(
+            logger.debug(
                 "再圧縮後の容量: %.1fKB (quality=%d)", len(output_data) / 1024, quality
             )
         processed_base64 = base64.b64encode(output_data).decode("utf-8")
@@ -216,24 +216,24 @@ def limit_remote_addr(request: Request):
         client_host = request.client.host if request.client else None
         remote_addr = client_host
 
-    logger.info(f"X-Forwarded-For: {remote_addr}")
+    logger.debug(f"X-Forwarded-For: {remote_addr}")
     if remote_addr and "," in remote_addr:
         remote_addr = remote_addr.split(",")[0].strip()
     try:
         client_ip = ipaddress.ip_address(remote_addr)
-        logger.info(f"@リクエスト送信元IP: {client_ip}")
+        logger.debug(f"@リクエスト送信元IP: {client_ip}")
     except ValueError:
         time.sleep(0.05)
         raise HTTPException(status_code=400, detail="不正なIPアドレス形式です")
 
     # ALLOWED_IPSは.envから取得する設定とする
     allowed_tokens = ALLOWED_IPS
-    logger.info(f'許可されたIPアドレスまたはネットワーク: {allowed_tokens}')
+    logger.debug(f'許可されたIPアドレスまたはネットワーク: {allowed_tokens}')
     allowed_networks = []
     for token in allowed_tokens.split(","):
         token = token.strip()
         if token:
-            logger.info(f'許可されたIPアドレスまたはネットワーク: {token}')
+            logger.debug(f'許可されたIPアドレスまたはネットワーク: {token}')
             try:
                 if "/" in token:
                     network = ipaddress.ip_network(token, strict=False)
