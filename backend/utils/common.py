@@ -15,8 +15,11 @@ from functools import wraps
 from dotenv import load_dotenv
 
 # .envファイルを読み込み
-load_dotenv("./config/.env.server")
-load_dotenv("../.env")
+load_dotenv("./config/.env")
+develop_env_path = './config_develop/.env.develop'
+# 開発環境の場合はdevelop_env_pathに対応する.envファイルがある
+if os.path.exists(develop_env_path):
+    load_dotenv(develop_env_path)
 
 # ロギング設定
 logging.basicConfig(
@@ -217,17 +220,19 @@ def limit_remote_addr(request: Request):
         remote_addr = remote_addr.split(",")[0].strip()
     try:
         client_ip = ipaddress.ip_address(remote_addr)
-        logger.info(f"リクエスト送信元IP: {client_ip}")
+        logger.info(f"@リクエスト送信元IP: {client_ip}")
     except ValueError:
         time.sleep(0.05)
         raise HTTPException(status_code=400, detail="不正なIPアドレス形式です")
 
     # ALLOWED_IPSは.envから取得する設定とする
     allowed_tokens = ALLOWED_IPS
+    logger.info(f'許可されたIPアドレスまたはネットワーク: {allowed_tokens}')
     allowed_networks = []
     for token in allowed_tokens.split(","):
         token = token.strip()
         if token:
+            logger.info(f'許可されたIPアドレスまたはネットワーク: {token}')
             try:
                 if "/" in token:
                     network = ipaddress.ip_network(token, strict=False)
