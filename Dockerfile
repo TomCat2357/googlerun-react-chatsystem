@@ -2,6 +2,13 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
+
+# バックエンドのコードをコピー
+COPY ./backend/config/requirements.txt ./backend/config/requirements.txt
+
+# 必要なパッケージをインストール
+RUN pip install --no-cache-dir -r ./backend/config/requirements.txt
+
 # ビルド時にARGで環境変数を受け取る
 ARG PORT=8080
 ARG DEBUG=0
@@ -15,16 +22,14 @@ ENV MODE=${MODE}
 # 環境変数値を表示
 RUN echo "DEBUG mode: $DEBUG"
 RUN echo "Using PORT: $PORT"
-RUN echo "Using CONFIG_PATH: $MODE"
+RUN echo "Using CONFIG_MODE: $MODE"
 
-# バックエンドのコードをコピー
-COPY ./backend/config/ ./backend/config/
-COPY ./backend/utils/ ./backend/utils/
+# 残りのconfigをコピー
 COPY ./backend/app.py ./backend/app.py
+COPY ./backend/utils/ ./backend/utils/
+COPY ./backend/config/ ./backend/config/
 COPY ./backend/config_${MODE} ./backend/config_${MODE}
 
-# 必要なパッケージをインストール
-RUN pip install --no-cache-dir -r ./backend/config/requirements.txt
 
 # フロントエンドのビルド済みファイルをコピー
 COPY ./frontend/dist/ ./frontend/dist/
