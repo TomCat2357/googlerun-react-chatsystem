@@ -126,17 +126,63 @@ async def get_current_user(request: Request):
         raise HTTPException(status_code=401, detail=str(e))
 
 
-# IPガードミドルウェア
 @app.middleware("http")
-async def ip_guard(request: Request, call_next):
+async def response_logger(request: Request, call_next):
     try:
         limit_remote_addr(request)
+        
+        # リクエスト情報をログ
+        logger.info(f'リクエスト: {request.method} {request.url.path}')
+        
+        # レスポンス取得
         response = await call_next(request)
-        logger.info('レスポンスタイプ: %s', str(type(response)))
-        logger.info('レスポンス: %s', str(response))
+        
+        # ステータスコードとヘッダー情報をログ
+        logger.info(f'レスポンス: ステータスコード={response.status_code}')
+        
+        # レスポンスの種類によって処理を分ける
+        if isinstance(response, StreamingResponse):
+            logger.info('レスポンスタイプ: StreamingResponse')
+            logger.info(f'レスポンスヘッダー: {dict(response.headers)}')
+        
+        elif isinstance(response, FileResponse):
+            logger.info('レスポンスタイプ: FileResponse')
+            logger.info(f'ファイルパス: {getattr(response, "path", "不明")}')
+            logger.info(f'レスポンスヘッダー: {dict(response.headers)}')
+            
+        elif isinstance(response, JSONResponse):
+            # JSONレスポンスの場合は内容もログに出力
+            logger.info('レスポンスタイプ: JSONResponse')
+            logger.info(f'レスポンスヘッダー: {dict(response.headers)}')
+            
+            # レスポンスのボディを取得するためにコピーを作成
+            response_body = [chunk async for chunk in response.body_iterator]
+            response.body_iterator = iterate_in_threadpool(iter(response_body))
+            
+            # ボディの内容を結合してデコード
+            body = b"".join(response_body)
+            try:
+                decoded_body = body.decode("utf-8")
+                if len(decoded_body) > 1000:
+                    logger.info(f'レスポンスボディ: {decoded_body[:1000]}... (省略)')
+                else:
+                    logger.info(f'レスポンスボディ: {decoded_body}')
+            except:
+                logger.info(f'レスポンスボディ: バイナリデータ {len(body)} バイト')
+        
+        else:
+            # その他のレスポンスタイプ
+            logger.info(f'レスポンスタイプ: {type(response).__name__}')
+            logger.info(f'レスポンスヘッダー: {dict(response.headers)}')
+            
         return response
+            
     except HTTPException as exc:
+        logger.error(f'HTTPエラー: {exc.status_code} - {exc.detail}')
         return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+    except Exception as e:
+        logger.error(f'予期せぬエラー: {str(e)}', exc_info=True)
+        return JSONResponse(status_code=500, content={"detail": "Internal Server Error"})
 
 
 # リクエストモデル
