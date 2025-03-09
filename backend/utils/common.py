@@ -11,7 +11,7 @@ from google.cloud import secretmanager
 from firebase_admin import auth, credentials
 from typing import Dict, Optional, Any, List, Callable
 from fastapi import HTTPException, Request, Response
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse  # StreamingResponseをインポート
 from starlette.middleware.base import BaseHTTPMiddleware
 from functools import wraps
 from dotenv import load_dotenv
@@ -271,33 +271,34 @@ class RequestResponseLoggerMiddleware(BaseHTTPMiddleware):
         # リクエスト時間を記録
         start_time = time.time()
         
-        # リクエスト情報をログに記録
+        # リクエスト情報をログに記録（簡略化可能）
         await self.log_request(request)
         
         try:
-            # リクエストボディの取得（必要な場合に後で使用するため）
-            body_bytes = await self.get_request_body_copy(request)
-            
             # 実際のリクエスト処理
             response = await call_next(request)
             
             # 処理時間の計算
             process_time = time.time() - start_time
             
-            # レスポンス情報をログに記録
-            self.log_response(response, process_time)
+            # StreamingResponseの場合は特別処理
+            if isinstance(response, StreamingResponse):
+                # 最小限のログのみ記録
+                logger.info(
+                    f"StreamingResponse: status={response.status_code}, "
+                    f"type={response.media_type}, time={round(process_time * 1000, 2)}ms"
+                )
+            else:
+                # 通常のレスポンスはフル記録
+                self.log_response(response, process_time)
             
             # 処理時間をレスポンスヘッダーに追加
             response.headers["X-Process-Time"] = str(round(process_time, 6))
             
             return response
         except Exception as e:
-            # エラー発生時の処理時間
             process_time = time.time() - start_time
-            logger.error(
-                f"リクエスト処理エラー: {str(e)}, 処理時間: {round(process_time * 1000, 2)}ms", 
-                exc_info=True
-            )
+            logger.error(f"エラー: {str(e)}, 時間: {round(process_time * 1000, 2)}ms", exc_info=True)
             raise
     
     async def get_request_body_copy(self, request: Request) -> Optional[bytes]:
