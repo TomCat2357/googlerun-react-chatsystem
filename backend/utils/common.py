@@ -4,13 +4,15 @@ import os
 import base64
 import io
 import ipaddress
+import time
+import json
 from PIL import Image
 from google.cloud import secretmanager
 from firebase_admin import auth, credentials
-from typing import Dict, Optional, Any, List
-from fastapi import HTTPException, Request
-import time
-import json
+from typing import Dict, Optional, Any, List, Callable
+from fastapi import HTTPException, Request, Response
+from fastapi.responses import JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware
 from functools import wraps
 from dotenv import load_dotenv
 
@@ -37,6 +39,9 @@ PORT = int(os.getenv("PORT", '8080'))
 FRONTEND_PATH = os.getenv("FRONTEND_PATH")
 DEBUG = bool(int(os.getenv("DEBUG", "0")))
 
+# ログ設定
+LOG_MAX_BODY_SIZE = int(os.getenv("LOG_MAX_BODY_SIZE", "10240"))  # ログに記録する最大ボディサイズ（デフォルト10KB）
+LOG_MAX_TEXT_LENGTH = int(os.getenv("LOG_MAX_TEXT_LENGTH", "1000"))  # テキストログの最大長さ（デフォルト1000文字）
 
 # CORS設定
 ORIGINS = [org for org in os.getenv("ORIGINS", "").split(",") if org]
@@ -221,14 +226,14 @@ def limit_remote_addr(request: Request):
         remote_addr = remote_addr.split(",")[0].strip()
     try:
         client_ip = ipaddress.ip_address(remote_addr)
-        logger.debug(f"@リクエスト送信元IP: {client_ip}")
+        logger.info(f"@リクエスト送信元IP: {client_ip}")
     except ValueError:
         time.sleep(0.05)
         raise HTTPException(status_code=400, detail="不正なIPアドレス形式です")
 
     # ALLOWED_IPSは.envから取得する設定とする
     allowed_tokens = ALLOWED_IPS
-    logger.debug(f'許可されたIPアドレスまたはネットワーク: {allowed_tokens}')
+    logger.info(f'許可されたIPアドレスまたはネットワーク: {allowed_tokens}')
     allowed_networks = []
     for token in allowed_tokens.split(","):
         token = token.strip()
@@ -255,3 +260,256 @@ def limit_remote_addr(request: Request):
 
     time.sleep(0.05)
     raise HTTPException(status_code=403, detail="アクセスが許可されていません")
+
+
+# =====以下、リクエスト・レスポンスログ取得のための追加クラスと関数=====
+
+class RequestResponseLoggerMiddleware(BaseHTTPMiddleware):
+    """リクエストとレスポンスの詳細をログに記録するミドルウェア"""
+    
+    async def dispatch(self, request: Request, call_next: Callable) -> Response:
+        # リクエスト時間を記録
+        start_time = time.time()
+        
+        # リクエスト情報をログに記録
+        await self.log_request(request)
+        
+        try:
+            # リクエストボディの取得（必要な場合に後で使用するため）
+            body_bytes = await self.get_request_body_copy(request)
+            
+            # 実際のリクエスト処理
+            response = await call_next(request)
+            
+            # 処理時間の計算
+            process_time = time.time() - start_time
+            
+            # レスポンス情報をログに記録
+            self.log_response(response, process_time)
+            
+            # 処理時間をレスポンスヘッダーに追加
+            response.headers["X-Process-Time"] = str(round(process_time, 6))
+            
+            return response
+        except Exception as e:
+            # エラー発生時の処理時間
+            process_time = time.time() - start_time
+            logger.error(
+                f"リクエスト処理エラー: {str(e)}, 処理時間: {round(process_time * 1000, 2)}ms", 
+                exc_info=True
+            )
+            raise
+    
+    async def get_request_body_copy(self, request: Request) -> Optional[bytes]:
+        """リクエストボディのコピーを取得し、リクエストを再利用可能にする"""
+        if request.method not in ["POST", "PUT", "PATCH"]:
+            return None
+        
+        try:
+            # ボディを読み取る
+            body_bytes = await request.body()
+            
+            # ボディを再度使用できるようにリクエストを再設定
+            async def receive():
+                return {"type": "http.request", "body": body_bytes, "more_body": False}
+            request._receive = receive
+            
+            return body_bytes
+        except Exception as e:
+            logger.warning(f"リクエストボディコピー取得エラー: {str(e)}")
+            return None
+    
+    async def log_request(self, request: Request):
+        """リクエスト情報をログに記録する"""
+        try:
+            # クライアントIP取得
+            client_ip = request.headers.get("x-forwarded-for", "")
+            if not client_ip:
+                client_ip = request.client.host if request.client else "unknown"
+            if client_ip and "," in client_ip:
+                client_ip = client_ip.split(",")[0].strip()
+            
+            # リクエストヘッダー（機密情報をマスク）
+            headers = dict(request.headers)
+            masked_headers = self._mask_sensitive_headers(headers)
+            
+            # リクエストURI情報
+            path = request.url.path
+            query_params = dict(request.query_params)
+            method = request.method
+            
+            # リクエストボディ（POSTなどの場合）
+            body_info = None
+            if method in ["POST", "PUT", "PATCH"]:
+                try:
+                    body_bytes = await request.body()
+                    
+                    # ボディを再利用可能にする
+                    async def receive():
+                        return {"type": "http.request", "body": body_bytes, "more_body": False}
+                    request._receive = receive
+                    
+                    # ボディ内容を表示（サイズが環境変数設定値より大きい場合は省略）
+                    if len(body_bytes) > LOG_MAX_BODY_SIZE:
+                        body_info = f"<Binary data: {len(body_bytes) / 1024:.2f} KB>"
+                    else:
+                        try:
+                            body_text = body_bytes.decode("utf-8")
+                            # JSONかどうか確認
+                            try:
+                                json_data = json.loads(body_text)
+                                body_info = self._mask_sensitive_json(json_data)
+                            except:
+                                if len(body_text) > LOG_MAX_TEXT_LENGTH:
+                                    body_info = body_text[:LOG_MAX_TEXT_LENGTH] + "..."
+                                else:
+                                    body_info = body_text
+                        except:
+                            body_info = f"<Binary data: {len(body_bytes)} bytes>"
+                except Exception as e:
+                    body_info = f"<Error reading body: {str(e)}>"
+            
+            # リクエスト情報の構築
+            request_info = {
+                "method": method,
+                "path": path,
+                "query_params": query_params,
+                "client_ip": client_ip,
+                "headers": masked_headers
+            }
+            
+            # ボディ情報があれば追加
+            if body_info:
+                request_info["body"] = body_info
+            
+            # ログ出力
+            logger.info(f"リクエスト受信: {json.dumps(request_info, ensure_ascii=False)}")
+        except Exception as e:
+            logger.error(f"リクエストログ記録エラー: {str(e)}", exc_info=True)
+    
+    def log_response(self, response: Response, process_time: float):
+        """レスポンス情報をログに記録する"""
+        try:
+            # レスポンス情報
+            response_info = {
+                "status_code": response.status_code,
+                "headers": dict(response.headers),
+                "process_time_ms": round(process_time * 1000, 2),
+                "response_type": response.__class__.__name__
+            }
+            
+            # Content-Lengthが存在するならサイズを記録
+            if "content-length" in response.headers:
+                size = int(response.headers["content-length"])
+                response_info["size"] = f"{round(size / 1024, 2)} KB" if size > 1024 else f"{size} bytes"
+            
+            # JSONレスポンスの場合、内容をログ記録（サイズに応じて）
+            if isinstance(response, JSONResponse) and hasattr(response, "body"):
+                try:
+                    body_size = len(response.body)
+                    if body_size <= LOG_MAX_BODY_SIZE:  # 環境変数設定値以下の場合のみ記録
+                        body_text = response.body.decode("utf-8")
+                        try:
+                            json_data = json.loads(body_text)
+                            # 機密情報をマスク
+                            response_info["body"] = self._mask_sensitive_json(json_data)
+                        except:
+                            if len(body_text) > LOG_MAX_TEXT_LENGTH:
+                                response_info["body"] = body_text[:LOG_MAX_TEXT_LENGTH] + "..."
+                            else:
+                                response_info["body"] = body_text
+                    else:
+                        response_info["body"] = f"<Body size: {body_size / 1024:.2f} KB>"
+                except Exception as e:
+                    response_info["body_error"] = str(e)
+            
+            # ログ出力
+            logger.info(f"レスポンス送信: {json.dumps(response_info, ensure_ascii=False)}")
+        except Exception as e:
+            logger.error(f"レスポンスログ記録エラー: {str(e)}", exc_info=True)
+    
+    def _mask_sensitive_headers(self, headers: Dict[str, str]) -> Dict[str, str]:
+        """機密情報を含むヘッダーをマスクする"""
+        sensitive_headers = ["authorization", "cookie", "x-api-key", "api-key"]
+        masked_headers = {}
+        
+        for key, value in headers.items():
+            lowercase_key = key.lower()
+            if lowercase_key in sensitive_headers:
+                if lowercase_key == "authorization" and value.startswith("Bearer "):
+                    masked_headers[key] = "Bearer [MASKED]"
+                else:
+                    masked_headers[key] = "[MASKED]"
+            else:
+                masked_headers[key] = value
+        
+        return masked_headers
+    
+    def _mask_sensitive_json(self, data: Any) -> Any:
+        """JSONデータ内の機密情報をマスクする"""
+        if isinstance(data, dict):
+            masked_data = {}
+            sensitive_keys = ["password", "token", "secret", "key", "authorization", "credential"]
+            
+            for key, value in data.items():
+                lowercase_key = key.lower()
+                if any(sensitive in lowercase_key for sensitive in sensitive_keys):
+                    masked_data[key] = "[MASKED]"
+                else:
+                    masked_data[key] = self._mask_sensitive_json(value)
+            return masked_data
+        elif isinstance(data, list):
+            return [self._mask_sensitive_json(item) for item in data]
+        else:
+            return data
+
+
+async def enhanced_ip_guard(request: Request, call_next):
+    """IPアドレス制限とログ記録を行うミドルウェア関数"""
+    # リクエスト時間を記録
+    start_time = time.time()
+    
+    try:
+        # リクエスト情報（短縮バージョン）
+        method = request.method
+        path = request.url.path
+        client_ip = request.headers.get("X-Forwarded-For", "")
+        if not client_ip:
+            client_ip = request.client.host if request.client else "unknown"
+        if client_ip and "," in client_ip:
+            client_ip = client_ip.split(",")[0].strip()
+        
+        logger.debug(f"IPガード処理: {method} {path} from {client_ip}")
+        
+        # IPアドレス制限のチェック
+        limit_remote_addr(request)
+        
+        # 実際のリクエスト処理
+        response = await call_next(request)
+        
+        # 処理時間の計算
+        process_time = time.time() - start_time
+        
+        # 処理時間をレスポンスヘッダーに追加（すでに追加されていない場合）
+        if "X-Process-Time" not in response.headers:
+            response.headers["X-Process-Time"] = str(round(process_time, 6))
+        
+        # 短縮バージョンのレスポンスログ
+        logger.debug(
+            f"IPガード許可: {method} {path} from {client_ip} -> {response.status_code} "
+            f"(処理時間: {round(process_time * 1000, 2)}ms)"
+        )
+        
+        return response
+    except HTTPException as exc:
+        # エラー処理時間の計算
+        process_time = time.time() - start_time
+        
+        # エラーログ出力
+        logger.error(
+            f"IPアクセス制限エラー: status_code={exc.status_code}, detail={exc.detail}, "
+            f"process_time={round(process_time * 1000, 2)}ms"
+        )
+        
+        # エラーレスポンスの作成
+        return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})

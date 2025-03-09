@@ -43,6 +43,9 @@ from utils.common import (
     IMAGEN_SAFETY_FILTER_LEVELS,
     IMAGEN_PERSON_GENERATIONS,
     get_api_key_for_model,
+    # 新しく追加
+    RequestResponseLoggerMiddleware,
+    enhanced_ip_guard,
 )
 
 # 新規追加
@@ -94,16 +97,19 @@ except ValueError:
 # FastAPIアプリケーションの初期化
 app = FastAPI()
 
+# リクエスト・レスポンスロギングミドルウェアの追加
+app.add_middleware(RequestResponseLoggerMiddleware)
+
 # 接続マネージャのインスタンス作成
 manager = ConnectionManager()
 
-logger.debug("ORIGINS: %s", ORIGINS)
+logger.info("ORIGINS: %s", ORIGINS)
 
 # FastAPIのCORS設定
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ORIGINS,
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["Content-Type", "Authorization"],
     expose_headers=["Authorization"],
@@ -126,15 +132,10 @@ async def get_current_user(request: Request):
         raise HTTPException(status_code=401, detail=str(e))
 
 
-# IPガードミドルウェア
+# IPガードミドルウェア - enhanced_ip_guardに置き換え
 @app.middleware("http")
 async def ip_guard(request: Request, call_next):
-    try:
-        limit_remote_addr(request)
-        response = await call_next(request)
-        return response
-    except HTTPException as exc:
-        return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+    return await enhanced_ip_guard(request, call_next)
 
 
 # リクエストモデル
