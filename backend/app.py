@@ -132,6 +132,8 @@ async def ip_guard(request: Request, call_next):
     try:
         limit_remote_addr(request)
         response = await call_next(request)
+        logger.info('レスポンスタイプ: %s', str(type(response)))
+        logger.info('レスポンス: %s', str(response))
         return response
     except HTTPException as exc:
         return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
