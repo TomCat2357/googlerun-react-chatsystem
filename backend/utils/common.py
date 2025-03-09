@@ -39,7 +39,7 @@ DEBUG = bool(int(os.getenv("DEBUG", "0")))
 
 
 # CORS設定
-ORIGINS = [org for org in os.getenv("ORIGINS").split(",") if org]
+ORIGINS = [org for org in os.getenv("ORIGINS", "").split(",") if org]
 
 # IPアクセス制限
 ALLOWED_IPS = os.getenv("ALLOWED_IPS")
