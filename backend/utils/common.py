@@ -33,9 +33,10 @@ logger = logging.getLogger(__name__)
 CHUNK_STORE = {}
 
 # ===== アプリケーション設定 =====
-PORT = int(os.getenv("PORT"))
+PORT = int(os.getenv("PORT", '8080'))
 FRONTEND_PATH = os.getenv("FRONTEND_PATH")
 DEBUG = bool(int(os.getenv("DEBUG", "0")))
+
 
 # CORS設定
 ORIGINS = [org for org in os.getenv("ORIGINS").split(",") if org]
