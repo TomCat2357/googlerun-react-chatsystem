@@ -3,7 +3,7 @@ FROM python:3.11-slim
 WORKDIR /app
 
 # ビルド時にARGで環境変数を受け取る
-ARG PORT=8000
+ARG PORT=8080
 ARG DEBUG=0
 ARG MODE=production
 

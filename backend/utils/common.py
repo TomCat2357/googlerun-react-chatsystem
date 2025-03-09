@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 CHUNK_STORE = {}
 
 # ===== アプリケーション設定 =====
-PORT = int(os.getenv("PORT", '8000'))
+PORT = int(os.getenv("PORT", '8080'))
 FRONTEND_PATH = os.getenv("FRONTEND_PATH")
 DEBUG = bool(int(os.getenv("DEBUG", "0")))
 
