@@ -19,7 +19,7 @@ async def process_geocoding(
     options: Dict[str, Any]
 ):
     """
-    ジオコーディング処理のメイン関数
+    ジオコーディング処理のメイン関数（WebSocket用）
     """
     google_maps_api_key = get_google_maps_api_key()
     timestamp = int(time.time() * 1000)

@@ -71,7 +71,7 @@ from utils.websocket_manager import (
     WebSocketMessageType,
     verify_token,
 )
-from utils.geocoding_service import process_geocoding
+from utils.geocoding_service import process_geocoding, process_single_geocode, process_map_images
 from utils.chat_utils import common_message_function
 from utils.speech2text import transcribe_streaming_v2
 from utils.generate_image import generate_image
@@ -247,6 +247,107 @@ async def websocket_geocoding(websocket: WebSocket):
             logger.debug(f"クライアント {client_id} との接続を解除しました")
         except Exception as e:
             logger.error(f"接続解除エラー: {str(e)}")
+
+
+# 新しいRESTful APIエンドポイント - ジオコーディング
+@app.post("/backend/geocoding")
+async def geocoding_endpoint(
+    request: GeocodeRequest,
+    current_user: Dict = Depends(get_current_user)
+):
+    """
+    ジオコーディングのための新しいRESTfulエンドポイント
+    """
+    mode = request.mode
+    lines = request.lines
+    options = request.options
+    
+    # 上限件数のチェック
+    max_batch_size = (
+        GEOCODING_WITH_IMAGE_MAX_BATCH_SIZE
+        if options.get("showSatellite") or options.get("showStreetView")
+        else GEOCODING_NO_IMAGE_MAX_BATCH_SIZE
+    )
+
+    if len(lines) > max_batch_size:
+        raise HTTPException(
+            status_code=400,
+            detail=f"入力された件数は{len(lines)}件ですが、1回の送信で取得可能な上限は{max_batch_size}件です。"
+        )
+    
+    from utils.common import get_google_maps_api_key
+    google_maps_api_key = get_google_maps_api_key()
+    timestamp = int(time.time() * 1000)
+    
+    # StreamingResponseを使って結果を非同期的に返す
+    async def generate_results():
+        for idx, line in enumerate(lines):
+            query = line.strip()
+            if not query:
+                continue
+            
+            # ジオコーディング処理
+            result = await process_single_geocode(
+                google_maps_api_key, 
+                mode, 
+                query, 
+                timestamp
+            )
+            
+            # 結果をJSON形式で返す
+            yield json.dumps({
+                "type": "GEOCODE_RESULT",
+                "payload": {
+                    "index": idx,
+                    "result": result,
+                    "progress": int((idx + 1) / len(lines) * 50)  # 50%までがジオコーディング処理
+                }
+            }) + "\n"
+            
+            # 画像取得処理（緯度経度が有効な場合のみ）
+            show_satellite = options.get("showSatellite", False)
+            show_street_view = options.get("showStreetView", False)
+            
+            if (show_satellite or show_street_view) and result["latitude"] is not None and result["longitude"] is not None:
+                satellite_image, street_view_image = await process_map_images(
+                    google_maps_api_key,
+                    result["latitude"],
+                    result["longitude"],
+                    show_satellite,
+                    show_street_view,
+                    options.get("satelliteZoom", 18),
+                    options.get("streetViewHeading"),
+                    options.get("streetViewPitch", 0),
+                    options.get("streetViewFov", 90)
+                )
+                
+                # 画像結果を返す
+                if satellite_image or street_view_image:
+                    progress = 50 + int((idx + 1) / len(lines) * 50)  # 残りの50%は画像処理
+                    yield json.dumps({
+                        "type": "IMAGE_RESULT",
+                        "payload": {
+                            "index": idx,
+                            "satelliteImage": satellite_image,
+                            "streetViewImage": street_view_image,
+                            "progress": progress
+                        }
+                    }) + "\n"
+            
+            # 処理間隔を空ける（レート制限対策）
+            await asyncio.sleep(0.1)
+        
+        # 全ての処理が完了したことを通知
+        yield json.dumps({
+            "type": "COMPLETE",
+            "payload": {}
+        }) + "\n"
+    
+    return StreamingResponse(
+        generate_results(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Transfer-Encoding": "chunked"}
+    )
 
 
 # テスト用のWebSocketエンドポイント

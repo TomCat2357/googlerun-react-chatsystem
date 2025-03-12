@@ -7,19 +7,17 @@ import * as Encoding from "encoding-japanese";
 import { MapControls } from "./MapControls";
 import { imageCache } from "../../utils/imageCache";
 
-// WebSocketメッセージタイプの定義
-enum WebSocketMessageType {
-  GEOCODE_REQUEST = "GEOCODE_REQUEST",
+// メッセージタイプの定義（WebSocketと互換性を保つ）
+enum MessageType {
   GEOCODE_RESULT = "GEOCODE_RESULT",
-  IMAGE_REQUEST = "IMAGE_REQUEST",
   IMAGE_RESULT = "IMAGE_RESULT",
   ERROR = "ERROR",
   COMPLETE = "COMPLETE",
 }
 
-// WebSocketメッセージインターフェース
-interface WebSocketMessage {
-  type: WebSocketMessageType;
+// メッセージインターフェース
+interface Message {
+  type: MessageType;
   payload: any;
 }
 
@@ -48,6 +46,7 @@ export interface GeoResult {
 const GOOGLE_MAPS_API_CACHE_TTL = Number(
   Config.getServerConfig().GOOGLE_MAPS_API_CACHE_TTL || 86400000
 );
+
 // IndexedDB用の関数（GeocodeCacheDB）
 function openCacheDB(): Promise<IDBDatabase> {
   return indexedDBUtils.openDB("GeocodeCacheDB", 1, (db) => {
@@ -132,16 +131,12 @@ const GeocodingPage = () => {
   const [isSending, setIsSending] = useState(false);
   const [results, setResults] = useState<GeoResult[]>([]);
   const [inputMode, setInputMode] = useState<"address" | "latlng">("address");
-  const [csvEncoding, setCsvEncoding] = useState<"utf8" | "shift-jis">(
-    "shift-jis"
-  );
-  const [progress, setProgress] = useState(0); // 処理進捗率
+  const [csvEncoding, setCsvEncoding] = useState<"utf8" | "shift-jis">("shift-jis");
+  const [progress, setProgress] = useState(0);
 
-  // WebSocket関連のstate
-  const [isConnected, setIsConnected] = useState(false);
-  const [connectionError, setConnectionError] = useState("");
-  const socketRef = useRef<WebSocket | null>(null);
-
+  // エラー関連のstate
+  const [fetchError, setFetchError] = useState("");
+  
   // 地図表示用のstate
   const [showSatellite, setShowSatellite] = useState(false);
   const [showStreetView, setShowStreetView] = useState(false);
@@ -153,164 +148,23 @@ const GeocodingPage = () => {
 
   const token = useToken();
 
-  // useTokenフックを監視するだけで、自動接続はしない
-  useEffect(() => {
-    if (token) {
-      console.log("認証トークンが取得できました");
-    } else {
-      console.log("認証トークン取得待機中...");
-    }
-  }, [token]);
+  // リクエストの中止用コントローラー
+  const abortControllerRef = useRef<AbortController | null>(null);
 
-  // WebSocketの接続を確立する関数
-  const connectWebSocket = (): Promise<boolean> => {
-    return new Promise((resolve) => {
-      if (
-        socketRef.current &&
-        (socketRef.current.readyState === WebSocket.OPEN ||
-          socketRef.current.readyState === WebSocket.CONNECTING)
-      ) {
-        console.log("既存のWebSocket接続を使用します");
-        resolve(true);
-        return;
-      }
-
-      // 接続URLの明示的な指定（開発環境と本番環境で分ける）
-      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-      let wsUrl: string;
-
-      if (process.env.NODE_ENV === "development") {
-        // 開発環境では明示的なポート指定
-        wsUrl = `${protocol}//localhost:8080/ws/geocoding`;
-        console.log(`開発環境WebSocket URL: ${wsUrl}`);
-      } else {
-        // 本番環境
-        wsUrl = `${protocol}//${window.location.host}/ws/geocoding`;
-        console.log(`本番環境WebSocket URL: ${wsUrl}`);
-      }
-
-      // WebSocket接続前の状態初期化
-      setConnectionError("");
-
-      try {
-        console.log(`WebSocket接続試行: ${wsUrl}`);
-        socketRef.current = new WebSocket(wsUrl);
-
-        socketRef.current.onopen = () => {
-          console.log("WebSocket接続が確立されました");
-          setIsConnected(true);
-          setConnectionError("");
-
-          // 認証メッセージを送信
-          if (socketRef.current && token) {
-            console.log("WebSocket認証メッセージ送信");
-            try {
-              socketRef.current.send(
-                JSON.stringify({
-                  type: "AUTH",
-                  payload: { token },
-                })
-              );
-              console.log("認証メッセージ送信完了");
-            } catch (err) {
-              console.error("認証メッセージ送信エラー:", err);
-              setConnectionError("認証メッセージ送信エラー");
-              socketRef.current?.close();
-              resolve(false);
-              return;
-            }
-          } else {
-            console.error(
-              "認証トークンが取得できないか、WebSocket接続が確立されていません"
-            );
-            setConnectionError("認証情報が取得できません");
-            resolve(false);
-            return;
-          }
-          resolve(true);
-        };
-
-        socketRef.current.onmessage = (event) => {
-          console.log(
-            `WebSocketメッセージ受信: ${event.data.substring(0, 100)}...`
-          );
-          try {
-            const message: WebSocketMessage = JSON.parse(event.data);
-            handleWebSocketMessage(message);
-          } catch (error) {
-            console.error("WebSocketメッセージの解析エラー:", error);
-          }
-        };
-
-        socketRef.current.onerror = (error) => {
-          console.error("WebSocketエラー:", error);
-          setConnectionError(`WebSocket接続エラー: [object Event]`);
-          setIsConnected(false);
-          resolve(false);
-        };
-
-        socketRef.current.onclose = (event) => {
-          console.log(
-            `WebSocket接続が閉じられました: コード=${event.code}, 理由=${event.reason}`
-          );
-          setIsConnected(false);
-
-          // 接続が拒否された場合のエラーメッセージを明確に
-          if (event.code === 1006) {
-            setConnectionError(
-              "WebSocket接続が拒否されました。サーバーが正しく起動しているか確認してください。"
-            );
-          } else if (event.reason) {
-            setConnectionError(`WebSocket切断: ${event.reason}`);
-          }
-
-          resolve(false);
-        };
-
-        // 接続タイムアウトの設定
-        setTimeout(() => {
-          if (
-            socketRef.current &&
-            socketRef.current.readyState !== WebSocket.OPEN
-          ) {
-            console.error("WebSocket接続タイムアウト");
-            setConnectionError("WebSocket接続がタイムアウトしました");
-            resolve(false);
-          }
-        }, 10000); // タイムアウト時間を10秒に延長
-      } catch (error) {
-        console.error("WebSocket接続の確立に失敗しました:", error);
-        setConnectionError(`WebSocket接続の確立に失敗: ${error}`);
-        setIsConnected(false);
-        resolve(false);
-      }
-    });
-  };
-
-  // WebSocketを切断する関数
-  const disconnectWebSocket = () => {
-    if (socketRef.current) {
-      socketRef.current.close();
-      socketRef.current = null;
-      setIsConnected(false);
-      console.log("WebSocket接続を切断しました");
-    }
-  };
-
-  // WebSocketメッセージを処理する関数
-  const handleWebSocketMessage = (message: WebSocketMessage) => {
-    console.log(`WebSocketメッセージ処理: ${message.type}`);
+  // メッセージ処理関数
+  const handleMessage = (message: Message) => {
+    console.log(`メッセージ処理: ${message.type}`);
     switch (message.type) {
-      case WebSocketMessageType.GEOCODE_RESULT:
+      case MessageType.GEOCODE_RESULT:
         handleGeocodeResult(message.payload);
         break;
-      case WebSocketMessageType.IMAGE_RESULT:
+      case MessageType.IMAGE_RESULT:
         handleImageResult(message.payload);
         break;
-      case WebSocketMessageType.ERROR:
+      case MessageType.ERROR:
         handleError(message.payload);
         break;
-      case WebSocketMessageType.COMPLETE:
+      case MessageType.COMPLETE:
         handleComplete(message.payload);
         break;
       default:
@@ -422,11 +276,10 @@ const GeocodingPage = () => {
 
   // エラーを処理する関数
   const handleError = (payload: any) => {
-    console.error("WebSocketエラー:", payload);
+    console.error("エラー:", payload);
     alert(`エラーが発生しました: ${payload.message || "不明なエラー"}`);
     setIsSending(false);
-    // エラー発生時は接続を切断
-    disconnectWebSocket();
+    setFetchError(payload.message || "不明なエラー");
   };
 
   // 処理完了を処理する関数
@@ -434,43 +287,325 @@ const GeocodingPage = () => {
     console.log("処理が完了しました:", payload);
     setIsSending(false);
     setProgress(100);
-
-    // 処理完了後に接続を切断（必要時接続型のため）
-    disconnectWebSocket();
   };
 
-  // WebSocketを通じてジオコーディングリクエストを送信する関数
-  const sendGeocodeRequest = (
-    _lines: string[],
-    queryToIndexMap: Map<string, number[]>
-  ) => {
-    if (!socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) {
-      alert("WebSocket接続が確立されていません。再試行してください。");
+  // HTTPリクエストを使用してジオコーディングを行う
+  const fetchGeocodingResults = async (lines: string[], queryToIndexMap: Map<string, number[]>) => {
+    if (!token) {
+      alert("認証トークンが取得できません。再ログインしてください。");
       return false;
     }
 
-    // 重複排除して一意のクエリだけを送信
-    const uniqueLines = Array.from(queryToIndexMap.keys());
+    try {
+      // 重複排除して一意のクエリだけを送信
+      const uniqueLines = Array.from(queryToIndexMap.keys());
 
-    const request: WebSocketMessage = {
-      type: WebSocketMessageType.GEOCODE_REQUEST,
-      payload: {
+      // リクエストの設定
+      const options = {
+        showSatellite,
+        showStreetView,
+        satelliteZoom,
+        streetViewHeading: streetViewNoHeading ? null : streetViewHeading,
+        streetViewPitch,
+        streetViewFov,
+      };
+
+      // APIエンドポイントのURL
+      const endpoint = 
+        process.env.NODE_ENV === "development" 
+          ? "http://localhost:8080/backend/geocoding"
+          : "/backend/geocoding";
+
+      // 中止用のコントローラーを作成
+      abortControllerRef.current = new AbortController();
+      
+      // リクエストヘッダー
+      const headers = {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      };
+
+      // リクエストボディ
+      const body = JSON.stringify({
         mode: inputMode,
         lines: uniqueLines,
-        options: {
-          showSatellite,
-          showStreetView,
-          satelliteZoom,
-          streetViewHeading: streetViewNoHeading ? null : streetViewHeading,
-          streetViewPitch,
-          streetViewFov,
-        },
-      },
-    };
+        options,
+      });
 
-    console.log("ジオコーディングリクエスト送信:", request);
-    socketRef.current.send(JSON.stringify(request));
-    return true;
+      // fetchリクエストを開始
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers,
+        body,
+        signal: abortControllerRef.current.signal,
+      });
+
+      // エラーチェック
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`APIエラー (${response.status}): ${errorText}`);
+      }
+
+      // StreamingResponseを読み込む
+      const reader = response.body?.getReader();
+      if (!reader) {
+        throw new Error("レスポンスボディを読み取れません");
+      }
+
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      // ストリームを読み込む
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        // バッファに追加
+        buffer += decoder.decode(value, { stream: true });
+
+        // 完全なJSONメッセージを処理
+        let newlineIndex;
+        while ((newlineIndex = buffer.indexOf("\n")) !== -1) {
+          const messageText = buffer.slice(0, newlineIndex);
+          buffer = buffer.slice(newlineIndex + 1);
+
+          try {
+            const message = JSON.parse(messageText);
+            
+            // オリジナルインデックスの変換処理
+            if (message.type === MessageType.GEOCODE_RESULT || message.type === MessageType.IMAGE_RESULT) {
+              const serverIndex = message.payload.index;
+              const query = uniqueLines[serverIndex];
+              const indices = queryToIndexMap.get(query) || [];
+              
+              // 各インデックスで結果を更新
+              indices.forEach((idx) => {
+                const modifiedPayload = {
+                  ...message.payload,
+                  index: idx,
+                };
+                
+                // 適切なハンドラーを呼び出す
+                handleMessage({
+                  type: message.type,
+                  payload: modifiedPayload,
+                });
+              });
+            } else {
+              // その他のメッセージタイプはそのまま処理
+              handleMessage(message);
+            }
+          } catch (e) {
+            console.error("JSONパースエラー:", e, messageText);
+          }
+        }
+      }
+
+      return true;
+    } catch (error) {
+      if (error.name === "AbortError") {
+        console.log("リクエストがキャンセルされました");
+      } else {
+        console.error("ジオコーディングリクエストエラー:", error);
+        setFetchError(error.message);
+        alert(`エラーが発生しました: ${error.message}`);
+      }
+      return false;
+    }
+  };
+
+  // 送信処理
+  const handleSendLines = async () => {
+    const allLines = inputText
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0);
+
+    if (allLines.length === 0) return;
+
+    // 画像表示の有無に応じた上限件数を設定
+    const maxBatchSize =
+      showSatellite || showStreetView
+        ? Config.getServerConfig().GEOCODING_WITH_IMAGE_MAX_BATCH_SIZE
+        : Config.getServerConfig().GEOCODING_NO_IMAGE_MAX_BATCH_SIZE;
+
+    if (allLines.length > maxBatchSize) {
+      alert(
+        `入力された件数は${allLines.length}件ですが、1回の送信で取得可能な上限は${maxBatchSize}件です。\n` +
+          `件数を減らして再度送信してください。`
+      );
+      return;
+    }
+
+    setIsSending(true);
+    setProgress(0);
+    setFetchError("");
+
+    // 初期結果配列とクエリーマッピングの準備
+    const initialResults: GeoResult[] = [];
+
+    // 重複管理: クエリー -> インデックスリストのマップ
+    const queryToIndexMap = new Map<string, number[]>();
+
+    // 先にキャッシュチェックして初期結果を設定
+    const timestamp = Date.now();
+    const linesToSend: string[] = [];
+
+    // 各行についてキャッシュをチェック
+    for (let i = 0; i < allLines.length; i++) {
+      const line = allLines[i];
+
+      // キャッシュチェック
+      const cachedResult = await getCachedResult(line);
+
+      if (cachedResult && cachedResult.fetchedAt) {
+        // キャッシュがある場合は、それを使用
+        console.log(
+          `キャッシュ利用: ${line}, 取得日時=${new Date(
+            cachedResult.fetchedAt
+          ).toLocaleString()}`
+        );
+        initialResults.push({
+          ...cachedResult,
+          isCached: true,
+          imageLoading: false,
+        });
+
+        // 画像キャッシュをチェック
+        if (
+          (showSatellite || showStreetView) &&
+          cachedResult.latitude !== null &&
+          cachedResult.longitude !== null
+        ) {
+          const options = {
+            satelliteZoom,
+            streetViewHeading: streetViewNoHeading ? null : streetViewHeading,
+            streetViewPitch,
+            streetViewFov,
+            streetViewNoHeading,
+          };
+
+          let needImageRequest = false;
+
+          // 衛星画像キャッシュをチェック
+          if (showSatellite) {
+            const cachedSatelliteImage = getCachedImage(
+              cachedResult.latitude,
+              cachedResult.longitude,
+              options,
+              "satellite"
+            );
+
+            if (cachedSatelliteImage) {
+              initialResults[i].satelliteImage = cachedSatelliteImage;
+            } else {
+              needImageRequest = true;
+            }
+          }
+
+          // ストリートビュー画像キャッシュをチェック
+          if (showStreetView) {
+            const cachedStreetViewImage = getCachedImage(
+              cachedResult.latitude,
+              cachedResult.longitude,
+              options,
+              "streetview"
+            );
+
+            if (cachedStreetViewImage) {
+              initialResults[i].streetViewImage = cachedStreetViewImage;
+            } else {
+              needImageRequest = true;
+            }
+          }
+
+          // 画像リクエストが必要な場合のみ imageLoading フラグを設定
+          if (needImageRequest) {
+            initialResults[i].imageLoading = true;
+
+            // クエリーマッピングに追加（画像だけを取得するため）
+            if (!queryToIndexMap.has(line)) {
+              queryToIndexMap.set(line, [i]);
+              linesToSend.push(line);
+            } else {
+              queryToIndexMap.get(line)?.push(i);
+            }
+          }
+        }
+      } else {
+        // キャッシュがない場合は、初期状態を設定
+        initialResults.push({
+          query: line,
+          status: "PROCESSING",
+          formatted_address: "",
+          latitude: null,
+          longitude: null,
+          location_type: "",
+          place_id: "",
+          types: "",
+          isProcessing: true,
+          mode: inputMode as "address" | "latlng",
+          fetchedAt: timestamp,
+        });
+
+        // クエリーマッピングに追加
+        if (!queryToIndexMap.has(line)) {
+          queryToIndexMap.set(line, [i]);
+          linesToSend.push(line);
+        } else {
+          queryToIndexMap.get(line)?.push(i);
+        }
+      }
+    }
+
+    // 初期結果を設定
+    setResults(initialResults);
+
+    // サーバーに送信するクエリがある場合のみ処理
+    if (linesToSend.length > 0) {
+      console.log(`重複排除後のクエリ数: ${linesToSend.length}件`);
+
+      // HTTPリクエストを実行
+      const success = await fetchGeocodingResults(linesToSend, queryToIndexMap);
+      if (!success) {
+        setIsSending(false);
+      }
+    } else {
+      // すべてキャッシュヒットの場合は即時完了
+      console.log(
+        "すべてキャッシュから取得済み。APIリクエストは不要です。"
+      );
+      // すべての結果で imageLoading フラグを確実に false に設定
+      setResults(
+        initialResults.map((result) => ({
+          ...result,
+          imageLoading: false,
+        }))
+      );
+      setIsSending(false);
+      setProgress(100);
+    }
+  };
+
+  // 処理中断ハンドラー
+  const handleCancelRequest = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+      setIsSending(false);
+    }
+  };
+
+  // 結果クリアボタンのハンドラー
+  const handleClearResults = () => {
+    setResults([]);
+    setProgress(0);
+  };
+
+  // テキストボックスクリアボタンのハンドラー
+  const handleClearText = () => {
+    setInputText("");
+    setLineCount(0);
   };
 
   // テキストエリアの内容変更時処理
@@ -554,321 +689,20 @@ const GeocodingPage = () => {
     window.URL.revokeObjectURL(url);
   };
 
-  // 送信処理（WebSocketを使用）- キャッシュ対応により必要時のみWebSocket接続
-  const handleSendLines = async () => {
-    const allLines = inputText
-      .split("\n")
-      .map((line) => line.trim())
-      .filter((line) => line.length > 0);
-
-    if (allLines.length === 0) return;
-
-    // 画像表示の有無に応じた上限件数を設定
-    const maxBatchSize =
-      showSatellite || showStreetView
-        ? Config.getServerConfig().GEOCODING_WITH_IMAGE_MAX_BATCH_SIZE
-        : Config.getServerConfig().GEOCODING_NO_IMAGE_MAX_BATCH_SIZE;
-
-    if (allLines.length > maxBatchSize) {
-      alert(
-        `入力された件数は${allLines.length}件ですが、1回の送信で取得可能な上限は${maxBatchSize}件です。\n` +
-          `件数を減らして再度送信してください。`
-      );
-      return;
-    }
-
-    setIsSending(true);
-    setProgress(0);
-
-    // 初期結果配列とクエリーマッピングの準備
-    const initialResults: GeoResult[] = [];
-
-    // 重複管理: クエリー -> インデックスリストのマップ
-    const queryToIndexMap = new Map<string, number[]>();
-
-    // 結果のマッピング: オリジナルインデックス -> サーバーへの要求インデックス
-    const originalToServerIndexMap = new Map<number, number>();
-
-    // 先にキャッシュチェックして初期結果を設定
-    const timestamp = Date.now();
-    const linesToSend: string[] = [];
-
-    // 各行についてキャッシュをチェック
-    for (let i = 0; i < allLines.length; i++) {
-      const line = allLines[i];
-
-      // キャッシュチェック
-      const cachedResult = await getCachedResult(line);
-
-      if (cachedResult && cachedResult.fetchedAt) {
-        // キャッシュがある場合は、それを使用
-        console.log(
-          `キャッシュ利用: ${line}, 取得日時=${new Date(
-            cachedResult.fetchedAt
-          ).toLocaleString()}`
-        );
-        initialResults.push({
-          ...cachedResult,
-          isCached: true,
-          imageLoading: false, // デフォルトでfalseに設定
-        });
-
-        // 画像キャッシュをチェック
-        if (
-          (showSatellite || showStreetView) &&
-          cachedResult.latitude !== null &&
-          cachedResult.longitude !== null
-        ) {
-          const options = {
-            satelliteZoom,
-            streetViewHeading: streetViewNoHeading ? null : streetViewHeading,
-            streetViewPitch,
-            streetViewFov,
-            streetViewNoHeading,
-          };
-
-          let needImageRequest = false;
-
-          // 衛星画像キャッシュをチェック
-          if (showSatellite) {
-            const cachedSatelliteImage = getCachedImage(
-              cachedResult.latitude,
-              cachedResult.longitude,
-              options,
-              "satellite"
-            );
-
-            if (cachedSatelliteImage) {
-              initialResults[i].satelliteImage = cachedSatelliteImage;
-            } else {
-              needImageRequest = true;
-            }
-          }
-
-          // ストリートビュー画像キャッシュをチェック
-          if (showStreetView) {
-            const cachedStreetViewImage = getCachedImage(
-              cachedResult.latitude,
-              cachedResult.longitude,
-              options,
-              "streetview"
-            );
-
-            if (cachedStreetViewImage) {
-              initialResults[i].streetViewImage = cachedStreetViewImage;
-            } else {
-              needImageRequest = true;
-            }
-          }
-
-          // 画像リクエストが必要な場合のみ imageLoading フラグを設定
-          if (needImageRequest) {
-            initialResults[i].imageLoading = true;
-
-            // クエリーマッピングに追加（画像だけを取得するため）
-            if (!queryToIndexMap.has(line)) {
-              queryToIndexMap.set(line, [i]);
-              originalToServerIndexMap.set(i, linesToSend.length);
-              linesToSend.push(line);
-            } else {
-              queryToIndexMap.get(line)?.push(i);
-            }
-          }
-        }
-      } else {
-        // キャッシュがない場合は、初期状態を設定
-        initialResults.push({
-          query: line,
-          status: "PROCESSING",
-          formatted_address: "",
-          latitude: null,
-          longitude: null,
-          location_type: "",
-          place_id: "",
-          types: "",
-          isProcessing: true,
-          mode: inputMode as "address" | "latlng",
-          fetchedAt: timestamp,
-        });
-
-        // クエリーマッピングに追加
-        if (!queryToIndexMap.has(line)) {
-          queryToIndexMap.set(line, [i]);
-          originalToServerIndexMap.set(i, linesToSend.length);
-          linesToSend.push(line);
-        } else {
-          queryToIndexMap.get(line)?.push(i);
-        }
-      }
-    }
-
-    // 初期結果を設定
-    setResults(initialResults);
-
-    // サーバーに送信するクエリがある場合のみ処理
-    if (linesToSend.length > 0) {
-      console.log(`重複排除後のクエリ数: ${linesToSend.length}件`);
-
-      // ここでWebSocket接続を行う（必要な場合のみ）
-      console.log("WebSocketに接続を試みます...");
-      const connected = await connectWebSocket();
-      if (!connected) {
-        alert(
-          "WebSocket接続が確立できませんでした。ネットワーク状態を確認してください。"
-        );
-        setIsSending(false);
-        return;
-      }
-
-      // オリジナルの結果配列をWebSocketのcallbackで更新するための準備
-      const originalHandleGeocodeResult = handleGeocodeResult;
-      const originalHandleImageResult = handleImageResult;
-
-      // WebSocketのcallbackを一時的に上書き
-      const newHandleGeocodeResult = (payload: any) => {
-        const serverIndex = payload.index;
-
-        // 対応するオリジナルインデックスを見つける
-        for (const [origIdx, srvIdx] of originalToServerIndexMap.entries()) {
-          if (srvIdx === serverIndex) {
-            const result = { ...payload.result };
-
-            // 該当するクエリを持つすべての結果を更新
-            const query = allLines[origIdx];
-            const indices = queryToIndexMap.get(query) || [];
-
-            // 各インデックスで結果を更新
-            indices.forEach((idx) => {
-              const modifiedPayload = {
-                ...payload,
-                index: idx,
-                result,
-              };
-              originalHandleGeocodeResult(modifiedPayload);
-            });
-
-            break;
-          }
-        }
-      };
-
-      const newHandleImageResult = (payload: any) => {
-        const serverIndex = payload.index;
-
-        // 対応するオリジナルインデックスを見つける
-        for (const [origIdx, srvIdx] of originalToServerIndexMap.entries()) {
-          if (srvIdx === serverIndex) {
-            // 該当するクエリを持つすべての結果を更新
-            const query = allLines[origIdx];
-            const indices = queryToIndexMap.get(query) || [];
-
-            // 各インデックスで画像結果を更新
-            indices.forEach((idx) => {
-              const modifiedPayload = {
-                ...payload,
-                index: idx,
-              };
-              originalHandleImageResult(modifiedPayload);
-            });
-
-            break;
-          }
-        }
-      };
-
-      // 一時的にハンドラーを置き換え
-      const tempHandleWebSocketMessage = (message: WebSocketMessage) => {
-        console.log(`WebSocketメッセージ処理（変換）: ${message.type}`);
-        switch (message.type) {
-          case WebSocketMessageType.GEOCODE_RESULT:
-            newHandleGeocodeResult(message.payload);
-            break;
-          case WebSocketMessageType.IMAGE_RESULT:
-            newHandleImageResult(message.payload);
-            break;
-          case WebSocketMessageType.ERROR:
-            handleError(message.payload);
-            break;
-          case WebSocketMessageType.COMPLETE:
-            handleComplete(message.payload);
-            // 元のハンドラーに戻す
-            if (socketRef.current) {
-              socketRef.current.onmessage = (event) => {
-                try {
-                  const message: WebSocketMessage = JSON.parse(event.data);
-                  handleWebSocketMessage(message);
-                } catch (error) {
-                  console.error("WebSocketメッセージの解析エラー:", error);
-                }
-              };
-            }
-            break;
-          default:
-            console.warn("不明なメッセージタイプ:", message.type);
-        }
-      };
-
-      // WebSocketメッセージハンドラーを一時的に置き換え
-      if (socketRef.current) {
-        socketRef.current.onmessage = (event) => {
-          try {
-            const message: WebSocketMessage = JSON.parse(event.data);
-            tempHandleWebSocketMessage(message);
-          } catch (error) {
-            console.error("WebSocketメッセージの解析エラー:", error);
-          }
-        };
-      }
-
-      // WebSocketを通じてリクエストを送信
-      const sent = sendGeocodeRequest(linesToSend, queryToIndexMap);
-      if (!sent) {
-        setIsSending(false);
-        disconnectWebSocket();
-      }
-    } else {
-      // すべてキャッシュヒットの場合は即時完了
-      console.log(
-        "すべてキャッシュから取得済み。WebSocketリクエストは不要です。"
-      );
-      // すべての結果で imageLoading フラグを確実に false に設定
-      setResults(
-        initialResults.map((result) => ({
-          ...result,
-          imageLoading: false, // 明示的に false に設定
-        }))
-      );
-      setIsSending(false);
-      setProgress(100);
-    }
-  };
-
-  // 結果クリアボタンのハンドラー
-  const handleClearResults = () => {
-    setResults([]);
-    setProgress(0);
-  };
-
-  // テキストボックスクリアボタンのハンドラー
-  const handleClearText = () => {
-    setInputText("");
-    setLineCount(0);
-  };
-
   return (
     <div className="max-w-6xl mx-auto p-4">
       <h1 className="text-2xl font-bold mb-4 text-gray-100">
         ジオコーディング
       </h1>
 
-      {/* エラーメッセージのみを表示 */}
-      {connectionError && (
+      {/* エラーメッセージの表示 */}
+      {fetchError && (
         <div className="mb-4">
-          <span className="text-red-400">{connectionError}</span>
+          <span className="text-red-400">{fetchError}</span>
         </div>
       )}
 
-      {/* 地図コントロール（結果が表示されていても操作可能） */}
+      {/* 地図コントロール */}
       <MapControls
         showSatellite={showSatellite}
         showStreetView={showStreetView}
@@ -915,7 +749,7 @@ const GeocodingPage = () => {
         </div>
       </div>
 
-      {/* テキスト入力エリアとテキストクリアボタンを同一行に配置 */}
+      {/* テキスト入力エリア */}
       <div className="mb-4">
         <div className="mb-2 flex justify-between items-center">
           <label className="text-sm font-medium text-gray-200">
@@ -943,29 +777,33 @@ const GeocodingPage = () => {
         />
       </div>
 
-      {/* アクションボタン（有効行数/送信/CSVダウンロード/CSVエンコーディングラジオボタン/結果クリア） */}
+      {/* アクションボタン */}
       <div className="flex items-center justify-between mb-4">
         <div className="text-gray-200">
           有効な行数: <strong>{lineCount}</strong>
         </div>
         <div className="flex items-center space-x-4">
-          {/* WebSocket接続状態のインジケーターを送信ボタンの左に配置 */}
-          <div
-            className={`w-3 h-3 rounded-full ${
-              isConnected ? "bg-red-500" : "bg-green-500"
-            }`}
-          ></div>
-          <button
-            onClick={handleSendLines}
-            disabled={isSending || lineCount === 0}
-            className={`px-4 py-2 text-white rounded transition-colors duration-200 ${
-              isSending || lineCount === 0
-                ? "bg-blue-400 cursor-not-allowed opacity-50"
-                : "bg-blue-600 hover:bg-blue-700"
-            }`}
-          >
-            {isSending ? "処理中..." : "送信"}
-          </button>
+          {/* 送信ボタン（または中止ボタン） */}
+          {isSending ? (
+            <button
+              onClick={handleCancelRequest}
+              className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700"
+            >
+              中止
+            </button>
+          ) : (
+            <button
+              onClick={handleSendLines}
+              disabled={lineCount === 0}
+              className={`px-4 py-2 text-white rounded transition-colors duration-200 ${
+                lineCount === 0
+                  ? "bg-blue-400 cursor-not-allowed opacity-50"
+                  : "bg-blue-600 hover:bg-blue-700"
+              }`}
+            >
+              送信
+            </button>
+          )}
           <button
             onClick={handleDownloadCSV}
             disabled={isSending || results.length === 0}
