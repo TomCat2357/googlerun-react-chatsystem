@@ -1,5 +1,5 @@
 // src/components/Geocoding/GeocodingPage.tsx
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useRef } from "react";
 import { useToken } from "../../hooks/useToken";
 import * as indexedDBUtils from "../../utils/indexedDBUtils";
 import * as Config from "../../config";
@@ -290,7 +290,7 @@ const GeocodingPage = () => {
   };
 
   // HTTPリクエストを使用してジオコーディングを行う
-  const fetchGeocodingResults = async (lines: string[], queryToIndexMap: Map<string, number[]>) => {
+  const fetchGeocodingResults = async (linesToSend: string[], queryToIndexMap: Map<string, number[]>) => {
     if (!token) {
       alert("認証トークンが取得できません。再ログインしてください。");
       return false;
@@ -298,7 +298,7 @@ const GeocodingPage = () => {
 
     try {
       // 重複排除して一意のクエリだけを送信
-      const uniqueLines = Array.from(queryToIndexMap.keys());
+      const uniqueLines = linesToSend;
 
       // リクエストの設定
       const options = {
@@ -403,12 +403,13 @@ const GeocodingPage = () => {
 
       return true;
     } catch (error) {
-      if (error.name === "AbortError") {
+      if (error instanceof Error && error.name === "AbortError") {
         console.log("リクエストがキャンセルされました");
       } else {
         console.error("ジオコーディングリクエストエラー:", error);
-        setFetchError(error.message);
-        alert(`エラーが発生しました: ${error.message}`);
+        const errorMessage = error instanceof Error ? error.message : "不明なエラーが発生しました";
+        setFetchError(errorMessage);
+        alert(`エラーが発生しました: ${errorMessage}`);
       }
       return false;
     }
