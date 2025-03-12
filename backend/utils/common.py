@@ -29,9 +29,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# グローバルなチャンク保存用辞書
-CHUNK_STORE = {}
-
 # ===== アプリケーション設定 =====
 PORT = int(os.getenv("PORT", '8080'))
 FRONTEND_PATH = os.getenv("FRONTEND_PATH")

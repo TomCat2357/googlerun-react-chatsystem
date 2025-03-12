@@ -2,7 +2,6 @@
 import React, { useState, useRef, useEffect } from "react";
 import { useToken } from "../../hooks/useToken";
 import * as Config from "../../config";
-import { sendChunkedRequest } from "../../utils/ChunkedUpload";
 import AudioUploader, { AudioInfo } from "./AudioUploader";
 import MetadataEditor from "./MetadataEditor";
 import AudioTranscriptPlayer, { TimedSegment } from "./AudioTranscriptPlayer";
@@ -13,6 +12,7 @@ const SpeechToTextPage = () => {
 
   const token = useToken();
   const API_BASE_URL: string = Config.API_BASE_URL;
+  const MAX_PAYLOAD_SIZE = Config.getServerConfig().MAX_PAYLOAD_SIZE || 500000;
 
   // 音声データ関連
   const [audioData, setAudioData] = useState("");
@@ -31,6 +31,7 @@ const SpeechToTextPage = () => {
 
   // UI制御
   const [isSending, setIsSending] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string>("");
 
   // ファイル参照
   const fileInputSessionRef = useRef<HTMLInputElement>(null);
@@ -152,6 +153,7 @@ const SpeechToTextPage = () => {
     setServerTranscript("");
     setEditedTranscriptSegments([]);
     setIsEditMode(false);
+    setErrorMessage("");
   };
 
   // 音声送信処理
@@ -171,6 +173,8 @@ const SpeechToTextPage = () => {
     }
     
     setIsSending(true);
+    setErrorMessage("");
+    
     try {
       // audioDataにはbase64形式の音声データが含まれている
       // Base64のヘッダー部分（data:audio/...;base64,）を除去
@@ -179,34 +183,43 @@ const SpeechToTextPage = () => {
         base64Data = base64Data.split(',')[1];
       }
       
-      const payload = { audio_data: base64Data };
-      const response = await sendChunkedRequest(
-        payload,
-        token,
-        `${API_BASE_URL}/backend/speech2text`
-      );
+      // データサイズのチェック
+      const estimatedSize = base64Data.length * 0.75; // Base64は約4/3のサイズになるため、デコードサイズを推定
       
-      if (response.ok) {
-        const data = await response.json();
-        if (!data.error) {
-          setServerTranscript(
-            data.transcription ? data.transcription.trim() : ""
-          );
-          setServerTimedTranscript(data.timed_transcription || []);
-          // 新しい文字起こし結果を受け取ったら編集セグメントをリセット
-          setEditedTranscriptSegments([]);
-          setIsEditMode(false);
-        } else {
-          console.error("Speech2Text error:", data.error);
-          alert("文字起こしエラー: " + data.error);
-        }
-      } else {
-        console.error("サーバーエラー:", response.status);
-        alert("サーバーエラー: " + response.status);
+      if (estimatedSize > MAX_PAYLOAD_SIZE) {
+        throw new Error(`音声データが大きすぎます (約${Math.round(estimatedSize/1024)}KB)。上限は${Math.round(MAX_PAYLOAD_SIZE/1024)}KBです。音声ファイルを圧縮するか、より短い音声で試してください。`);
       }
+      
+      // 標準のHTTPリクエストを使用
+      const response = await fetch(`${API_BASE_URL}/backend/speech2text`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
+        body: JSON.stringify({ audio_data: base64Data })
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: `HTTP エラー: ${response.status}` }));
+        throw new Error(errorData.error || `サーバーエラー: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      if (data.error) {
+        throw new Error(`文字起こしエラー: ${data.error}`);
+      }
+      
+      setServerTranscript(
+        data.transcription ? data.transcription.trim() : ""
+      );
+      setServerTimedTranscript(data.timed_transcription || []);
+      // 新しい文字起こし結果を受け取ったら編集セグメントをリセット
+      setEditedTranscriptSegments([]);
+      setIsEditMode(false);
     } catch (error) {
       console.error("送信エラー:", error);
-      alert("送信中にエラーが発生しました: " + (error instanceof Error ? error.message : String(error)));
+      setErrorMessage(error instanceof Error ? error.message : String(error));
     } finally {
       setIsSending(false);
     }
@@ -215,6 +228,13 @@ const SpeechToTextPage = () => {
   return (
     <div className="p-4 overflow-y-auto bg-dark-primary text-white min-h-screen">
       <h1 className="text-3xl font-bold mb-4">音声文字起こし</h1>
+
+      {/* エラーメッセージがあれば表示 */}
+      {errorMessage && (
+        <div className="mb-4 p-3 bg-red-700 text-white rounded">
+          <p>{errorMessage}</p>
+        </div>
+      )}
 
       <div className="flex justify-between items-center mb-6">
         <div className="flex space-x-4">

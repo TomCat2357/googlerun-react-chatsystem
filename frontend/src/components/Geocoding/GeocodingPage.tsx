@@ -7,7 +7,7 @@ import * as Encoding from "encoding-japanese";
 import { MapControls } from "./MapControls";
 import { imageCache } from "../../utils/imageCache";
 
-// メッセージタイプの定義（WebSocketと互換性を保つ）
+// メッセージタイプの定義（APIレスポンスと互換性を保つ）
 enum MessageType {
   GEOCODE_RESULT = "GEOCODE_RESULT",
   IMAGE_RESULT = "IMAGE_RESULT",

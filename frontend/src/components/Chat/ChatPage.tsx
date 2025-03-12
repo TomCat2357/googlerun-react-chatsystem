@@ -4,7 +4,6 @@ import { Message, ChatRequest, ChatHistory } from "../../types/apiTypes";
 import { useToken } from "../../hooks/useToken";
 import * as indexedDBUtils from "../../utils/indexedDBUtils";
 import * as Config from "../../config";
-import { sendChunkedRequest } from "../../utils/ChunkedUpload";
 import { FileData } from "../../utils/fileUtils";
 import ChatSidebar from "./ChatSidebar";
 import ChatMessages from "./ChatMessages";
@@ -391,33 +390,27 @@ const ChatPage: React.FC = () => {
       const jsonStr = JSON.stringify(chatRequest);
       const encoder = new TextEncoder();
       const chatRequestBytes = encoder.encode(jsonStr);
+      const requestSize = chatRequestBytes.length;
 
-      console.log(`MAX_PAYLOAD_SIZE: ${MAX_PAYLOAD_SIZE} bytes`);
-      console.log(`送信前のプロンプトデータサイズ: ${chatRequestBytes.length} bytes`);
+      console.log(`最大リクエストサイズ制限: ${MAX_PAYLOAD_SIZE} バイト`);
+      console.log(`送信データサイズ: ${requestSize} バイト`);
 
-      let response: Response;
-      if (chatRequestBytes.length > MAX_PAYLOAD_SIZE) {
-        console.log(
-          `プロンプトサイズ ${chatRequestBytes.length} bytes は上限 ${MAX_PAYLOAD_SIZE} bytes を超えているため、チャンク送信します`
-        );
-        response = await sendChunkedRequest(
-          chatRequest,
-          token,
-          `${API_BASE_URL}/backend/chat`
-        );
-      } else {
-        console.log("チャンクに分けずに送信します");
-        response = await fetch(`${API_BASE_URL}/backend/chat`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Accept: "text/event-stream",
-            Authorization: `Bearer ${token}`,
-          },
-          signal,
-          body: jsonStr,
-        });
+      // サイズ制限のチェック
+      if (requestSize > MAX_PAYLOAD_SIZE) {
+        throw new Error(`リクエストサイズ (${requestSize} bytes) が上限 (${MAX_PAYLOAD_SIZE} bytes) を超えています。添付ファイルを減らすか、テキストを短くしてください。`);
       }
+
+      // 標準のHTTPリクエストを送信
+      const response = await fetch(`${API_BASE_URL}/backend/chat`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "text/event-stream",
+          Authorization: `Bearer ${token}`,
+        },
+        signal,
+        body: jsonStr,
+      });
 
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
