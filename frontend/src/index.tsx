@@ -1,3 +1,4 @@
+// frontend/src/index.tsx を修正
 import React, { StrictMode, Suspense } from "react";
 import { createRoot } from "react-dom/client";
 import {
@@ -12,6 +13,7 @@ import LoginPage from "./components/Login/LoginPage";
 import MainPage from "./components/Main/MainPage";
 import Header from "./components/Header/Header";
 import "./index.css";
+import * as Config from "./config";  // 追加
 
 // 遅延ロードするコンポーネント
 const ChatPage = React.lazy(() => import("./components/Chat/ChatPage"));
@@ -66,7 +68,7 @@ function App() {
               }
             />
 
-            <Route path="*" element={<Navigate to="/app/main" replace />} />
+            <Route path="*" element={<Navigate to={Config.getClientPath("/app/main")} replace />} />
           </Routes>
         </div>
       </AuthProvider>

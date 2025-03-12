@@ -1,28 +1,30 @@
-import { useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { useAuth } from '../../contexts/AuthContext';
-import LoginButton from '../Auth/LoginButton';
-import PageLoader from '../../utils/PageLoader';
+import { useEffect } from "react";
+import { useNavigate } from "react-router-dom";
+import { useAuth } from "../../contexts/AuthContext";
+import LoginButton from "../Auth/LoginButton";
+import PageLoader from "../../utils/PageLoader";
+import * as Config from "../../config";
 
 export default function LoginPage() {
   const { currentUser, checkAuthStatus, loading } = useAuth();
   const navigate = useNavigate();
-  
+
+  // frontend/src/components/Login/LoginPage.tsx の useEffect内を修正
   useEffect(() => {
     const checkAuth = async () => {
       if (loading) return;
-      
+
       if (currentUser) {
         const isAuthenticated = await checkAuthStatus();
         if (isAuthenticated) {
-          navigate('/app/main', { replace: true });
+          navigate(Config.getClientPath("/app/main"), { replace: true });
         }
       }
     };
-    
+
     checkAuth();
   }, [currentUser, loading, checkAuthStatus, navigate]);
-  
+
   if (loading) {
     return <PageLoader message="認証状態を確認中..." />;
   }

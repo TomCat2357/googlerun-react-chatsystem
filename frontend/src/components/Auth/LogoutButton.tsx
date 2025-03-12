@@ -8,7 +8,7 @@ export default function LogoutButton() {
 
   const handleLogout = async () => {
     console.log('LogoutButton: Logging out');
-    
+
     const auth = getAuth();
     try {
       console.log("Firebaseからサインアウトを試みています");
@@ -26,10 +26,12 @@ export default function LogoutButton() {
       };
 
       // サーバー側のログアウトAPIを呼び出す
-      await axios.post(`${Config.API_BASE_URL}/backend/logout`, null, {
+      // frontend/src/components/Auth/LogoutButton.tsx のログアウト後のリダイレクト
+      // ...
+      await axios.post(Config.getApiUrl('/backend/logout'), null, {
         withCredentials: false
       });
-      navigate('/');
+      navigate(Config.getClientPath('/'));
     } catch (error) {
       console.error('Logout error:', error);
     }

@@ -1,7 +1,7 @@
 // frontend/src/components/Main/MainPage.tsx
 
 import { useNavigate } from "react-router-dom";
-
+import * as Config from "../../config";
 
 const MainPage = () => {
   const navigate = useNavigate();
@@ -15,7 +15,7 @@ const MainPage = () => {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {/* チャットへのリンクカード */}
           <div
-            onClick={() => navigate("/app/chat")}
+            onClick={() => navigate(Config.getClientPath("/app/chat"))}
             className="bg-dark-secondary p-6 rounded-lg shadow-lg cursor-pointer hover:bg-dark-accent transition-colors"
           >
             <h2 className="text-xl font-bold text-white mb-2">チャット</h2>
@@ -24,7 +24,7 @@ const MainPage = () => {
 
           {/* Geocodingへのリンクカード（仮実装） */}
           <div
-            onClick={() => navigate("/app/geocoding")}
+            onClick={() => navigate(Config.getClientPath("/app/geocoding"))}
             className="bg-dark-secondary p-6 rounded-lg shadow-lg cursor-pointer hover:bg-dark-accent transition-colors"
           >
             <h2 className="text-xl font-bold text-white mb-2">Geocoding</h2>
@@ -33,7 +33,7 @@ const MainPage = () => {
 
           {/* SpeechToTextへのリンクカード */}
           <div
-            onClick={() => navigate("/app/speechtotext")}
+            onClick={() => navigate(Config.getClientPath("/app/speechtotext"))}
             className="bg-dark-secondary p-6 rounded-lg shadow-lg cursor-pointer hover:bg-dark-accent transition-colors"
           >
             <h2 className="text-xl font-bold text-white mb-2">
@@ -43,7 +43,7 @@ const MainPage = () => {
           </div>
           {/* 画像生成へのリンクカード */}
           <div
-            onClick={() => navigate("/app/generate-image")}
+            onClick={() => navigate(Config.getClientPath("/app/generate-image"))}
             className="bg-dark-secondary p-6 rounded-lg shadow-lg cursor-pointer hover:bg-dark-accent transition-colors"
           >
             <h2 className="text-xl font-bold text-white mb-2">画像生成</h2>

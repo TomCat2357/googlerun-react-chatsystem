@@ -54,10 +54,10 @@ export function parseOptionsWithDefault(optionsStr: string): { options: string[]
   if (!optionsStr || !optionsStr.trim()) {
     return { options: [], defaultOption: '' };
   }
-  
+
   const items = optionsStr.split(',').map(item => item.trim());
   let defaultOption = '';
-  
+
   // {}で囲まれた値を探してデフォルト値を設定
   const options = items.map(item => {
     if (item.startsWith('{') && item.endsWith('}')) {
@@ -67,12 +67,12 @@ export function parseOptionsWithDefault(optionsStr: string): { options: string[]
     }
     return item;
   });
-  
+
   // デフォルト値が見つからなければ最初の値をデフォルト値とする
   if (!defaultOption && options.length > 0) {
     defaultOption = options[0];
   }
-  
+
   return { options, defaultOption };
 }
 
@@ -83,7 +83,7 @@ export function parseNumberOptionsWithDefault(optionsStr: string): { options: nu
   const { options: strOptions, defaultOption: strDefaultOption } = parseOptionsWithDefault(optionsStr);
   const options = strOptions.map(opt => parseInt(opt, 10)).filter(num => !isNaN(num));
   const defaultOption = parseInt(strDefaultOption, 10);
-  
+
   return {
     options,
     defaultOption: isNaN(defaultOption) && options.length > 0 ? options[0] : defaultOption
@@ -189,3 +189,47 @@ loadServerConfig()
   .catch((error) => {
     console.error("サーバー設定のロード中にエラーが発生しました:", error);
   });
+
+// frontend/src/config.ts に追加
+
+// APIゲートウェイ用のキー設定
+export const API_GATEWAY_KEY: string = import.meta.env.VITE_API_GATEWAY_KEY || "";
+
+/**
+ * API GatewayのキーをクエリパラメータとしてURLに追加する関数
+ * @param endpoint APIエンドポイントのパス
+ * @returns API_KEYが付与されたフルURL
+ */
+export function getApiUrl(endpoint: string): string {
+  // 基本URLを取得
+  const baseUrl = API_BASE_URL;
+
+  // API_KEYが設定されていなければ、元のURLをそのまま返す
+  if (!API_GATEWAY_KEY) {
+    return `${baseUrl}${endpoint}`;
+  }
+
+  // クエリパラメータの開始文字を決定（既存のクエリパラメータがあるかをチェック）
+  const separator = endpoint.includes('?') ? '&' : '?';
+
+  // API_KEYを付与したURLを返す
+  return `${baseUrl}${endpoint}${separator}API_KEY=${API_GATEWAY_KEY}`;
+}
+
+/**
+ * クライアントサイドのルーティングパスにAPI_KEYを追加する関数
+ * @param path ルーティングパス（例: "/", "/app/main"）
+ * @returns API_KEYが付与されたパス
+ */
+export function getClientPath(path: string): string {
+  // API_KEYが設定されていなければ、元のパスをそのまま返す
+  if (!API_GATEWAY_KEY) {
+    return path;
+  }
+
+  // クエリパラメータの開始文字を決定（既存のクエリパラメータがあるかをチェック）
+  const separator = path.includes('?') ? '&' : '?';
+
+  // API_KEYを付与したパスを返す
+  return `${path}${separator}API_KEY=${API_GATEWAY_KEY}`;
+}

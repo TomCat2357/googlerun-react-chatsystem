@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { getAuth, setPersistence, browserSessionPersistence, signInWithPopup, GoogleAuthProvider } from 'firebase/auth';
 import { app } from '../../firebase/firebase';
-import { fetchAndSaveServerConfig } from '../../config';
+import * as Config from '../../config';
+
 
 export default function LoginButton() {
   const [error, setError] = useState<string>('');
@@ -23,9 +24,9 @@ export default function LoginButton() {
 
       // ログイン後、IDトークンを取得してサーバー設定を取得
       const token = await result.user.getIdToken();
-      await fetchAndSaveServerConfig(token);
+      await Config.fetchAndSaveServerConfig(token);
 
-      navigate('/app/main');
+      navigate(Config.getClientPath('/app/main'));
     } catch (err) {
       setError('ログインに失敗しました');
       console.error('Login error:', err);
