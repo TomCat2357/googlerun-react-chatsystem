@@ -205,32 +205,43 @@ def get_api_key_for_model(model: str) -> Optional[str]:
     source = model.split("/")[0] if "/" in model else model
     return json.loads(os.getenv("MODEL_API_KEYS", "{}")).get(source, "")
 
-
 def limit_remote_addr(request: Request):
-    """リクエスト送信元IPが許可リストに含まれていなければ403を返す"""
-    remote_addr = request.headers.get("X-Forwarded-For", None)
-    if not remote_addr:
-        client_host = request.client.host if request.client else None
-        remote_addr = client_host
+    # クライアント直前のIPアドレスを取得（TCPコネクションのリモートIP）
+    client_ip = request.client.host if request.client else None
+    logger.debug("接続直前のIPアドレス: %s", client_ip)
+    
+    # X-Forwarded-For ヘッダーを取得（転送途中の経路で使われるケースが多い）
+    forwarded_for = request.headers.get("X-Forwarded-For", "")
+    logger.debug("X-Forwarded-For ヘッダー全体: %s", forwarded_for)
+    
+    if forwarded_for:
+        # ヘッダーに複数のIPが含まれている場合、カンマで分割
+        forwarded_ips = [ip.strip() for ip in forwarded_for.split(",")]
+        logger.debug("転送途中のIPアドレスリスト: %s", forwarded_ips)
+        # 最初のIPアドレスをオリジナルのクライアントIPとする
+        original_ip = forwarded_ips[0]
+        logger.debug("最初のIPアドレス (オリジナル): %s", original_ip)
+        # チェック処理はここでは原則として最初のIPを利用する
+        remote_addr = original_ip
+    else:
+        remote_addr = client_ip
 
-    logger.debug(f"X-Forwarded-For: {remote_addr}")
-    if remote_addr and "," in remote_addr:
-        remote_addr = remote_addr.split(",")[0].strip()
+    logger.debug("検証対象のIPアドレス: %s", remote_addr)
+    
+    # 既存のIP形式の検証と許可リストチェック
     try:
-        client_ip = ipaddress.ip_address(remote_addr)
-        logger.debug(f"@リクエスト送信元IP: {client_ip}")
+        client_ip_obj = ipaddress.ip_address(remote_addr)
+        logger.debug("IPアドレス検証済み: %s", client_ip_obj)
     except ValueError:
         time.sleep(0.05)
         raise HTTPException(status_code=400, detail="不正なIPアドレス形式です")
 
-    # ALLOWED_IPSは.envから取得する設定とする
     allowed_tokens = ALLOWED_IPS
-    logger.debug(f'許可されたIPアドレスまたはネットワーク: {allowed_tokens}')
+    logger.debug("許可されたIP設定: %s", allowed_tokens)
     allowed_networks = []
     for token in allowed_tokens.split(","):
         token = token.strip()
         if token:
-            logger.debug(f'許可されたIPアドレスまたはネットワーク: {token}')
             try:
                 if "/" in token:
                     network = ipaddress.ip_network(token, strict=False)
@@ -241,14 +252,11 @@ def limit_remote_addr(request: Request):
                     )
                 allowed_networks.append(network)
             except ValueError as e:
-                logger.error(
-                    f"無効なIPアドレスまたはネットワーク形式: {token}, エラー: {e}"
-                )
+                logger.error("無効なIPまたはネットワーク: %s, エラー: %s", token, e)
 
-    # IPがいずれかの許可されたネットワークに含まれているかチェック
     for network in allowed_networks:
-        if client_ip in network:
-            return  # 許可されている場合、処理継続
+        if client_ip_obj in network:
+            return
 
     time.sleep(0.05)
     raise HTTPException(status_code=403, detail="アクセスが許可されていません")
