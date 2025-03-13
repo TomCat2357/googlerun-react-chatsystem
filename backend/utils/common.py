@@ -14,6 +14,7 @@ import json
 from functools import wraps
 from dotenv import load_dotenv
 from copy import copy
+from functools import wraps
 
 # .envファイルを読み込み
 load_dotenv("./config/.env")
@@ -22,38 +23,38 @@ develop_env_path = "./config_develop/.env.develop"
 if os.path.exists(develop_env_path):
     load_dotenv(develop_env_path)
 
-  # 環境変数DEBUGの値を取得し、デバッグモードの設定を行う
-  # デフォルトは空文字列
-  debug = os.getenv("DEBUG", "")
-  # DEBUGが未設定、"false"、"0"の場合はデバッグモードをオフに
-  if not debug or debug.lower() == "false" or debug == "0":
-      DEBUG = False
-  else:
-      DEBUG = True
+# 環境変数DEBUGの値を取得し、デバッグモードの設定を行う
+# デフォルトは空文字列
+debug = os.getenv("DEBUG", "")
+# DEBUGが未設定、"false"、"0"の場合はデバッグモードをオフに
+if not debug or debug.lower() == "false" or debug == "0":
+    DEBUG = False
+else:
+    DEBUG = True
 
-  # ロギング設定の初期化
-  if DEBUG:
-      # デバッグモード時のログ設定
-      # - ログレベル: DEBUG（詳細なログを出力）
-      # - フォーマット: タイムスタンプ、ログレベル、ファイル名、行番号、メッセージ
-      # - 出力先: コンソール(StreamHandler)とファイル(app_debug.log)
-      logging.basicConfig(
-          level=logging.DEBUG,
-          format="%(asctime)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s",
-          handlers=[logging.StreamHandler(), logging.FileHandler("app_debug.log")],
-      )
-  else:
-      # 本番モード時のログ設定
-      # - ログレベル: INFO（重要な情報のみ出力）
-      # - フォーマット: タイムスタンプ、ログレベル、メッセージ（ファイル情報なし）
-      # - 出力先: コンソール(StreamHandler)とファイル(app.log)
-      logging.basicConfig(
-          level=logging.INFO,
-          format="%(asctime)s - %(levelname)s - %(message)s",
-          handlers=[logging.StreamHandler(), logging.FileHandler("app.log")],
-      )
-  # 現在のモジュール用のロガーを取得
-  logger = logging.getLogger(__name__)
+# ロギング設定の初期化
+if DEBUG:
+    # デバッグモード時のログ設定
+    # - ログレベル: DEBUG（詳細なログを出力）
+    # - フォーマット: タイムスタンプ、ログレベル、ファイル名、行番号、メッセージ
+    # - 出力先: コンソール(StreamHandler)とファイル(app_debug.log)
+    logging.basicConfig(
+        level=logging.DEBUG,
+        format="%(asctime)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s",
+        handlers=[logging.StreamHandler(), logging.FileHandler("app_debug.log")],
+    )
+else:
+    # 本番モード時のログ設定
+    # - ログレベル: INFO（重要な情報のみ出力）
+    # - フォーマット: タイムスタンプ、ログレベル、メッセージ（ファイル情報なし）
+    # - 出力先: コンソール(StreamHandler)とファイル(app.log)
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(levelname)s - %(message)s",
+        handlers=[logging.StreamHandler(), logging.FileHandler("app.log")],
+    )
+# 現在のモジュール用のロガーを取得
+logger = logging.getLogger(__name__)
 
 def wrap_logger(generator_func):
     """
@@ -65,6 +66,7 @@ def wrap_logger(generator_func):
     Returns:
         wrapper: ログ機能が追加された非同期ジェネレーター関数
     """
+    @wraps(generator_func)
     async def wrapper(meta_info : dict = {}, *args, **kwargs):
         # meta_infoパラメータの取得（直接渡されるか、kwargsから取得）
         meta_info = meta_info or kwargs.get("meta_info")

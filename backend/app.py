@@ -51,6 +51,7 @@ from typing import Dict, Any, List, Optional, Callable
 from firebase_admin import auth, credentials
 import firebase_admin
 import os, json, asyncio, base64, time
+from uuid import uuid4
 
 
 from utils.geocoding_service import process_single_geocode, process_map_images
@@ -128,6 +129,7 @@ class GeocodeRequest(BaseModel):
 class ChatRequest(BaseModel):
     messages: List[Dict[str, Any]]
     model: str
+    id: Optional[str] = Field(default_factory=lambda: uuid4().hex[:12])
 
 
 class SpeechToTextRequest(BaseModel):
@@ -311,6 +313,9 @@ async def chat(
 ):
     logger.debug("チャットリクエストを処理中")
     try:
+        request_id = chat_request.id
+        logger.debug(f"リクエストID: {request_id}")
+
         messages = chat_request.messages
         model = chat_request.model
         logger.debug(f"モデル: {model}")
@@ -374,7 +379,8 @@ async def chat(
                 logger.debug(f"メッセージ[{i}]: role={role}, parts={parts_info}")
 
         # ストリーミングレスポンスの作成
-        async def generate_stream():
+        @wrap_logger
+        async def generate_stream(meta_info: dict = {}):
             for chunk in common_message_function(
                 model=model,
                 stream=True,
@@ -384,7 +390,7 @@ async def chat(
                 yield chunk
 
         return StreamingResponse(
-            generate_stream(),
+            generate_stream({'ID' : request_id}),
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "Transfer-Encoding": "chunked"},
         )
