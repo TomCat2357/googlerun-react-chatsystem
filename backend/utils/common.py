@@ -13,26 +13,81 @@ import time
 import json
 from functools import wraps
 from dotenv import load_dotenv
+from copy import copy
 
 # .envファイルを読み込み
 load_dotenv("./config/.env")
-develop_env_path = './config_develop/.env.develop'
+develop_env_path = "./config_develop/.env.develop"
 # 開発環境の場合はdevelop_env_pathに対応する.envファイルがある
 if os.path.exists(develop_env_path):
     load_dotenv(develop_env_path)
 
-# ロギング設定
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s",
-    handlers=[logging.StreamHandler(), logging.FileHandler("app.log")],
-)
-logger = logging.getLogger(__name__)
+  # 環境変数DEBUGの値を取得し、デバッグモードの設定を行う
+  # デフォルトは空文字列
+  debug = os.getenv("DEBUG", "")
+  # DEBUGが未設定、"false"、"0"の場合はデバッグモードをオフに
+  if not debug or debug.lower() == "false" or debug == "0":
+      DEBUG = False
+  else:
+      DEBUG = True
+
+  # ロギング設定の初期化
+  if DEBUG:
+      # デバッグモード時のログ設定
+      # - ログレベル: DEBUG（詳細なログを出力）
+      # - フォーマット: タイムスタンプ、ログレベル、ファイル名、行番号、メッセージ
+      # - 出力先: コンソール(StreamHandler)とファイル(app_debug.log)
+      logging.basicConfig(
+          level=logging.DEBUG,
+          format="%(asctime)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s",
+          handlers=[logging.StreamHandler(), logging.FileHandler("app_debug.log")],
+      )
+  else:
+      # 本番モード時のログ設定
+      # - ログレベル: INFO（重要な情報のみ出力）
+      # - フォーマット: タイムスタンプ、ログレベル、メッセージ（ファイル情報なし）
+      # - 出力先: コンソール(StreamHandler)とファイル(app.log)
+      logging.basicConfig(
+          level=logging.INFO,
+          format="%(asctime)s - %(levelname)s - %(message)s",
+          handlers=[logging.StreamHandler(), logging.FileHandler("app.log")],
+      )
+  # 現在のモジュール用のロガーを取得
+  logger = logging.getLogger(__name__)
+
+def wrap_logger(generator_func):
+    """
+    非同期ジェネレーター関数をラップしてログ出力を追加するデコレータ関数
+    
+    Args:
+        generator_func: ラップする非同期ジェネレーター関数
+        
+    Returns:
+        wrapper: ログ機能が追加された非同期ジェネレーター関数
+    """
+    async def wrapper(meta_info : dict = {}, *args, **kwargs):
+        # meta_infoパラメータの取得（直接渡されるか、kwargsから取得）
+        meta_info = meta_info or kwargs.get("meta_info")
+        
+        # 元のジェネレーター関数を実行し、各チャンクを処理
+        async for chunk in generator_func(*args, **kwargs):
+            # ログ用の辞書を準備（meta_infoのディープコピーまたは新規辞書）
+            if isinstance(meta_info, dict):
+                streaming_log = copy(meta_info)
+            else:
+                streaming_log = {}
+                
+            # 現在のチャンクをログ辞書に追加してログ出力
+            streaming_log["chunk"] = chunk
+            logger.info(streaming_log)
+            
+            # チャンクを次の処理へ渡す
+            yield chunk
+    return wrapper
 
 # ===== アプリケーション設定 =====
-PORT = int(os.getenv("PORT", '8080'))
+PORT = int(os.getenv("PORT", "8080"))
 FRONTEND_PATH = os.getenv("FRONTEND_PATH")
-DEBUG = bool(int(os.getenv("DEBUG", "0")))
 
 
 # CORS設定
@@ -64,7 +119,9 @@ GEOCODING_WITH_IMAGE_MAX_BATCH_SIZE = int(
     os.getenv("GEOCODING_WITH_IMAGE_MAX_BATCH_SIZE")
 )
 # ===== Secret Manager設定 ===== 環境変数から取得する場合があるので空白許容
-SECRET_MANAGER_ID_FOR_GOOGLE_MAPS_API_KEY = os.getenv("SECRET_MANAGER_ID_FOR_GOOGLE_MAPS_API_KEY", "")
+SECRET_MANAGER_ID_FOR_GOOGLE_MAPS_API_KEY = os.getenv(
+    "SECRET_MANAGER_ID_FOR_GOOGLE_MAPS_API_KEY", ""
+)
 
 # ===== データ制限設定 =====
 MAX_PAYLOAD_SIZE = int(os.getenv("MAX_PAYLOAD_SIZE"))
@@ -101,7 +158,7 @@ def access_secret(secret_id, version_id="latest"):
     """
     try:
         logger.debug(f"Secret Managerから{secret_id}を取得しています")
-        
+
         client = secretmanager.SecretManagerServiceClient()
         name = f"projects/{VERTEX_PROJECT}/secrets/{secret_id}/versions/{version_id}"
         response = client.access_secret_version(request={"name": name})
@@ -135,69 +192,6 @@ def get_google_maps_api_key():
     return api_key
 
 
-def process_uploaded_image(image_data: str) -> str:
-    """
-    画像データを処理し、サイズや形式を調整する
-    """
-    try:
-        header = None
-        if image_data.startswith("data:"):
-            header, image_data = image_data.split(",", 1)
-        image_bytes = base64.b64decode(image_data)
-        image = Image.open(io.BytesIO(image_bytes))
-        if image.mode not in ("RGB", "RGBA"):
-            image = image.convert("RGB")
-        width, height = image.size
-        logger.debug(
-            "元の画像サイズ: %dx%dpx, 容量: %.1fKB",
-            width,
-            height,
-            len(image_bytes) / 1024,
-        )
-        if max(width, height) > MAX_LONG_EDGE:
-            scale = MAX_LONG_EDGE / max(width, height)
-            new_width = int(width * scale)
-            new_height = int(height * scale)
-            image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
-            logger.debug("リサイズ後: %dx%dpx", new_width, new_height)
-        quality = 85
-        output = io.BytesIO()
-        output_format = "JPEG"
-        mime_type = "image/jpeg"
-        if header and "png" in header.lower():
-            output_format = "PNG"
-            mime_type = "image/png"
-            image.save(output, format=output_format, optimize=True)
-        else:
-            image = image.convert("RGB")
-            image.save(output, format=output_format, quality=quality, optimize=True)
-        output_data = output.getvalue()
-        logger.debug(
-            "圧縮後の容量: %.1fKB (quality=%d)", len(output_data) / 1024, quality
-        )
-        while len(output_data) > MAX_IMAGE_SIZE and quality > 30:
-            quality -= 10
-            output = io.BytesIO()
-            image.save(output, format=output_format, quality=quality, optimize=True)
-            output_data = output.getvalue()
-            logger.debug(
-                "再圧縮後の容量: %.1fKB (quality=%d)", len(output_data) / 1024, quality
-            )
-        processed_base64 = base64.b64encode(output_data).decode("utf-8")
-        return f"data:{mime_type};base64,{processed_base64}"
-    except Exception as e:
-        logger.error("画像処理エラー: %s", str(e), exc_info=True)
-        return image_data
-
-
-def verify_firebase_token(token: str) -> Dict[str, Any]:
-    """Firebase認証トークンを検証し、デコードされたトークンを返す"""
-    try:
-        decoded_token = auth.verify_id_token(token, clock_skew_seconds=60)
-        return decoded_token
-    except Exception as e:
-        logger.error("認証エラー: %s", str(e), exc_info=True)
-        raise e
 
 
 def get_api_key_for_model(model: str) -> Optional[str]:
@@ -205,15 +199,16 @@ def get_api_key_for_model(model: str) -> Optional[str]:
     source = model.split("/")[0] if "/" in model else model
     return json.loads(os.getenv("MODEL_API_KEYS", "{}")).get(source, "")
 
+
 def limit_remote_addr(request: Request):
     # クライアント直前のIPアドレスを取得（TCPコネクションのリモートIP）
     client_ip = request.client.host if request.client else None
     logger.debug("接続直前のIPアドレス: %s", client_ip)
-    
+
     # X-Forwarded-For ヘッダーを取得（転送途中の経路で使われるケースが多い）
     forwarded_for = request.headers.get("X-Forwarded-For", "")
     logger.debug("X-Forwarded-For ヘッダー全体: %s", forwarded_for)
-    
+
     if forwarded_for:
         # ヘッダーに複数のIPが含まれている場合、カンマで分割
         forwarded_ips = [ip.strip() for ip in forwarded_for.split(",")]
@@ -227,7 +222,7 @@ def limit_remote_addr(request: Request):
         remote_addr = client_ip
 
     logger.debug("検証対象のIPアドレス: %s", remote_addr)
-    
+
     # 既存のIP形式の検証と許可リストチェック
     try:
         client_ip_obj = ipaddress.ip_address(remote_addr)

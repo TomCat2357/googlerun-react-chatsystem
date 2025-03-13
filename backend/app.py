@@ -11,9 +11,8 @@ from fastapi import (
 )
 from utils.common import (
     logger,
-    process_uploaded_image,
-    limit_remote_addr,
-    verify_firebase_token,
+    wrap_logger,
+    # limit_remote_addr,
     MAX_IMAGES,
     MAX_AUDIO_FILES,
     MAX_TEXT_FILES,
@@ -42,15 +41,6 @@ from utils.common import (
     get_api_key_for_model,
 )
 
-# 新規追加
-from utils.file_utils import (
-    process_uploaded_image,
-    process_audio_file,
-    process_text_file,
-    prepare_message_for_ai,
-    parse_csv_preview,
-    process_docx_text,
-)
 
 from fastapi.responses import JSONResponse, StreamingResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -119,10 +109,10 @@ async def get_current_user(request: Request):
 @app.middleware("http")
 async def ip_guard(request: Request, call_next):
     try:
-        #limit_remote_addr(request)
+        # limit_remote_addr(request)
         response = await call_next(request)
-        logger.debug('レスポンスタイプ: %s', str(type(response)))
-        logger.debug('レスポンス: %s', str(response))
+        logger.debug("レスポンスタイプ: %s", str(type(response)))
+        logger.debug("レスポンス: %s", str(response))
         return response
     except HTTPException as exc:
         return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
@@ -160,8 +150,7 @@ class GenerateImageRequest(BaseModel):
 # 新しいRESTful APIエンドポイント - ジオコーディング
 @app.post("/backend/geocoding")
 async def geocoding_endpoint(
-    request: GeocodeRequest,
-    current_user: Dict = Depends(get_current_user)
+    request: GeocodeRequest, current_user: Dict = Depends(get_current_user)
 ):
     """
     ジオコーディングのための新しいRESTfulエンドポイント
@@ -169,7 +158,7 @@ async def geocoding_endpoint(
     mode = request.mode
     lines = request.lines
     options = request.options
-    
+
     # 上限件数のチェック
     max_batch_size = (
         GEOCODING_WITH_IMAGE_MAX_BATCH_SIZE
@@ -180,43 +169,49 @@ async def geocoding_endpoint(
     if len(lines) > max_batch_size:
         raise HTTPException(
             status_code=400,
-            detail=f"入力された件数は{len(lines)}件ですが、1回の送信で取得可能な上限は{max_batch_size}件です。"
+            detail=f"入力された件数は{len(lines)}件ですが、1回の送信で取得可能な上限は{max_batch_size}件です。",
         )
-    
+
     from utils.common import get_google_maps_api_key
+
     google_maps_api_key = get_google_maps_api_key()
     timestamp = int(time.time() * 1000)
-    
+
     # StreamingResponseを使って結果を非同期的に返す
     async def generate_results():
         for idx, line in enumerate(lines):
             query = line.strip()
             if not query:
                 continue
-            
+
             # ジオコーディング処理
             result = await process_single_geocode(
-                google_maps_api_key, 
-                mode, 
-                query, 
-                timestamp
+                google_maps_api_key, mode, query, timestamp
             )
-            
+
             # 結果をJSON形式で返す
-            yield json.dumps({
-                "type": "GEOCODE_RESULT",
-                "payload": {
-                    "index": idx,
-                    "result": result,
-                    "progress": int((idx + 1) / len(lines) * 50)  # 50%までがジオコーディング処理
+            yield json.dumps(
+                {
+                    "type": "GEOCODE_RESULT",
+                    "payload": {
+                        "index": idx,
+                        "result": result,
+                        "progress": int(
+                            (idx + 1) / len(lines) * 50
+                        ),  # 50%までがジオコーディング処理
+                    },
                 }
-            }) + "\n"
-            
+            ) + "\n"
+
             # 画像取得処理（緯度経度が有効な場合のみ）
             show_satellite = options.get("showSatellite", False)
             show_street_view = options.get("showStreetView", False)
-            
-            if (show_satellite or show_street_view) and result["latitude"] is not None and result["longitude"] is not None:
+
+            if (
+                (show_satellite or show_street_view)
+                and result["latitude"] is not None
+                and result["longitude"] is not None
+            ):
                 satellite_image, street_view_image = await process_map_images(
                     google_maps_api_key,
                     result["latitude"],
@@ -226,35 +221,36 @@ async def geocoding_endpoint(
                     options.get("satelliteZoom", 18),
                     options.get("streetViewHeading"),
                     options.get("streetViewPitch", 0),
-                    options.get("streetViewFov", 90)
+                    options.get("streetViewFov", 90),
                 )
-                
+
                 # 画像結果を返す
                 if satellite_image or street_view_image:
-                    progress = 50 + int((idx + 1) / len(lines) * 50)  # 残りの50%は画像処理
-                    yield json.dumps({
-                        "type": "IMAGE_RESULT",
-                        "payload": {
-                            "index": idx,
-                            "satelliteImage": satellite_image,
-                            "streetViewImage": street_view_image,
-                            "progress": progress
+                    progress = 50 + int(
+                        (idx + 1) / len(lines) * 50
+                    )  # 残りの50%は画像処理
+                    yield json.dumps(
+                        {
+                            "type": "IMAGE_RESULT",
+                            "payload": {
+                                "index": idx,
+                                "satelliteImage": satellite_image,
+                                "streetViewImage": street_view_image,
+                                "progress": progress,
+                            },
                         }
-                    }) + "\n"
-            
+                    ) + "\n"
+
             # 処理間隔を空ける（レート制限対策）
             await asyncio.sleep(0.1)
-        
+
         # 全ての処理が完了したことを通知
-        yield json.dumps({
-            "type": "COMPLETE",
-            "payload": {}
-        }) + "\n"
-    
+        yield json.dumps({"type": "COMPLETE", "payload": {}}) + "\n"
+
     return StreamingResponse(
         generate_results(),
         media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "Transfer-Encoding": "chunked"}
+        headers={"Cache-Control": "no-cache", "Transfer-Encoding": "chunked"},
     )
 
 
@@ -309,9 +305,9 @@ async def verify_auth(current_user: Dict = Depends(get_current_user)):
 
 @app.post("/backend/chat")
 async def chat(
-    request: Request, 
+    request: Request,
     chat_request: ChatRequest,
-    current_user: Dict = Depends(get_current_user)
+    current_user: Dict = Depends(get_current_user),
 ):
     logger.debug("チャットリクエストを処理中")
     try:
@@ -325,13 +321,13 @@ async def chat(
             )
 
         model_api_key = get_api_key_for_model(model)
-        
+
         # リクエストサイズチェック
         request_size = len(json.dumps(chat_request.dict()))
         if request_size > MAX_PAYLOAD_SIZE:
             raise HTTPException(
-                status_code=413, 
-                detail=f"リクエストサイズが上限を超えています。現在: {request_size}バイト、上限: {MAX_PAYLOAD_SIZE}バイト"
+                status_code=413,
+                detail=f"リクエストサイズが上限を超えています。現在: {request_size}バイト、上限: {MAX_PAYLOAD_SIZE}バイト",
             )
 
         # メッセージ変換処理のログ出力を追加
@@ -347,19 +343,19 @@ async def chat(
                         name = file.get("name", "")
                         file_types.append(f"{name} ({mime_type})")
                     logger.debug(f"添付ファイル: {', '.join(file_types)}")
-                
+
                 # メッセージをそのまま追加（prepare_message_for_aiは使わない）
                 transformed_messages.append(msg)
             else:
                 # システムメッセージまたはアシスタントメッセージはそのまま
-                transformed_messages.append(msg)        
+                transformed_messages.append(msg)
         logger.debug(f"選択されたモデル: {model}")
-        
+
         # プロンプト内容の概要をログに出力
         for i, msg in enumerate(transformed_messages):
             role = msg.get("role", "unknown")
             content = msg.get("content", "")
-            
+
             if isinstance(content, str):
                 content_preview = content[:50] + "..." if len(content) > 50 else content
                 logger.debug(f"メッセージ[{i}]: role={role}, content={content_preview}")
@@ -367,7 +363,11 @@ async def chat(
                 parts_info = []
                 for part in content:
                     if part.get("type") == "text":
-                        text = part.get("text", "")[:20] + "..." if len(part.get("text", "")) > 20 else part.get("text", "")
+                        text = (
+                            part.get("text", "")[:20] + "..."
+                            if len(part.get("text", "")) > 20
+                            else part.get("text", "")
+                        )
                         parts_info.append(f"text: {text}")
                     elif part.get("type") == "image_url":
                         parts_info.append("image")
@@ -398,13 +398,12 @@ async def chat(
 
 @app.post("/backend/speech2text")
 async def speech2text(
-    request: SpeechToTextRequest,
-    current_user: Dict = Depends(get_current_user)
+    request: SpeechToTextRequest, current_user: Dict = Depends(get_current_user)
 ):
     logger.debug("音声認識処理開始")
     try:
         audio_data = request.audio_data
-        
+
         if not audio_data:
             logger.error("音声データが見つかりません")
             raise HTTPException(
@@ -414,8 +413,8 @@ async def speech2text(
         # データサイズチェック
         if len(audio_data) > MAX_PAYLOAD_SIZE:
             raise HTTPException(
-                status_code=413, 
-                detail=f"音声データサイズが上限を超えています。上限: {MAX_PAYLOAD_SIZE}バイト"
+                status_code=413,
+                detail=f"音声データサイズが上限を超えています。上限: {MAX_PAYLOAD_SIZE}バイト",
             )
 
         # ヘッダー除去（"data:audio/～;base64,..."形式の場合）
@@ -602,39 +601,47 @@ async def static_file(path: str):
 if __name__ == "__main__":
     import hypercorn.asyncio
     from hypercorn.config import Config
-    
+
     # Hypercornの設定
     config = Config()
     config.bind = [f"0.0.0.0:{PORT}"]
     config.loglevel = "info" if not DEBUG else "debug"
-    config.accesslog = '-'
-    config.errorlog = '-'
+    config.accesslog = "-"
+    config.errorlog = "-"
     config.workers = 1
-    
+
     # SSL/TLS設定（証明書と秘密鍵のパスを指定）
-    if SSL_CERT_PATH and SSL_KEY_PATH and os.path.exists(SSL_CERT_PATH) and os.path.exists(SSL_KEY_PATH):
+    if (
+        SSL_CERT_PATH
+        and SSL_KEY_PATH
+        and os.path.exists(SSL_CERT_PATH)
+        and os.path.exists(SSL_KEY_PATH)
+    ):
         config.certfile = SSL_CERT_PATH
         config.keyfile = SSL_KEY_PATH
         # SSLプロトコルを明示的に設定して安全性と互換性を確保
         config.ciphers = "ECDHE+AESGCM:ECDHE+CHACHA20:DHE+AESGCM:DHE+CHACHA20"
         logger.info("SSL/TLSが有効化されました")
-        
+
         # HTTP/2を有効化し優先する
         config.alpn_protocols = ["h2", "http/1.1"]
         config.h2_max_concurrent_streams = 250  # HTTP/2の同時ストリーム数を設定
         config.h2_max_inbound_frame_size = 2**14  # HTTP/2フレームの最大サイズを設定
         logger.info("HTTP/2が有効化されました")
     else:
-        logger.warning("SSL/TLS証明書が見つからないか設定されていません。HTTP/1.1のみで動作します")
+        logger.warning(
+            "SSL/TLS証明書が見つからないか設定されていません。HTTP/1.1のみで動作します"
+        )
         # HTTP/1.1のみを使用
         config.alpn_protocols = ["http/1.1"]
-    
+
     logger.info(
         "Hypercornを使用してFastAPIアプリを起動します（TLS設定：%s） DEBUG: %s",
         "有効" if hasattr(config, "certfile") else "無効",
         bool(DEBUG),
     )
-    
+
     # Hypercornでアプリを起動
     import asyncio
+
     asyncio.run(hypercorn.asyncio.serve(app, config))

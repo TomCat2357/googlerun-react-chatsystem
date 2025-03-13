@@ -8,11 +8,8 @@ import csv
 from PIL import Image
 from typing import Dict, List, Any, Optional, Tuple
 import docx2txt
-from utils.common import (
-    logger,
-    MAX_LONG_EDGE,
-    MAX_IMAGE_SIZE
-)
+from utils.common import logger, MAX_LONG_EDGE, MAX_IMAGE_SIZE
+
 
 def process_uploaded_image(image_data: str) -> str:
     """
@@ -68,6 +65,7 @@ def process_uploaded_image(image_data: str) -> str:
         logger.error("画像処理エラー: %s", str(e), exc_info=True)
         return image_data
 
+
 def process_audio_file(audio_data: Dict[str, str]) -> Dict[str, str]:
     """
     音声ファイルを処理する
@@ -75,7 +73,7 @@ def process_audio_file(audio_data: Dict[str, str]) -> Dict[str, str]:
     try:
         name = audio_data.get("name", "audio.wav")
         content = audio_data.get("content", "")
-        
+
         # ヘッダー除去（"data:audio/～;base64,..."形式の場合）
         mime_type = "audio/wav"  # デフォルト
         if content.startswith("data:"):
@@ -83,14 +81,16 @@ def process_audio_file(audio_data: Dict[str, str]) -> Dict[str, str]:
             if ";" in mime_parts and ":" in mime_parts:
                 mime_type = mime_parts.split(":", 1)[1].split(";", 1)[0]
             content = content.split(",", 1)[1]
-        
-        logger.debug(f"音声ファイル処理: {name}, MIMEタイプ: {mime_type}, サイズ: {len(content)//1024}KB")
-        
+
+        logger.debug(
+            f"音声ファイル処理: {name}, MIMEタイプ: {mime_type}, サイズ: {len(content)//1024}KB"
+        )
+
         return {
             "name": name,
             "content": f"[Audio: {name}] 文字起こししてください",  # チャット履歴用表示テキストに文字起こし指示を追加
             "data": content,  # base64エンコードされたデータ
-            "mime_type": mime_type  # MIMEタイプを保存
+            "mime_type": mime_type,  # MIMEタイプを保存
         }
     except Exception as e:
         logger.error("音声ファイル処理エラー: %s", str(e), exc_info=True)
@@ -98,8 +98,9 @@ def process_audio_file(audio_data: Dict[str, str]) -> Dict[str, str]:
             "name": audio_data.get("name", "audio.mp3"),
             "content": "[Audio file processing error]",
             "data": "",
-            "mime_type": "audio/mpeg"
+            "mime_type": "audio/mpeg",
         }
+
 
 def process_text_file(text_file: Dict[str, str]) -> Dict[str, str]:
     """
@@ -109,23 +110,18 @@ def process_text_file(text_file: Dict[str, str]) -> Dict[str, str]:
         name = text_file.get("name", "file.txt")
         content = text_file.get("content", "")
         file_type = text_file.get("type", "text")
-        
+
         # ファイルタイプに応じた処理
         if file_type == "csv":
             # CSVのプレビューを作成
             preview = parse_csv_preview(content)
-            return {
-                "name": name,
-                "type": "csv",
-                "content": content,
-                "preview": preview
-            }
+            return {"name": name, "type": "csv", "content": content, "preview": preview}
         elif file_type == "docx":
             return {
                 "name": name,
                 "type": "docx",
                 "content": content,
-                "preview": f"[Document: {name}]"
+                "preview": f"[Document: {name}]",
             }
         else:
             # 通常のテキストファイル
@@ -133,7 +129,7 @@ def process_text_file(text_file: Dict[str, str]) -> Dict[str, str]:
                 "name": name,
                 "type": "text",
                 "content": content,
-                "preview": content[:100] + ("..." if len(content) > 100 else "")
+                "preview": content[:100] + ("..." if len(content) > 100 else ""),
             }
     except Exception as e:
         logger.error("テキストファイル処理エラー: %s", str(e), exc_info=True)
@@ -141,8 +137,9 @@ def process_text_file(text_file: Dict[str, str]) -> Dict[str, str]:
             "name": text_file.get("name", "file.txt"),
             "type": text_file.get("type", "text"),
             "content": "[Text file processing error]",
-            "preview": "[Text file processing error]"
+            "preview": "[Text file processing error]",
         }
+
 
 def parse_csv_preview(content: str, max_rows: int = 5) -> str:
     """
@@ -151,17 +148,18 @@ def parse_csv_preview(content: str, max_rows: int = 5) -> str:
     try:
         preview_lines = []
         csv_reader = csv.reader(content.splitlines())
-        
+
         for i, row in enumerate(csv_reader):
             if i >= max_rows:
                 preview_lines.append("...")
                 break
             preview_lines.append(", ".join(row))
-        
+
         return "\n".join(preview_lines)
     except Exception as e:
         logger.error("CSV解析エラー: %s", str(e), exc_info=True)
         return "[CSV parsing error]"
+
 
 def process_docx_text(docx_content: str) -> str:
     """
@@ -171,12 +169,12 @@ def process_docx_text(docx_content: str) -> str:
     try:
         # base64デコード
         binary_data = base64.b64decode(docx_content)
-        
+
         # 一時ファイルに保存
-        with tempfile.NamedTemporaryFile(suffix='.docx', delete=False) as temp_file:
+        with tempfile.NamedTemporaryFile(suffix=".docx", delete=False) as temp_file:
             temp_file_path = temp_file.name
             temp_file.write(binary_data)
-        
+
         try:
             # docx2txtを使用してテキスト抽出
             text = docx2txt.process(temp_file_path)
@@ -189,6 +187,7 @@ def process_docx_text(docx_content: str) -> str:
         logger.error("DOCXテキスト抽出エラー: %s", str(e), exc_info=True)
         return "[DOCX text extraction error]"
 
+
 def prepare_message_for_ai(message: Dict[str, Any]) -> Dict[str, Any]:
     """
     メッセージを処理してAIモデルに送信できる形式に変換する
@@ -198,18 +197,18 @@ def prepare_message_for_ai(message: Dict[str, Any]) -> Dict[str, Any]:
     try:
         processed_message = {
             "role": message.get("role", "user"),
-            "content": message.get("content", "")
+            "content": message.get("content", ""),
         }
-        
+
         # 添付ファイルのテキスト内容を含める場合、元のコンテンツに追加
         additional_content = []
-        
+
         # 音声ファイルの処理
         if "audioFiles" in message and message["audioFiles"]:
             for audio in message["audioFiles"]:
                 processed_audio = process_audio_file(audio)
                 additional_content.append(f"[音声ファイル: {processed_audio['name']}]")
-        
+
         # テキストファイルの処理
         if "textFiles" in message and message["textFiles"]:
             for text_file in message["textFiles"]:
@@ -217,31 +216,35 @@ def prepare_message_for_ai(message: Dict[str, Any]) -> Dict[str, Any]:
                 file_type_label = {
                     "text": "テキストファイル",
                     "csv": "CSVファイル",
-                    "docx": "Wordファイル"
+                    "docx": "Wordファイル",
                 }.get(processed_text["type"], "ファイル")
-                
-                additional_content.append(f"\n--- {file_type_label}: {processed_text['name']} ---\n")
+
+                additional_content.append(
+                    f"\n--- {file_type_label}: {processed_text['name']} ---\n"
+                )
                 additional_content.append(processed_text["content"])
                 additional_content.append("\n--- ファイル終了 ---\n")
-        
+
         # 追加コンテンツがある場合はメッセージに追加
         if additional_content:
             if processed_message["content"]:
                 processed_message["content"] += "\n\n"
             processed_message["content"] += "\n".join(additional_content)
-        
+
         # 画像処理（従来の形式）
         if "images" in message and message["images"]:
             parts = []
             if processed_message["content"]:
                 parts.append({"type": "text", "text": processed_message["content"]})
-            
+
             for image in message["images"]:
                 processed_image = process_uploaded_image(image)
-                parts.append({"type": "image_url", "image_url": {"url": processed_image}})
-            
+                parts.append(
+                    {"type": "image_url", "image_url": {"url": processed_image}}
+                )
+
             processed_message["content"] = parts
-        
+
         return processed_message
     except Exception as e:
         logger.error("メッセージ処理エラー: %s", str(e), exc_info=True)
