@@ -88,11 +88,38 @@ def wrap_asyncgenerator_logger(meta_info: dict = {}):
                 else:
                     streaming_log = {}
 
-                # 現在のチャンクをログ辞書に追加してログ出力
-                streaming_log["chunk"] = chunk
+                # chunkが文字列の場合、長さを制限する
+                if (
+                    isinstance(chunk, str)
+                    and len(chunk) > GENERATOR_LOG_MAX_TEXT_LENGTH
+                ):
+                    truncated_chunk = (
+                        chunk[:GENERATOR_LOG_MAX_TEXT_LENGTH]
+                        + f"... (省略: 合計{len(chunk)}文字)"
+                    )
+                    streaming_log["chunk"] = truncated_chunk
+                # chunkが辞書やリストなど他の型の場合
+                elif (
+                    isinstance(chunk, (dict, list))
+                    and len(str(chunk)) > GENERATOR_LOG_MAX_TEXT_LENGTH
+                ):
+                    # 文字列に変換して長さを確認
+                    chunk_str = str(chunk)
+                    if len(chunk_str) > GENERATOR_LOG_MAX_TEXT_LENGTH:
+                        truncated_chunk = (
+                            chunk_str[:GENERATOR_LOG_MAX_TEXT_LENGTH]
+                            + f"... (省略: 合計{len(chunk_str)}文字)"
+                        )
+                        streaming_log["chunk"] = truncated_chunk
+                    else:
+                        streaming_log["chunk"] = chunk
+                else:
+                    streaming_log["chunk"] = chunk
+
+                # ログ出力
                 logger.info(streaming_log)
 
-                # チャンクを次の処理へ渡す
+                # 元のチャンクを次の処理へ渡す（切り詰めたのはログ用だけ）
                 yield chunk
 
         return wrapper
@@ -180,8 +207,56 @@ IMAGEN_ADD_WATERMARK = os.getenv("IMAGEN_ADD_WATERMARK")
 IMAGEN_SAFETY_FILTER_LEVELS = os.getenv("IMAGEN_SAFETY_FILTER_LEVELS")
 IMAGEN_PERSON_GENERATIONS = os.getenv("IMAGEN_PERSON_GENERATIONS")
 
+# 環境変数から最大ログテキスト長を取得
+GENERATOR_LOG_MAX_TEXT_LENGTH = int(os.getenv("GENERATOR_LOG_MAX_TEXT_LENGTH"))
+
+# 環境変数から最大JSONログテキスト長を取得
+JSON_LOG_MAX_TEXT_LENGTH = int(os.getenv("JSON_LOG_MAX_TEXT_LENGTH"))
+
 
 def get_api_key_for_model(model: str) -> Optional[str]:
     """モデル名からAPIキーを取得する"""
     source = model.split("/")[0] if "/" in model else model
     return json.loads(os.getenv("MODEL_API_KEYS", "{}")).get(source, "")
+
+
+def create_dict_logger(input_dict: dict = {}, meta_info: dict = {}):
+    """
+    辞書にメタ情報を追加してログ出力する関数を生成する
+    長いテキスト値は指定された長さに切り詰める
+
+    Args:
+        input_dict (dict): ログに出力する辞書
+        meta_info (dict): ログに追加する追加情報の辞書
+
+    Returns:
+        dict: 結合した辞書
+    """
+    enriched_dict = copy(meta_info)
+
+    # input_dictの各値を処理して長すぎる場合は切り詰める
+    truncated_input = {}
+    for key, value in input_dict.items():
+        if isinstance(value, str) and len(value) > JSON_LOG_MAX_TEXT_LENGTH:
+            truncated_value = (
+                value[:JSON_LOG_MAX_TEXT_LENGTH] + f"... (省略: 合計{len(value)}文字)"
+            )
+            truncated_input[key] = truncated_value
+        elif not isinstance(value, str) and len(str(value)) > JSON_LOG_MAX_TEXT_LENGTH:
+            value_str = str(value)
+            truncated_value = (
+                value_str[:JSON_LOG_MAX_TEXT_LENGTH]
+                + f"... (省略: 合計{len(value_str)}文字)"
+            )
+            truncated_input[key] = truncated_value
+        else:
+            truncated_input[key] = value
+
+    # 切り詰めた辞書をenriched_dictに追加
+    enriched_dict.update(truncated_input)
+
+    # 更新された辞書をログ出力
+    logger.info(enriched_dict)
+
+    # 更新された辞書を返す
+    return enriched_dict
