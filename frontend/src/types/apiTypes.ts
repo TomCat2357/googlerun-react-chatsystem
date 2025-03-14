@@ -10,11 +10,6 @@ export interface Message {
 export interface ChatRequest {
   messages: Message[];
   model: string;
-  chunked?: boolean;
-  chunkId?: string;
-  chunkIndex?: number;
-  totalChunks?: number;
-  chunkData?: string;
 }
 
 export interface ChatHistory {

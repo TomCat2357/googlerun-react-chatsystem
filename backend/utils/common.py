@@ -7,7 +7,7 @@ import ipaddress
 from PIL import Image
 from google.cloud import secretmanager
 from firebase_admin import auth, credentials
-from typing import Dict, Optional, Any, List
+from typing import Dict, Optional, Any, List, Callable
 from fastapi import HTTPException, Request
 import time
 import json
@@ -56,36 +56,55 @@ else:
 # 現在のモジュール用のロガーを取得
 logger = logging.getLogger(__name__)
 
-def wrap_logger(generator_func):
+
+def wrap_dict_logger(meta_info: dict = {}) -> Callable[[dict], dict]:
     """
-    非同期ジェネレーター関数をラップしてログ出力を追加するデコレータ関数
-    
-    Args:
-        generator_func: ラップする非同期ジェネレーター関数
-        
-    Returns:
-        wrapper: ログ機能が追加された非同期ジェネレーター関数
+    辞書を返す関数をラップしてログ出力を追加するデコレータ関数
     """
-    @wraps(generator_func)
-    async def wrapper(meta_info : dict = {}, *args, **kwargs):
-        # meta_infoパラメータの取得（直接渡されるか、kwargsから取得）
-        meta_info = meta_info or kwargs.get("meta_info")
-        
-        # 元のジェネレーター関数を実行し、各チャンクを処理
-        async for chunk in generator_func(*args, **kwargs):
-            # ログ用の辞書を準備（meta_infoのディープコピーまたは新規辞書）
-            if isinstance(meta_info, dict):
-                streaming_log = copy(meta_info)
-            else:
-                streaming_log = {}
-                
-            # 現在のチャンクをログ辞書に追加してログ出力
-            streaming_log["chunk"] = chunk
-            logger.info(streaming_log)
-            
-            # チャンクを次の処理へ渡す
-            yield chunk
+    def wrapper(Dict : dict) -> dict:
+        ret_info = copy(meta_info)
+        # 元の関数を実行して結果を取得
+        ret_info.update(Dict)
+        # ログを出力
+        logger.info(ret_info)
+        return ret_info
     return wrapper
+
+
+
+def wrap_generator_logger(meta_info={}):
+    """
+    非同期ジェネレーター関数をラップしてログ出力を追加するデコレータファクトリ
+
+    Args:
+        meta_info: ログに追加するメタ情報の辞書
+
+    Returns:
+        decorator: 実際のデコレータ関数
+    """
+    def decorator(generator_func):
+        @wraps(generator_func)
+        async def wrapper(*args, **kwargs):
+            # meta_infoパラメータの取得（直接渡されるか、kwargsから取得）
+            local_meta_info = meta_info or kwargs.get("meta_info")
+
+            # 元のジェネレーター関数を実行し、各チャンクを処理
+            async for chunk in generator_func(*args, **kwargs):
+                # ログ用の辞書を準備（meta_infoのディープコピーまたは新規辞書）
+                if isinstance(local_meta_info, dict):
+                    streaming_log = copy(local_meta_info)
+                else:
+                    streaming_log = {}
+
+                # 現在のチャンクをログ辞書に追加してログ出力
+                streaming_log["chunk"] = chunk
+                logger.info(streaming_log)
+
+                # チャンクを次の処理へ渡す
+                yield chunk
+
+        return wrapper
+    return decorator
 
 # ===== アプリケーション設定 =====
 PORT = int(os.getenv("PORT", "8080"))
@@ -192,8 +211,6 @@ def get_google_maps_api_key():
         if not api_key:
             raise Exception("Google Maps APIキーが見つかりません")
     return api_key
-
-
 
 
 def get_api_key_for_model(model: str) -> Optional[str]:

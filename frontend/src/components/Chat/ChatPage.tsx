@@ -11,6 +11,7 @@ import ChatInput from "./ChatInput";
 import FilePreview from "./FilePreview";
 import FileViewerModal from "./FileViewerModal";
 import ErrorModal from "./ErrorModal";
+import generateId from "../../utils/idGenerator";
 
 const ChatPage: React.FC = () => {
   // ==========================
@@ -400,6 +401,8 @@ const ChatPage: React.FC = () => {
         throw new Error(`リクエストサイズ (${requestSize} bytes) が上限 (${MAX_PAYLOAD_SIZE} bytes) を超えています。添付ファイルを減らすか、テキストを短くしてください。`);
       }
 
+      const requestId: string = generateId();
+
       // 標準のHTTPリクエストを送信
       const response = await fetch(`${API_BASE_URL}/backend/chat`, {
         method: "POST",
@@ -407,6 +410,7 @@ const ChatPage: React.FC = () => {
           "Content-Type": "application/json",
           Accept: "text/event-stream",
           Authorization: `Bearer ${token}`,
+          "X-Request-Id": requestId
         },
         signal,
         body: jsonStr,

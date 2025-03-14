@@ -11,7 +11,8 @@ from fastapi import (
 )
 from utils.common import (
     logger,
-    wrap_logger,
+    wrap_generator_logger,
+    wrap_dict_logger,
     # limit_remote_addr,
     MAX_IMAGES,
     MAX_AUDIO_FILES,
@@ -107,16 +108,16 @@ async def get_current_user(request: Request):
 
 
 # IPガードミドルウェア
-@app.middleware("http")
-async def ip_guard(request: Request, call_next):
-    try:
-        # limit_remote_addr(request)
-        response = await call_next(request)
-        logger.debug("レスポンスタイプ: %s", str(type(response)))
-        logger.debug("レスポンス: %s", str(response))
-        return response
-    except HTTPException as exc:
-        return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+#@app.middleware("http")
+#async def ip_guard(request: Request, call_next):
+#    try:
+#        # limit_remote_addr(request)
+#        response = await call_next(request)
+#        logger.debug("レスポンスタイプ: %s", str(type(response)))
+#        logger.debug("レスポンス: %s", str(response))
+#        return response
+#    except HTTPException as exc:
+#        return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
 
 
 # リクエストモデル
@@ -129,11 +130,13 @@ class GeocodeRequest(BaseModel):
 class ChatRequest(BaseModel):
     messages: List[Dict[str, Any]]
     model: str
-    id: Optional[str] = Field(default_factory=lambda: uuid4().hex[:12])
+    #id: Optional[str] = Field(default_factory=lambda: uuid4().hex[:12])
 
 
 class SpeechToTextRequest(BaseModel):
     audio_data: str
+    #id: Optional[str] = Field(default_factory=lambda: uuid4().hex[:12])  # ChatRequestと同様のID自動生成
+
 
 
 class GenerateImageRequest(BaseModel):
@@ -152,15 +155,19 @@ class GenerateImageRequest(BaseModel):
 # 新しいRESTful APIエンドポイント - ジオコーディング
 @app.post("/backend/geocoding")
 async def geocoding_endpoint(
-    request: GeocodeRequest, current_user: Dict = Depends(get_current_user)
+    request : Request,
+    geocode_request: GeocodeRequest, current_user: Dict = Depends(get_current_user)
 ):
     """
     ジオコーディングのための新しいRESTfulエンドポイント
     """
-    mode = request.mode
-    lines = request.lines
-    options = request.options
-
+    mode = geocode_request.mode
+    lines = geocode_request.lines
+    options = geocode_request.options
+    # request_id
+    request_id = request.headers.get("X-Request-Id", "R" + uuid4().hex[:12]) # RはRandomの意味 フロントエンドのものはFをつける
+    logger.debug(f"リクエストID: {request_id}")
+    
     # 上限件数のチェック
     max_batch_size = (
         GEOCODING_WITH_IMAGE_MAX_BATCH_SIZE
@@ -257,8 +264,10 @@ async def geocoding_endpoint(
 
 
 @app.get("/backend/config")
-async def get_config(current_user: Dict = Depends(get_current_user)):
+async def get_config(request: Request, current_user: Dict = Depends(get_current_user)) -> JSONResponse:
     try:
+        request_id = request.headers.get("X-Request-Id", "R" + uuid4().hex[:12]) # RはRandomの意味 フロントエンドのものはFをつける        
+        logger.debug(f"リクエストID: {request_id}")
         config_values = {
             "MAX_IMAGES": MAX_IMAGES,
             "MAX_AUDIO_FILES": MAX_AUDIO_FILES,
@@ -279,15 +288,17 @@ async def get_config(current_user: Dict = Depends(get_current_user)):
             "IMAGEN_SAFETY_FILTER_LEVELS": IMAGEN_SAFETY_FILTER_LEVELS,
             "IMAGEN_PERSON_GENERATIONS": IMAGEN_PERSON_GENERATIONS,
         }
-        return config_values
+        return wrap_dict_logger({"X-Response-Id" : request_id})(config_values)
     except Exception as e:
         logger.error("Config取得エラー: %s", str(e), exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/backend/verify-auth")
-async def verify_auth(current_user: Dict = Depends(get_current_user)):
+async def verify_auth(request : Request, current_user: Dict = Depends(get_current_user)) -> JSONResponse:
     try:
+        request_id = request.headers.get("X-Request-Id", "R" + uuid4().hex[:12]) # RはRandomの意味 フロントエンドのものはFをつける
+        logger.debug(f"認証検証リクエストID: {request_id}")
         logger.debug("認証検証開始")
         logger.debug("トークンの復号化成功。ユーザー: %s", current_user.get("email"))
         response_data = {
@@ -298,8 +309,9 @@ async def verify_auth(current_user: Dict = Depends(get_current_user)):
             },
             "expire_time": current_user.get("exp"),
         }
+        
         logger.debug("認証検証完了")
-        return response_data
+        return wrap_dict_logger({"X-Response-Id" : request_id})(response_data)
     except Exception as e:
         logger.error("認証エラー: %s", str(e), exc_info=True)
         raise HTTPException(status_code=401, detail=str(e))
@@ -310,10 +322,10 @@ async def chat(
     request: Request,
     chat_request: ChatRequest,
     current_user: Dict = Depends(get_current_user),
-):
+) -> StreamingResponse:
     logger.debug("チャットリクエストを処理中")
     try:
-        request_id = chat_request.id
+        request_id = request.headers.get("X-Request-Id", "R" + uuid4().hex[:12]) # RはRandomの意味 フロントエンドのものはFをつける
         logger.debug(f"リクエストID: {request_id}")
 
         messages = chat_request.messages
@@ -379,8 +391,8 @@ async def chat(
                 logger.debug(f"メッセージ[{i}]: role={role}, parts={parts_info}")
 
         # ストリーミングレスポンスの作成
-        @wrap_logger
-        async def generate_stream(meta_info: dict = {}):
+        @wrap_generator_logger(meta_info={'X-Response-Id' : request_id})
+        async def generate_stream():
             for chunk in common_message_function(
                 model=model,
                 stream=True,
@@ -390,7 +402,7 @@ async def chat(
                 yield chunk
 
         return StreamingResponse(
-            generate_stream({'ID' : request_id}),
+            generate_stream(),
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "Transfer-Encoding": "chunked"},
         )
@@ -404,11 +416,17 @@ async def chat(
 
 @app.post("/backend/speech2text")
 async def speech2text(
-    request: SpeechToTextRequest, current_user: Dict = Depends(get_current_user)
+    request: Request,  # FastAPIのRequestオブジェクトを追加
+    speech_request: SpeechToTextRequest,  # 変数名を変更して明確化
+    current_user: Dict = Depends(get_current_user)
 ):
     logger.debug("音声認識処理開始")
     try:
-        audio_data = request.audio_data
+        # リクエストヘッダーからIDを取得し、なければ新しく生成する
+        request_id = request.headers.get("X-Request-Id", "R" + uuid4().hex[:12]) # RはRandomの意味 フロントエンドのものはFをつける
+        logger.debug(f"音声認識リクエストID: {request_id}")
+        
+        audio_data = speech_request.audio_data
 
         if not audio_data:
             logger.error("音声データが見つかりません")
@@ -487,10 +505,12 @@ async def speech2text(
         logger.debug(
             f"文字起こし結果: {len(full_transcript)} 文字, {len(timed_transcription)} セグメント"
         )
-        return {
+        content = {
             "transcription": full_transcript.strip(),
             "timed_transcription": timed_transcription,
         }
+        return wrap_dict_logger({"X-Response-Id" : request_id})(content)
+    
     except HTTPException as he:
         raise he
     except Exception as e:
@@ -500,19 +520,24 @@ async def speech2text(
 
 @app.post("/backend/generate-image")
 async def generate_image_endpoint(
-    request: GenerateImageRequest, current_user: Dict = Depends(get_current_user)
+    request : Request,
+    generate_image_request: GenerateImageRequest, 
+    current_user: Dict = Depends(get_current_user)
 ):
-    prompt = request.prompt
-    model_name = request.model_name
-    negative_prompt = request.negative_prompt
-    number_of_images = request.number_of_images
-    seed = request.seed
-    aspect_ratio = request.aspect_ratio
-    language = request.language
-    add_watermark = request.add_watermark
-    safety_filter_level = request.safety_filter_level
-    person_generation = request.person_generation
-
+    prompt = generate_image_request.prompt
+    model_name = generate_image_request.model_name
+    negative_prompt = generate_image_request.negative_prompt
+    number_of_images = generate_image_request.number_of_images
+    seed = generate_image_request.seed
+    aspect_ratio = generate_image_request.aspect_ratio
+    language = generate_image_request.language
+    add_watermark = generate_image_request.add_watermark
+    safety_filter_level = generate_image_request.safety_filter_level
+    person_generation = generate_image_request.person_generation
+    
+    request_id = request.headers.get("X-Request-Id", "R" + uuid4().hex[:12]) # RはRandomの意味 フロントエンドのものはFをつける
+    logger.debug(f"リクエストID: {request_id}")
+    
     kwargs = dict(
         prompt=prompt,
         model_name=model_name,
@@ -547,7 +572,9 @@ async def generate_image_endpoint(
         for img_obj in image_list:
             img_base64 = img_obj._as_base64_string()
             encode_images.append(img_base64)
-        return {"images": encode_images}
+        content = {"images": encode_images}
+        
+        return wrap_dict_logger({"X-Response-Id" : request_id})(content)
     except HTTPException as he:
         raise he
     except Exception as e:
@@ -557,10 +584,14 @@ async def generate_image_endpoint(
 
 
 @app.post("/backend/logout")
-async def logout():
+async def logout(request : Request):
     try:
+        request_id = request.headers.get("X-Request-Id", "R" + uuid4().hex[:12]) # RはRandomの意味 フロントエンドのものはFをつける
+        logger.debug(f"ログアウトリクエストID: {request_id}")
         logger.debug("ログアウト処理開始")
-        return {"status": "success", "message": "ログアウトに成功しました"}
+        content = {"status": "success", "message": "ログアウトに成功しました"}
+        return wrap_dict_logger({"X-Response-Id" : request_id})(content)
+    
     except Exception as e:
         logger.error("ログアウト処理中にエラーが発生: %s", str(e), exc_info=True)
         raise HTTPException(status_code=401, detail=str(e))

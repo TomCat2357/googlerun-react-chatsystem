@@ -6,6 +6,7 @@ import * as Config from "../../config";
 import * as Encoding from "encoding-japanese";
 import { MapControls } from "./MapControls";
 import { imageCache } from "../../utils/imageCache";
+import generateId from "../../utils/idGenerator";
 
 // メッセージタイプの定義（APIレスポンスと互換性を保つ）
 enum MessageType {
@@ -319,12 +320,6 @@ const GeocodingPage = () => {
       // 中止用のコントローラーを作成
       abortControllerRef.current = new AbortController();
       
-      // リクエストヘッダー
-      const headers = {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      };
-
       // リクエストボディ
       const body = JSON.stringify({
         mode: inputMode,
@@ -335,7 +330,11 @@ const GeocodingPage = () => {
       // fetchリクエストを開始
       const response = await fetch(endpoint, {
         method: "POST",
-        headers,
+        headers:{
+          "Content-Type" : "application/json",
+          "X-Request-Id" : generateId(),
+          "Authorization" : `Bearer ${token}`
+        },
         body,
         signal: abortControllerRef.current.signal,
       });

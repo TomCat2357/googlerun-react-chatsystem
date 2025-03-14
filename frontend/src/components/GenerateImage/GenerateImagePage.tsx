@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from "react";
 import { useToken } from "../../hooks/useToken";
 import * as Config from "../../config";
-
+import generateId from "../../utils/idGenerator";
 
 interface ImageGenerationParams {
   prompt: string;
@@ -173,16 +173,15 @@ const GenerateImagePage: React.FC = () => {
         safety_filter_level: params.safety_filter_level,
         person_generation: params.person_generation,
       };
-
       const response = await fetch(`${API_BASE_URL}/backend/generate-image`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
+          "X-Request-Id": generateId(), // リクエストIDを追加
         },
         body: JSON.stringify(payload),
       });
-
       if (!response.ok) {
         const errorData = await response.json();
         throw new Error(errorData.error || "画像生成に失敗しました");
