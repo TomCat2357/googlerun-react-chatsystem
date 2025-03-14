@@ -6,7 +6,7 @@ import AudioUploader, { AudioInfo } from "./AudioUploader";
 import MetadataEditor from "./MetadataEditor";
 import AudioTranscriptPlayer, { TimedSegment } from "./AudioTranscriptPlayer";
 import TranscriptExporter from "./TranscriptExporter";
-
+import { generateRequestId } from '../../utils/requestIdUtils';
 
 const SpeechToTextPage = () => {
 
@@ -183,19 +183,16 @@ const SpeechToTextPage = () => {
         base64Data = base64Data.split(',')[1];
       }
       
-      // データサイズのチェック
-      const estimatedSize = base64Data.length * 0.75; // Base64は約4/3のサイズになるため、デコードサイズを推定
-      
-      if (estimatedSize > MAX_PAYLOAD_SIZE) {
-        throw new Error(`音声データが大きすぎます (約${Math.round(estimatedSize/1024)}KB)。上限は${Math.round(MAX_PAYLOAD_SIZE/1024)}KBです。音声ファイルを圧縮するか、より短い音声で試してください。`);
-      }
+      const requestId = generateRequestId();
+      console.log(`音声送信リクエストID: ${requestId}`);
       
       // 標準のHTTPリクエストを使用
       const response = await fetch(`${API_BASE_URL}/backend/speech2text`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`
+          "Authorization": `Bearer ${token}`,
+          "X-Request-Id": requestId
         },
         body: JSON.stringify({ audio_data: base64Data })
       });

@@ -155,15 +155,27 @@ export async function loadServerConfig() {
 /**
  * サーバーから設定を取得し、メモリとIndexedDBに保存する関数
  * @param token 認証トークン
+ * @param requestId リクエストID（省略可能）
  * @returns 取得したサーバー設定
  */
-export async function fetchAndSaveServerConfig(token: string): Promise<typeof serverConfig> {
+export async function fetchAndSaveServerConfig(
+  token: string, 
+  requestId?: string
+): Promise<typeof serverConfig> {
   try {
+    // ヘッダーの準備
+    const headers: Record<string, string> = {
+      "Authorization": `Bearer ${token}`
+    };
+    
+    // リクエストIDが指定されていれば追加
+    if (requestId) {
+      headers["X-Request-Id"] = requestId;
+    }
+
     const response = await fetch(`${API_BASE_URL}/backend/config`, {
       method: "GET",
-      headers: {
-        "Authorization": `Bearer ${token}`
-      }
+      headers: headers
     });
 
     if (!response.ok) {
@@ -180,6 +192,7 @@ export async function fetchAndSaveServerConfig(token: string): Promise<typeof se
     throw error;
   }
 }
+
 
 // モジュール読み込み時に IndexedDB から設定をロード
 loadServerConfig()

@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from "react";
 import { useToken } from "../../hooks/useToken";
 import * as Config from "../../config";
-
+import { generateRequestId } from '../../utils/requestIdUtils';
 
 interface ImageGenerationParams {
   prompt: string;
@@ -174,11 +174,15 @@ const GenerateImagePage: React.FC = () => {
         person_generation: params.person_generation,
       };
 
+      const requestId = generateRequestId();
+      console.log(`画像生成リクエストID: ${requestId}`);
+
       const response = await fetch(`${API_BASE_URL}/backend/generate-image`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
+          "X-Request-Id": requestId,
         },
         body: JSON.stringify(payload),
       });

@@ -4,7 +4,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { getAuth, setPersistence, browserSessionPersistence, signInWithPopup, GoogleAuthProvider } from 'firebase/auth';
 import { app } from '../../firebase/firebase';
 import * as Config from '../../config';
-
+import { generateRequestId } from '../../utils/requestIdUtils';
 
 export default function LoginButton() {
   const [error, setError] = useState<string>('');
@@ -24,7 +24,12 @@ export default function LoginButton() {
 
       // ログイン後、IDトークンを取得してサーバー設定を取得
       const token = await result.user.getIdToken();
-      await Config.fetchAndSaveServerConfig(token);
+
+      // リクエストIDを生成
+      const requestId = generateRequestId();
+      console.log(`ログインリクエストID: ${requestId}`);
+
+      await Config.fetchAndSaveServerConfig(token, requestId);
 
       navigate(Config.getClientPath('/app/main'));
     } catch (err) {
