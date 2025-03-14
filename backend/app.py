@@ -107,8 +107,6 @@ async def get_current_user(request: Request):
         raise HTTPException(status_code=401, detail=str(e))
 
 
-
-
 # リクエストモデル
 class GeocodeRequest(BaseModel):
     mode: str
@@ -119,7 +117,6 @@ class GeocodeRequest(BaseModel):
 class ChatRequest(BaseModel):
     messages: List[Dict[str, Any]]
     model: str
-
 
 
 class SpeechToTextRequest(BaseModel):
@@ -247,15 +244,17 @@ async def geocoding_endpoint(
 
 
 @app.get("/backend/config")
-async def get_config(current_user: Dict = Depends(get_current_user)):
+async def get_config(request: Request, current_user: Dict = Depends(get_current_user)):
     try:
+        request_id = request.headers.get("X-Request-Id", generate_request_id())
+        logger.debug("リクエストID: %s", request_id)
+
         config_values = {
             "MAX_IMAGES": MAX_IMAGES,
             "MAX_AUDIO_FILES": MAX_AUDIO_FILES,
             "MAX_TEXT_FILES": MAX_TEXT_FILES,
             "MAX_LONG_EDGE": MAX_LONG_EDGE,
             "MAX_IMAGE_SIZE": MAX_IMAGE_SIZE,
-
             "GOOGLE_MAPS_API_CACHE_TTL": GOOGLE_MAPS_API_CACHE_TTL,
             "GEOCODING_NO_IMAGE_MAX_BATCH_SIZE": GEOCODING_NO_IMAGE_MAX_BATCH_SIZE,
             "GEOCODING_WITH_IMAGE_MAX_BATCH_SIZE": GEOCODING_WITH_IMAGE_MAX_BATCH_SIZE,
@@ -269,14 +268,15 @@ async def get_config(current_user: Dict = Depends(get_current_user)):
             "IMAGEN_SAFETY_FILTER_LEVELS": IMAGEN_SAFETY_FILTER_LEVELS,
             "IMAGEN_PERSON_GENERATIONS": IMAGEN_PERSON_GENERATIONS,
         }
-        return config_values
+        logger.debug("Config取得成功")
+        return create_dict_logger(config_values, {"X-Request-Id": request_id})
     except Exception as e:
         logger.error("Config取得エラー: %s", str(e), exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/backend/verify-auth")
-async def verify_auth(request : Request, current_user: Dict = Depends(get_current_user)):
+async def verify_auth(request: Request, current_user: Dict = Depends(get_current_user)):
     try:
         logger.debug("認証検証開始")
         logger.debug("トークンの復号化成功。ユーザー: %s", current_user.get("email"))
@@ -291,7 +291,7 @@ async def verify_auth(request : Request, current_user: Dict = Depends(get_curren
             "expire_time": current_user.get("exp"),
         }
         logger.debug("認証検証完了")
-        return create_dict_logger(response_data, {'X-Request-Id': request_id})
+        return create_dict_logger(response_data, {"X-Request-Id": request_id})
     except Exception as e:
         logger.error("認証エラー: %s", str(e), exc_info=True)
         raise HTTPException(status_code=401, detail=str(e))
@@ -318,8 +318,6 @@ async def chat(
             )
 
         model_api_key = get_api_key_for_model(model)
-
-
 
         # メッセージ変換処理のログ出力を追加
         transformed_messages = []
@@ -365,7 +363,7 @@ async def chat(
                 logger.debug(f"メッセージ[{i}]: role={role}, parts={parts_info}")
 
         # ストリーミングレスポンスの作成
-        @wrap_asyncgenerator_logger(meta_info={'X-Request-Id': request_id})
+        @wrap_asyncgenerator_logger(meta_info={"X-Request-Id": request_id})
         async def generate_stream():
             for chunk in common_message_function(
                 model=model,
@@ -390,19 +388,22 @@ async def chat(
 
 @app.post("/backend/speech2text")
 async def speech2text(
-    request: SpeechToTextRequest, current_user: Dict = Depends(get_current_user)
+    request: Request,
+    speech_request: SpeechToTextRequest,
+    current_user: Dict = Depends(get_current_user),
 ):
     logger.debug("音声認識処理開始")
     try:
-        audio_data = request.audio_data
+        request_id = request.headers.get("X-Request-Id", generate_request_id())
+        logger.debug(f"リクエストID: {request_id}")
+
+        audio_data = speech_request.audio_data
 
         if not audio_data:
             logger.error("音声データが見つかりません")
             raise HTTPException(
                 status_code=400, detail="音声データが提供されていません"
             )
-
-
 
         # ヘッダー除去（"data:audio/～;base64,..."形式の場合）
         if audio_data.startswith("data:"):
@@ -468,10 +469,13 @@ async def speech2text(
         logger.debug(
             f"文字起こし結果: {len(full_transcript)} 文字, {len(timed_transcription)} セグメント"
         )
-        return {
+
+        response_data = {
             "transcription": full_transcript.strip(),
             "timed_transcription": timed_transcription,
         }
+
+        return create_dict_logger(response_data, {"X-Request-Id": request_id})
     except HTTPException as he:
         raise he
     except Exception as e:
@@ -481,18 +485,23 @@ async def speech2text(
 
 @app.post("/backend/generate-image")
 async def generate_image_endpoint(
-    request: GenerateImageRequest, current_user: Dict = Depends(get_current_user)
+    request: Request,
+    image_request: GenerateImageRequest, 
+    current_user: Dict = Depends(get_current_user)
 ):
-    prompt = request.prompt
-    model_name = request.model_name
-    negative_prompt = request.negative_prompt
-    number_of_images = request.number_of_images
-    seed = request.seed
-    aspect_ratio = request.aspect_ratio
-    language = request.language
-    add_watermark = request.add_watermark
-    safety_filter_level = request.safety_filter_level
-    person_generation = request.person_generation
+    request_id = request.headers.get("X-Request-Id", generate_request_id())
+    logger.debug(f"リクエストID: {request_id}")
+    
+    prompt = image_request.prompt
+    model_name = image_request.model_name
+    negative_prompt = image_request.negative_prompt
+    number_of_images = image_request.number_of_images
+    seed = image_request.seed
+    aspect_ratio = image_request.aspect_ratio
+    language = image_request.language
+    add_watermark = image_request.add_watermark
+    safety_filter_level = image_request.safety_filter_level
+    person_generation = image_request.person_generation
 
     kwargs = dict(
         prompt=prompt,
@@ -528,7 +537,9 @@ async def generate_image_endpoint(
         for img_obj in image_list:
             img_base64 = img_obj._as_base64_string()
             encode_images.append(img_base64)
-        return {"images": encode_images}
+        
+        response_data = {"images": encode_images}
+        return create_dict_logger(response_data, {'X-Request-Id': request_id})
     except HTTPException as he:
         raise he
     except Exception as e:
@@ -538,10 +549,14 @@ async def generate_image_endpoint(
 
 
 @app.post("/backend/logout")
-async def logout():
+async def logout(request: Request):
     try:
+        request_id = request.headers.get("X-Request-Id", generate_request_id())
+        logger.debug(f"リクエストID: {request_id}")
         logger.debug("ログアウト処理開始")
-        return {"status": "success", "message": "ログアウトに成功しました"}
+        
+        response_data = {"status": "success", "message": "ログアウトに成功しました"}
+        return create_dict_logger(response_data, {'X-Request-Id': request_id})
     except Exception as e:
         logger.error("ログアウト処理中にエラーが発生: %s", str(e), exc_info=True)
         raise HTTPException(status_code=401, detail=str(e))
