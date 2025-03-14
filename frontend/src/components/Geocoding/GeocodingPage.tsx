@@ -6,6 +6,7 @@ import * as Config from "../../config";
 import * as Encoding from "encoding-japanese";
 import { MapControls } from "./MapControls";
 import { imageCache } from "../../utils/imageCache";
+import { generateRequestId } from "../../utils/requestIdUtils";
 
 // メッセージタイプの定義（APIレスポンスと互換性を保つ）
 enum MessageType {
@@ -101,14 +102,14 @@ async function getCachedResult(query: string): Promise<GeoResult | null> {
 async function getCachedResultByLatLng(lat: number, lng: number): Promise<GeoResult | null> {
   // 緯度経度を標準形式に変換
   const cacheKey = getLatlngCacheKey(lat, lng);
-  
+
   const db = await openCacheDB();
   return new Promise((resolve, reject) => {
     const transaction = db.transaction("geocodeCache", "readonly");
     const store = transaction.objectStore("geocodeCache");
     const index = store.index("cache_key");
     const req = index.get(cacheKey);
-    
+
     req.onsuccess = () => {
       const result = req.result ? req.result : null;
 
@@ -141,7 +142,7 @@ async function setCachedResult(result: GeoResult): Promise<void> {
   if (result.mode === "latlng" && result.latitude !== null && result.longitude !== null && !result.cache_key) {
     result.cache_key = getLatlngCacheKey(result.latitude, result.longitude);
   }
-  
+
   const db = await openCacheDB();
   return new Promise((resolve, reject) => {
     const transaction = db.transaction("geocodeCache", "readwrite");
@@ -194,7 +195,7 @@ const GeocodingPage = () => {
 
   // エラー関連のstate
   const [fetchError, setFetchError] = useState("");
-  
+
   // 地図表示用のstate
   const [showSatellite, setShowSatellite] = useState(false);
   const [showStreetView, setShowStreetView] = useState(false);
@@ -237,7 +238,7 @@ const GeocodingPage = () => {
 
     setResults((prevResults) => {
       const newResults = [...prevResults];
-      
+
       // キャッシュデータを保存
       if (!result.isCached) {
         setCachedResult(result).catch((err) =>
@@ -372,20 +373,30 @@ const GeocodingPage = () => {
     }
 
     try {
-      // APIエンドポイントのURL
-      const endpoint = 
-        process.env.NODE_ENV === "development" 
-          ? "http://localhost:8080/backend/geocoding"
-          : "/backend/geocoding";
+      // 修正: config.tsのAPI関連関数を使用
+      const endpoint = Config.getApiUrl("/backend/geocoding");
+
+      console.log("送信するリクエスト:", {
+        url: endpoint,
+        mode: inputMode,
+        lineCount: lineDataList.length,
+        // リクエストの詳細をログ出力
+      });
 
       // 中止用のコントローラーを作成
       abortControllerRef.current = new AbortController();
-      
+
+      const requestId = generateRequestId();
+      console.log("リクエストID:", requestId);
+
       // リクエストヘッダー
       const headers = {
         "Content-Type": "application/json",
         Authorization: `Bearer ${token}`,
+        "X-Request-Id": requestId,
       };
+
+      // 以下は元のコード...
 
       // リクエストオプション
       const options = {
@@ -403,6 +414,20 @@ const GeocodingPage = () => {
         mode: inputMode,
         lines: lineDataList,
         options,
+      });
+
+      // デバッグ出力を追加
+      console.log("送信するリクエスト:", {
+        url: endpoint,
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Bearer [トークン省略]"
+        },
+        body: {
+          mode: inputMode,
+          lines: lineDataList,
+          options
+        }
       });
 
       // fetchリクエストを開始
@@ -483,7 +508,7 @@ const GeocodingPage = () => {
     if (allLines.length > maxBatchSize) {
       alert(
         `入力された件数は${allLines.length}件ですが、1回の送信で取得可能な上限は${maxBatchSize}件です。\n` +
-          `件数を減らして再度送信してください。`
+        `件数を減らして再度送信してください。`
       );
       return;
     }
@@ -492,13 +517,13 @@ const GeocodingPage = () => {
     setProgress(0);
     setFetchError("");
     setProcessedCount(0);
-    
+
     // 予想される最大処理アイテム数を設定（ジオコード + 画像）
     setTotalItems(allLines.length);
 
     // 初期結果配列の準備
     const initialResults: GeoResult[] = [];
-    
+
     // 最適化リクエスト用の行データを準備
     const optimizedLineData: GeocodingLineData[] = [];
 
@@ -514,10 +539,10 @@ const GeocodingPage = () => {
     // 各行についてキャッシュをチェック
     for (let i = 0; i < allLines.length; i++) {
       const line = allLines[i];
-      
+
       // キャッシュチェック
       let cachedResult: GeoResult | null = null;
-      
+
       if (inputMode === "address") {
         // 住所モードの場合はクエリでキャッシュ検索
         cachedResult = await getCachedResult(line);
@@ -559,17 +584,17 @@ const GeocodingPage = () => {
             cachedResult.fetchedAt
           ).toLocaleString()}`
         );
-        
+
         // 緯度経度のキャッシュ状態
         lineData.has_geocode_cache = true;
         lineData.latitude = cachedResult.latitude;
         lineData.longitude = cachedResult.longitude;
-        
+
         // 画像キャッシュの状態
-        if ((showSatellite || showStreetView) && 
-            cachedResult.latitude !== null && 
-            cachedResult.longitude !== null) {
-          
+        if ((showSatellite || showStreetView) &&
+          cachedResult.latitude !== null &&
+          cachedResult.longitude !== null) {
+
           // 衛星画像キャッシュをチェック
           if (showSatellite) {
             const cachedSatelliteImage = getCachedImage(
@@ -580,7 +605,7 @@ const GeocodingPage = () => {
             );
             lineData.has_satellite_cache = !!cachedSatelliteImage;
           }
-          
+
           // ストリートビュー画像キャッシュをチェック
           if (showStreetView) {
             const cachedStreetViewImage = getCachedImage(
@@ -592,19 +617,19 @@ const GeocodingPage = () => {
             lineData.has_streetview_cache = !!cachedStreetViewImage;
           }
         }
-        
+
         // 初期結果配列に追加
         initialResults.push({
           ...cachedResult,
           isCached: true,
-          satelliteImage: lineData.has_satellite_cache 
-            ? getCachedImage(cachedResult.latitude, cachedResult.longitude, options, "satellite") 
+          satelliteImage: lineData.has_satellite_cache
+            ? getCachedImage(cachedResult.latitude, cachedResult.longitude, options, "satellite")
             : undefined,
-          streetViewImage: lineData.has_streetview_cache 
-            ? getCachedImage(cachedResult.latitude, cachedResult.longitude, options, "streetview") 
+          streetViewImage: lineData.has_streetview_cache
+            ? getCachedImage(cachedResult.latitude, cachedResult.longitude, options, "streetview")
             : undefined,
-          imageLoading: (showSatellite && !lineData.has_satellite_cache) || 
-                        (showStreetView && !lineData.has_streetview_cache)
+          imageLoading: (showSatellite && !lineData.has_satellite_cache) ||
+            (showStreetView && !lineData.has_streetview_cache)
         });
       } else {
         // キャッシュがない場合は、初期状態を設定
@@ -622,7 +647,7 @@ const GeocodingPage = () => {
           fetchedAt: Date.now(),
         });
       }
-      
+
       // 最適化リクエスト用の行データを追加
       optimizedLineData.push(lineData);
     }
@@ -846,11 +871,10 @@ const GeocodingPage = () => {
             <button
               onClick={handleSendLines}
               disabled={lineCount === 0}
-              className={`px-4 py-2 text-white rounded transition-colors duration-200 ${
-                lineCount === 0
-                  ? "bg-blue-400 cursor-not-allowed opacity-50"
-                  : "bg-blue-600 hover:bg-blue-700"
-              }`}
+              className={`px-4 py-2 text-white rounded transition-colors duration-200 ${lineCount === 0
+                ? "bg-blue-400 cursor-not-allowed opacity-50"
+                : "bg-blue-600 hover:bg-blue-700"
+                }`}
             >
               送信
             </button>
