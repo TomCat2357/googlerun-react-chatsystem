@@ -142,19 +142,19 @@ class GenerateImageRequest(BaseModel):
     person_generation: Optional[str] = None
 
 
-# 新しいジオコーディングエンドポイント
 @app.post("/backend/geocoding")
 async def geocoding_endpoint(
-    request: GeocodeRequest, current_user: Dict = Depends(get_current_user)
+    request : Request,
+    geocoding_request: GeocodeRequest, current_user: Dict = Depends(get_current_user)
 ):
     """
     ジオコーディングのための最適化されたRESTfulエンドポイント
     クライアントからキャッシュ情報を受け取り、
     最小限のAPI呼び出しで結果と画像を取得する
     """
-    mode = request.mode
-    lines = request.lines
-    options = request.options
+    mode = geocoding_request.mode
+    lines = geocoding_request.lines
+    options = geocoding_request.options
 
     # 上限件数のチェック
     max_batch_size = (
@@ -188,7 +188,12 @@ async def geocoding_endpoint(
 
     logger.debug(f"重複排除後のクエリ数: {len(unique_queries)} (元: {len(lines)})")
 
+    # リクエストIDを取得
+    request_id = request.headers.get("X-Request-Id", generate_request_id())
+    logger.debug(f"ジオコーディングリクエストID: {request_id}")
+
     # StreamingResponseを使って結果を非同期的に返す
+    @wrap_asyncgenerator_logger(meta_info={"X-Request-Id": request_id})
     async def generate_results():
         # 並行処理用のタスクリスト
         tasks = []
@@ -254,6 +259,7 @@ async def geocoding_endpoint(
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "Transfer-Encoding": "chunked"},
     )
+
 
 
 
