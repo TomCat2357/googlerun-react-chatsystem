@@ -4,17 +4,12 @@ from fastapi import (
     HTTPException,
     Depends,
     Request,
-    Response,
-    Body,
-    File,
-    UploadFile,
 )
 from utils.common import (
     logger,
     wrap_asyncgenerator_logger,
     create_dict_logger,
     generate_request_id,
-    # limit_remote_addr,
     MAX_IMAGES,
     MAX_AUDIO_FILES,
     MAX_TEXT_FILES,
@@ -41,10 +36,12 @@ from utils.common import (
     IMAGEN_SAFETY_FILTER_LEVELS,
     IMAGEN_PERSON_GENERATIONS,
     get_api_key_for_model,
-    get_latlng_cache_key,
-    get_google_maps_api_key,
 )
 
+from utils.geocoding_service import (
+    get_google_maps_api_key,
+    process_optimized_geocode
+)
 
 from fastapi.responses import JSONResponse, StreamingResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -55,10 +52,8 @@ from typing import Dict, Any, List, Optional, Callable
 from firebase_admin import auth, credentials
 import firebase_admin
 import os, json, asyncio, base64, time
-from uuid import uuid4
 
 
-from utils.geocoding_service import process_single_geocode, process_map_images
 from utils.chat_utils import common_message_function
 from utils.speech2text import transcribe_streaming_v2
 from utils.generate_image import generate_image
@@ -260,134 +255,7 @@ async def geocoding_endpoint(
         headers={"Cache-Control": "no-cache", "Transfer-Encoding": "chunked"},
     )
 
-# 最適化されたジオコード処理関数
-async def process_optimized_geocode(
-    original_indices, query, mode, api_key, timestamp, options,
-    has_geocode_cache, has_satellite_cache, has_streetview_cache,
-    cached_lat, cached_lng
-):
-    """
-    キャッシュ状態を考慮してジオコーディングを最適化して処理する関数
-    
-    Args:
-        original_indices (List[int]): 元のリクエスト内でのインデックスのリスト
-        query (str): 検索クエリ（住所または緯度経度）
-        mode (str): 'address'または'latlng'
-        api_key (str): Google Maps API キー
-        timestamp (int): 現在のタイムスタンプ
-        options (Dict): 表示オプション設定
-        has_geocode_cache (bool): 緯度経度のキャッシュがあるか
-        has_satellite_cache (bool): 衛星画像のキャッシュがあるか
-        has_streetview_cache (bool): ストリートビュー画像のキャッシュがあるか
-        cached_lat (float): キャッシュされた緯度
-        cached_lng (float): キャッシュされた経度
-        
-    Returns:
-        List[str]: レスポンスチャンクのリスト
-    """
-    chunks = []
-    show_satellite = options.get("showSatellite", False)
-    show_street_view = options.get("showStreetView", False)
-    
-    # 緯度経度のキャッシュがある場合は再取得しない
-    if has_geocode_cache and cached_lat is not None and cached_lng is not None:
-        # キャッシュデータを使用
-        if mode == "address":
-            result = {
-                "query": query,
-                "status": "OK",
-                "formatted_address": "",  # クライアントから必要に応じて提供
-                "latitude": cached_lat,
-                "longitude": cached_lng,
-                "location_type": "",
-                "place_id": "",
-                "types": "",
-                "isCached": True,
-                "fetchedAt": timestamp,
-                "mode": mode
-            }
-        else:  # latlng モード
-            result = {
-                "query": query,
-                "status": "OK",
-                "formatted_address": "",  # クライアントから必要に応じて提供
-                "latitude": cached_lat,
-                "longitude": cached_lng,
-                "location_type": "",
-                "place_id": "",
-                "types": "",
-                "isCached": True,
-                "fetchedAt": timestamp,
-                "mode": mode
-            }
-    else:
-        # 通常のジオコーディング処理
-        result = await process_single_geocode(api_key, mode, query, timestamp)
-    
-    # 各インデックスに対してジオコーディング結果を送信
-    for idx in original_indices:
-        chunks.append(
-            json.dumps({
-                "type": "GEOCODE_RESULT",
-                "payload": {
-                    "index": idx,
-                    "result": result,
-                    "progress": -1,  # 進捗はgenerate_resultsで計算
-                },
-            }) + "\n"
-        )
-    
-    # 画像取得処理（必要かつ緯度経度が有効な場合のみ）
-    if (show_satellite or show_street_view) and result["latitude"] is not None and result["longitude"] is not None:
-        satellite_image = None
-        street_view_image = None
-        
-        # 衛星画像が必要でキャッシュにない場合
-        if show_satellite and not has_satellite_cache:
-            # 衛星画像のみ取得
-            satellite_image, _ = await process_map_images(
-                api_key,
-                result["latitude"],
-                result["longitude"],
-                True,
-                False,  # ストリートビューは別に処理
-                options.get("satelliteZoom", 18),
-                None,
-                0,
-                90
-            )
-        
-        # ストリートビューが必要でキャッシュにない場合
-        if show_street_view and not has_streetview_cache:
-            # ストリートビュー画像のみ取得
-            _, street_view_image = await process_map_images(
-                api_key,
-                result["latitude"],
-                result["longitude"],
-                False,  # 衛星画像は別に処理
-                True,
-                options.get("satelliteZoom", 18),
-                options.get("streetViewHeading"),
-                options.get("streetViewPitch", 0),
-                options.get("streetViewFov", 90)
-            )
-        
-        # 画像結果がある場合のみ返す
-        if satellite_image or street_view_image:
-            for idx in original_indices:
-                chunks.append(
-                    json.dumps({
-                        "type": "IMAGE_RESULT",
-                        "payload": {
-                            "index": idx,
-                            "satelliteImage": satellite_image,
-                            "streetViewImage": street_view_image,
-                            "progress": -1,
-                        },
-                    }) + "\n"
-                )
-    
-    return chunks
+
 
 
 @app.get("/backend/config")
