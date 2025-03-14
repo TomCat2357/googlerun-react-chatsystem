@@ -142,7 +142,6 @@ SECRET_MANAGER_ID_FOR_GOOGLE_MAPS_API_KEY = os.getenv(
 )
 
 # ===== データ制限設定 =====
-MAX_PAYLOAD_SIZE = int(os.getenv("MAX_PAYLOAD_SIZE"))
 MAX_IMAGES = int(os.getenv("MAX_IMAGES"))
 MAX_LONG_EDGE = int(os.getenv("MAX_LONG_EDGE"))
 MAX_IMAGE_SIZE = int(os.getenv("MAX_IMAGE_SIZE"))

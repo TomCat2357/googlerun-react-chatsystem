@@ -31,7 +31,6 @@ from utils.common import (
     GEOCODING_NO_IMAGE_MAX_BATCH_SIZE,
     GEOCODING_WITH_IMAGE_MAX_BATCH_SIZE,
     SPEECH_MAX_SECONDS,
-    MAX_PAYLOAD_SIZE,
     IMAGEN_MODELS,
     IMAGEN_NUMBER_OF_IMAGES,
     IMAGEN_ASPECT_RATIOS,
@@ -266,7 +265,7 @@ async def get_config(current_user: Dict = Depends(get_current_user)):
             "MAX_TEXT_FILES": MAX_TEXT_FILES,
             "MAX_LONG_EDGE": MAX_LONG_EDGE,
             "MAX_IMAGE_SIZE": MAX_IMAGE_SIZE,
-            "MAX_PAYLOAD_SIZE": MAX_PAYLOAD_SIZE,
+
             "GOOGLE_MAPS_API_CACHE_TTL": GOOGLE_MAPS_API_CACHE_TTL,
             "GEOCODING_NO_IMAGE_MAX_BATCH_SIZE": GEOCODING_NO_IMAGE_MAX_BATCH_SIZE,
             "GEOCODING_WITH_IMAGE_MAX_BATCH_SIZE": GEOCODING_WITH_IMAGE_MAX_BATCH_SIZE,
@@ -328,13 +327,7 @@ async def chat(
 
         model_api_key = get_api_key_for_model(model)
 
-        # リクエストサイズチェック
-        request_size = len(json.dumps(chat_request.dict()))
-        if request_size > MAX_PAYLOAD_SIZE:
-            raise HTTPException(
-                status_code=413,
-                detail=f"リクエストサイズが上限を超えています。現在: {request_size}バイト、上限: {MAX_PAYLOAD_SIZE}バイト",
-            )
+
 
         # メッセージ変換処理のログ出力を追加
         transformed_messages = []
@@ -417,12 +410,7 @@ async def speech2text(
                 status_code=400, detail="音声データが提供されていません"
             )
 
-        # データサイズチェック
-        if len(audio_data) > MAX_PAYLOAD_SIZE:
-            raise HTTPException(
-                status_code=413,
-                detail=f"音声データサイズが上限を超えています。上限: {MAX_PAYLOAD_SIZE}バイト",
-            )
+
 
         # ヘッダー除去（"data:audio/～;base64,..."形式の場合）
         if audio_data.startswith("data:"):
