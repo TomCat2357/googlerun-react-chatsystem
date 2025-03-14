@@ -12,6 +12,7 @@ from fastapi import (
 from utils.common import (
     logger,
     wrap_asyncgenerator_logger,
+    create_dict_logger,
     generate_request_id,
     # limit_remote_addr,
     MAX_IMAGES,
@@ -106,17 +107,6 @@ async def get_current_user(request: Request):
         raise HTTPException(status_code=401, detail=str(e))
 
 
-# IPガードミドルウェア
-@app.middleware("http")
-async def ip_guard(request: Request, call_next):
-    try:
-        # limit_remote_addr(request)
-        response = await call_next(request)
-        logger.debug("レスポンスタイプ: %s", str(type(response)))
-        logger.debug("レスポンス: %s", str(response))
-        return response
-    except HTTPException as exc:
-        return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
 
 
 # リクエストモデル
@@ -129,7 +119,7 @@ class GeocodeRequest(BaseModel):
 class ChatRequest(BaseModel):
     messages: List[Dict[str, Any]]
     model: str
-    #id: Optional[str] = Field(default_factory=lambda: uuid4().hex[:12])
+
 
 
 class SpeechToTextRequest(BaseModel):
@@ -286,10 +276,12 @@ async def get_config(current_user: Dict = Depends(get_current_user)):
 
 
 @app.get("/backend/verify-auth")
-async def verify_auth(current_user: Dict = Depends(get_current_user)):
+async def verify_auth(request : Request, current_user: Dict = Depends(get_current_user)):
     try:
         logger.debug("認証検証開始")
         logger.debug("トークンの復号化成功。ユーザー: %s", current_user.get("email"))
+        request_id = request.headers.get("X-Request-Id", generate_request_id())
+        logger.debug("リクエストID: %s", request_id)
         response_data = {
             "status": "success",
             "user": {
@@ -299,7 +291,7 @@ async def verify_auth(current_user: Dict = Depends(get_current_user)):
             "expire_time": current_user.get("exp"),
         }
         logger.debug("認証検証完了")
-        return response_data
+        return create_dict_logger(response_data, {'X-Request-Id': request_id})
     except Exception as e:
         logger.error("認証エラー: %s", str(e), exc_info=True)
         raise HTTPException(status_code=401, detail=str(e))

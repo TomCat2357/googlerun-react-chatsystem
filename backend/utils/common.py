@@ -103,6 +103,27 @@ def wrap_asyncgenerator_logger(meta_info : dict = {}):
         return wrapper
     return decorator
 
+def create_dict_logger(input_dict : dict = {}, meta_info: dict = {}):
+    """
+    辞書にメタ情報を追加してログ出力する関数を生成する
+    
+    Args:
+        meta_info (dict): ログに追加する追加情報の辞書
+        
+    Returns:
+        function: 辞書を受け取り、meta_infoと結合してログ出力し、結合した辞書を返す関数
+    """
+    enriched_dict = copy(meta_info)
+    enriched_dict.update(input_dict)
+    
+    # 更新された辞書をログ出力
+    logger.info(enriched_dict)
+    
+    # 更新された辞書を返す
+    return enriched_dict
+
+
+
 # ===== アプリケーション設定 =====
 PORT = int(os.getenv("PORT", "8080"))
 FRONTEND_PATH = os.getenv("FRONTEND_PATH")

@@ -2,6 +2,8 @@ import { createContext, useContext, useState, useEffect, ReactNode } from 'react
 import { User, getAuth, onAuthStateChanged } from 'firebase/auth';
 import axios from 'axios';
 import * as Config from '../config'; // config.ts からインポート
+import { generateRequestId } from '../utils/requestIdUtils'; // リクエストID生成関数をインポート
+
 
 // interfaceの更新も必要
 interface AuthContextType {
@@ -139,12 +141,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // 最新のトークンを取得
       const token = await auth.currentUser.getIdToken(false);
       console.log('取得した最新トークン(先頭10文字):', token.substring(0, 10) + '...');
+
+      // リクエストIDを生成
+      const requestId = generateRequestId();
+      console.log(`認証確認用リクエストID: ${requestId}`);
       
       // バックエンドへ認証確認リクエスト
       console.log('バックエンドへ認証確認のリクエストを送信します...');
       const response = await axios.get(`${Config.API_BASE_URL}/backend/verify-auth`, {
         headers: {
           Authorization: `Bearer ${token}`,
+          "X-Request-Id": requestId, // リクエストIDをヘッダーに追加
         },
       });
       console.log('バックエンドからのレスポンス:', response.data);
