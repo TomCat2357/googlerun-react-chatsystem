@@ -11,6 +11,7 @@ import ChatInput from "./ChatInput";
 import FilePreview from "./FilePreview";
 import FileViewerModal from "./FileViewerModal";
 import ErrorModal from "./ErrorModal";
+import { generateRequestId } from '../../utils/requestIdUtils';
 
 const ChatPage: React.FC = () => {
   // ==========================
@@ -48,7 +49,7 @@ const ChatPage: React.FC = () => {
   const MAX_TEXT_FILES = Config.getServerConfig().MAX_TEXT_FILES || 5;
   const MAX_LONG_EDGE = Config.getServerConfig().MAX_LONG_EDGE || 1568;
   const MAX_IMAGE_SIZE = Config.getServerConfig().MAX_IMAGE_SIZE || 5242880;
-  const MAX_PAYLOAD_SIZE = Config.getServerConfig().MAX_PAYLOAD_SIZE || 500000;
+  
 
   // ==========================
   //  初期化処理
@@ -276,8 +277,8 @@ const ChatPage: React.FC = () => {
   // 音声ファイルを最適化する（最新のMAX_AUDIO_FILES個だけを残す）
   const optimizeAudioFiles = (messages: Message[], maxAudioFiles: number): Message[] => {
     // すべての音声ファイルを抽出
-    const allAudioFiles: {messageIndex: number, fileId: string}[] = [];
-    
+    const allAudioFiles: { messageIndex: number, fileId: string }[] = [];
+
     messages.forEach((msg, msgIndex) => {
       if (msg.role === "user" && msg.files) {
         msg.files.forEach(file => {
@@ -290,23 +291,23 @@ const ChatPage: React.FC = () => {
         });
       }
     });
-    
+
     if (allAudioFiles.length <= maxAudioFiles) {
       return messages; // 最適化の必要なし
     }
-    
+
     // 保持する最新の音声ファイルのIDを特定（最後のmaxAudioFiles個）
     const keepAudioFileIds = new Set(
       allAudioFiles
         .slice(-maxAudioFiles) // 最後のmaxAudioFiles個を取得（最新のものたち）
         .map(item => item.fileId) // ファイルIDを抽出
     );
-    
+
     // メッセージ配列をディープコピー
     const optimizedMessages = JSON.parse(JSON.stringify(messages));
-    
+
     // 古い音声ファイルを削除
-    optimizedMessages.forEach((msg : Message) => {
+    optimizedMessages.forEach((msg: Message) => {
       if (msg.role === "user" && msg.files) {
         msg.files = msg.files.filter((file: FileData) => {
           // 音声ファイルでない場合は残す
@@ -318,7 +319,7 @@ const ChatPage: React.FC = () => {
         });
       }
     });
-    
+
     return optimizedMessages;
   };
 
@@ -347,12 +348,12 @@ const ChatPage: React.FC = () => {
         files: selectedFiles
       };
 
-      // メッセージ配列に追加
+      // メッセージ配列を更新...
       let updatedMessages: Message[] = [...messages, newUserMessage];
-      
+
       // 音声ファイルの最適化（最新のMAX_AUDIO_FILES個だけを残す）
       updatedMessages = optimizeAudioFiles(updatedMessages, MAX_AUDIO_FILES);
-      
+
       setMessages(updatedMessages);
       setInput("");
       setSelectedFiles([]);
@@ -366,50 +367,21 @@ const ChatPage: React.FC = () => {
         model: selectedModel,
       };
 
-      // 送信前にログ出力する処理を追加
-      const logMessages = updatedMessages.map(msg => {
-        // filesがある場合のみ処理
-        if (msg.files && msg.files.length > 0) {
-          return {
-            ...msg,
-            files: msg.files.map(file => ({
-              ...file,
-              content: file.content.substring(0, 10) + '...' // 最初の10文字だけ表示
-            }))
-          };
-        }
-        return msg;
-      });
-      
-      console.log('バックエンドに送信するチャットデータ:', {
-        ...chatRequest,
-        messages: logMessages
-      });
+      // リクエストIDを生成
+      const requestId = generateRequestId(); // "F" + uuid4の12桁
+      console.log(`生成されたリクエストID: ${requestId}`);
 
-      // 送信データサイズチェック
-      const jsonStr = JSON.stringify(chatRequest);
-      const encoder = new TextEncoder();
-      const chatRequestBytes = encoder.encode(jsonStr);
-      const requestSize = chatRequestBytes.length;
-
-      console.log(`最大リクエストサイズ制限: ${MAX_PAYLOAD_SIZE} バイト`);
-      console.log(`送信データサイズ: ${requestSize} バイト`);
-
-      // サイズ制限のチェック
-      if (requestSize > MAX_PAYLOAD_SIZE) {
-        throw new Error(`リクエストサイズ (${requestSize} bytes) が上限 (${MAX_PAYLOAD_SIZE} bytes) を超えています。添付ファイルを減らすか、テキストを短くしてください。`);
-      }
-
-      // 標準のHTTPリクエストを送信
+      // 標準のHTTPリクエストを送信（ヘッダーにリクエストIDを追加）
       const response = await fetch(`${API_BASE_URL}/backend/chat`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Accept: "text/event-stream",
           Authorization: `Bearer ${token}`,
+          "X-Request-Id": requestId, // リクエストIDをヘッダーに追加
         },
         signal,
-        body: jsonStr,
+        body: JSON.stringify(chatRequest),
       });
 
       if (!response.ok) {

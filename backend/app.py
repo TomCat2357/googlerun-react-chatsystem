@@ -12,6 +12,7 @@ from fastapi import (
 from utils.common import (
     logger,
     wrap_asyncgenerator_logger,
+    generate_request_id,
     # limit_remote_addr,
     MAX_IMAGES,
     MAX_AUDIO_FILES,
@@ -85,7 +86,7 @@ app.add_middleware(
     allow_origins=ORIGINS,
     allow_credentials=True,
     allow_methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["Content-Type", "Authorization"],
+    allow_headers=["Content-Type", "Authorization", "X-Request-Id"],
     expose_headers=["Authorization"],
 )
 
@@ -129,7 +130,7 @@ class GeocodeRequest(BaseModel):
 class ChatRequest(BaseModel):
     messages: List[Dict[str, Any]]
     model: str
-    id: Optional[str] = Field(default_factory=lambda: uuid4().hex[:12])
+    #id: Optional[str] = Field(default_factory=lambda: uuid4().hex[:12])
 
 
 class SpeechToTextRequest(BaseModel):
@@ -313,7 +314,7 @@ async def chat(
 ):
     logger.debug("チャットリクエストを処理中")
     try:
-        request_id = chat_request.id
+        request_id = request.headers.get("X-Request-Id", generate_request_id())
         logger.debug(f"リクエストID: {request_id}")
 
         messages = chat_request.messages

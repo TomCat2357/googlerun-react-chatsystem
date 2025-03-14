@@ -15,6 +15,7 @@ from functools import wraps
 from dotenv import load_dotenv
 from copy import copy
 from functools import wraps
+from uuid import uuid4
 
 # .envファイルを読み込み
 load_dotenv("./config/.env")
@@ -55,6 +56,19 @@ else:
     )
 # 現在のモジュール用のロガーを取得
 logger = logging.getLogger(__name__)
+
+# リクエストIDの生成機能
+def generate_request_id(prefix="B"):
+    """
+    プレフィックス + uuid4の先頭12桁からなるリクエストIDを生成する
+    
+    Args:
+        prefix (str): IDのプレフィックス。デフォルトは"B"（バックエンド）
+        
+    Returns:
+        str: 生成されたリクエストID (プレフィックス + 12桁のuuid)
+    """
+    return f"{prefix}{uuid4().hex[:12]}"
 
 def wrap_asyncgenerator_logger(meta_info : dict = {}):
     """
