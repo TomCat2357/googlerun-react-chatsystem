@@ -2,6 +2,7 @@ import { getAuth } from 'firebase/auth';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import * as Config from '../../config';
+import { generateRequestId } from '../../utils/requestIdUtils';
 
 export default function LogoutButton() {
   const navigate = useNavigate();
@@ -25,11 +26,16 @@ export default function LogoutButton() {
         console.error(`IndexedDB ${dbName} の削除に失敗しました`, event);
       };
 
+      // リクエストIDを生成
+      const requestId = generateRequestId();
+      console.log(`ログアウト処理のリクエストID: ${requestId}`);
+
       // サーバー側のログアウトAPIを呼び出す
-      // frontend/src/components/Auth/LogoutButton.tsx のログアウト後のリダイレクト
-      // ...
       await axios.post(Config.getApiUrl('/backend/logout'), null, {
-        withCredentials: false
+        withCredentials: false,
+        headers: {
+          'X-Request-Id': requestId // リクエストIDをヘッダーに追加
+        }
       });
       navigate(Config.getClientPath('/'));
     } catch (error) {

@@ -122,12 +122,9 @@ def create_dict_logger(input_dict : dict = {}, meta_info: dict = {}):
     # 更新された辞書を返す
     return enriched_dict
 
-
-
 # ===== アプリケーション設定 =====
 PORT = int(os.getenv("PORT", "8080"))
 FRONTEND_PATH = os.getenv("FRONTEND_PATH")
-
 
 # CORS設定
 ORIGINS = [org for org in os.getenv("ORIGINS", "").split(",") if org]
@@ -157,6 +154,9 @@ GEOCODING_NO_IMAGE_MAX_BATCH_SIZE = int(os.getenv("GEOCODING_NO_IMAGE_MAX_BATCH_
 GEOCODING_WITH_IMAGE_MAX_BATCH_SIZE = int(
     os.getenv("GEOCODING_WITH_IMAGE_MAX_BATCH_SIZE")
 )
+# 並行処理のバッチサイズ（追加）
+GEOCODING_BATCH_SIZE = int(os.getenv("GEOCODING_BATCH_SIZE", "5"))
+
 # ===== Secret Manager設定 ===== 環境変数から取得する場合があるので空白許容
 SECRET_MANAGER_ID_FOR_GOOGLE_MAPS_API_KEY = os.getenv(
     "SECRET_MANAGER_ID_FOR_GOOGLE_MAPS_API_KEY", ""
@@ -182,7 +182,6 @@ IMAGEN_ADD_WATERMARK = os.getenv("IMAGEN_ADD_WATERMARK")
 IMAGEN_SAFETY_FILTER_LEVELS = os.getenv("IMAGEN_SAFETY_FILTER_LEVELS")
 IMAGEN_PERSON_GENERATIONS = os.getenv("IMAGEN_PERSON_GENERATIONS")
 
-
 # Secret Managerからシークレットを取得するための関数
 def access_secret(secret_id, version_id="latest"):
     """
@@ -207,7 +206,6 @@ def access_secret(secret_id, version_id="latest"):
         )
         return None
 
-
 # Google Maps APIキーを取得するための関数
 def get_google_maps_api_key():
     """
@@ -229,14 +227,10 @@ def get_google_maps_api_key():
             raise Exception("Google Maps APIキーが見つかりません")
     return api_key
 
-
-
-
 def get_api_key_for_model(model: str) -> Optional[str]:
     """モデル名からAPIキーを取得する"""
     source = model.split("/")[0] if "/" in model else model
     return json.loads(os.getenv("MODEL_API_KEYS", "{}")).get(source, "")
-
 
 def limit_remote_addr(request: Request):
     # クライアント直前のIPアドレスを取得（TCPコネクションのリモートIP）
@@ -293,3 +287,18 @@ def limit_remote_addr(request: Request):
 
     time.sleep(0.05)
     raise HTTPException(status_code=403, detail="アクセスが許可されていません")
+
+# 緯度経度からキャッシュキーを生成（追加）
+def get_latlng_cache_key(lat, lng):
+    """
+    緯度経度からキャッシュキーを生成する関数
+    精度を7桁に制限して緯度経度を文字列に変換する
+    
+    Args:
+        lat (float): 緯度
+        lng (float): 経度
+        
+    Returns:
+        str: "緯度,経度" 形式のキャッシュキー
+    """
+    return f"{round(float(lat), 7)},{round(float(lng), 7)}"

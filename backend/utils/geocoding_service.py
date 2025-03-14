@@ -5,7 +5,8 @@ import time
 from typing import Dict, List, Any, Optional, Tuple
 from utils.common import (
     logger, 
-    get_google_maps_api_key
+    get_google_maps_api_key,
+    get_latlng_cache_key
 )
 from utils.maps import get_coordinates, get_address, get_static_map, get_street_view
 
@@ -77,6 +78,9 @@ async def process_single_geocode(
                 lat = float(parts[0])
                 lng = float(parts[1])
                 
+                # 緯度経度から標準化されたキャッシュキーを生成
+                cache_key = get_latlng_cache_key(lat, lng)
+                
                 if lat < -90 or lat > 90 or lng < -180 or lng > 180:
                     return {
                         "query": query,
@@ -110,7 +114,8 @@ async def process_single_geocode(
                             "error": "",
                             "isCached": False,
                             "fetchedAt": timestamp,
-                            "mode": "latlng"
+                            "mode": "latlng",
+                            "cache_key": cache_key  # キャッシュキーを含める
                         }
                     else:
                         return {
@@ -125,7 +130,8 @@ async def process_single_geocode(
                             "error": geocode_data.get("status", "エラー"),
                             "isCached": False,
                             "fetchedAt": timestamp,
-                            "mode": "latlng"
+                            "mode": "latlng",
+                            "cache_key": cache_key  # キャッシュキーを含める
                         }
             except ValueError:
                 return {
