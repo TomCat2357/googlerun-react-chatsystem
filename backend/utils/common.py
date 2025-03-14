@@ -56,36 +56,38 @@ else:
 # 現在のモジュール用のロガーを取得
 logger = logging.getLogger(__name__)
 
-def wrap_logger(generator_func):
+def wrap_asyncgenerator_logger(meta_info : dict = {}):
     """
     非同期ジェネレーター関数をラップしてログ出力を追加するデコレータ関数
     
     Args:
-        generator_func: ラップする非同期ジェネレーター関数
+        meta_info: ログに追加する追加情報の辞書
         
     Returns:
-        wrapper: ログ機能が追加された非同期ジェネレーター関数
+        decorator: ラップする非同期ジェネレーター関数を受け取るデコレータ関数
     """
-    @wraps(generator_func)
-    async def wrapper(meta_info : dict = {}, *args, **kwargs):
-        # meta_infoパラメータの取得（直接渡されるか、kwargsから取得）
-        meta_info = meta_info or kwargs.get("meta_info")
-        
-        # 元のジェネレーター関数を実行し、各チャンクを処理
-        async for chunk in generator_func(*args, **kwargs):
-            # ログ用の辞書を準備（meta_infoのディープコピーまたは新規辞書）
-            if isinstance(meta_info, dict):
-                streaming_log = copy(meta_info)
-            else:
-                streaming_log = {}
-                
-            # 現在のチャンクをログ辞書に追加してログ出力
-            streaming_log["chunk"] = chunk
-            logger.info(streaming_log)
+    def decorator(generator_func):
+        @wraps(generator_func)
+        async def wrapper(*args, **kwargs):
+            # meta_infoパラメータをクロージャから取得または、kwargsから取得
+            local_meta_info = meta_info or kwargs.get("meta_info")
             
-            # チャンクを次の処理へ渡す
-            yield chunk
-    return wrapper
+            # 元のジェネレーター関数を実行し、各チャンクを処理
+            async for chunk in generator_func(*args, **kwargs):
+                # ログ用の辞書を準備（meta_infoのディープコピーまたは新規辞書）
+                if isinstance(local_meta_info, dict):
+                    streaming_log = copy(local_meta_info)
+                else:
+                    streaming_log = {}
+                    
+                # 現在のチャンクをログ辞書に追加してログ出力
+                streaming_log["chunk"] = chunk
+                logger.info(streaming_log)
+                
+                # チャンクを次の処理へ渡す
+                yield chunk
+        return wrapper
+    return decorator
 
 # ===== アプリケーション設定 =====
 PORT = int(os.getenv("PORT", "8080"))

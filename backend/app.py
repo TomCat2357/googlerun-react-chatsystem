@@ -11,7 +11,7 @@ from fastapi import (
 )
 from utils.common import (
     logger,
-    wrap_logger,
+    wrap_asyncgenerator_logger,
     # limit_remote_addr,
     MAX_IMAGES,
     MAX_AUDIO_FILES,
@@ -379,8 +379,8 @@ async def chat(
                 logger.debug(f"メッセージ[{i}]: role={role}, parts={parts_info}")
 
         # ストリーミングレスポンスの作成
-        @wrap_logger
-        async def generate_stream(meta_info: dict = {}):
+        @wrap_asyncgenerator_logger(meta_info={'X-Request-Id': request_id})
+        async def generate_stream():
             for chunk in common_message_function(
                 model=model,
                 stream=True,
@@ -390,7 +390,7 @@ async def chat(
                 yield chunk
 
         return StreamingResponse(
-            generate_stream({'ID' : request_id}),
+            generate_stream(),
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "Transfer-Encoding": "chunked"},
         )
