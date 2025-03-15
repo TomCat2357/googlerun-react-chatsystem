@@ -35,13 +35,16 @@ from utils.common import (
     IMAGEN_ADD_WATERMARK,
     IMAGEN_SAFETY_FILTER_LEVELS,
     IMAGEN_PERSON_GENERATIONS,
+    CONFIG_LOG_MAX_LENGTH,
+    VERIFY_AUTH_LOG_MAX_LENGTH,
+    SPEECH2TEXT_LOG_MAX_LENGTH,
+    GENERATE_IMAGE_LOG_MAX_LENGTH,
+    LOGOUT_LOG_MAX_LENGTH,
+    CHAT_LOG_MAX_LENGTH,
+    GEOCODING_LOG_MAX_LENGTH,
     get_api_key_for_model,
 )
-
-from utils.geocoding_service import (
-    get_google_maps_api_key,
-    process_optimized_geocode
-)
+from utils.geocoding_service import get_google_maps_api_key, process_optimized_geocode
 
 from fastapi.responses import JSONResponse, StreamingResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -114,6 +117,7 @@ class GeocodeLineData(BaseModel):
     latitude: Optional[float] = None
     longitude: Optional[float] = None
 
+
 class GeocodeRequest(BaseModel):
     mode: str
     lines: List[GeocodeLineData]
@@ -144,8 +148,9 @@ class GenerateImageRequest(BaseModel):
 
 @app.post("/backend/geocoding")
 async def geocoding_endpoint(
-    request : Request,
-    geocoding_request: GeocodeRequest, current_user: Dict = Depends(get_current_user)
+    request: Request,
+    geocoding_request: GeocodeRequest,
+    current_user: Dict = Depends(get_current_user),
 ):
     """
     ジオコーディングのための最適化されたRESTfulエンドポイント
@@ -178,10 +183,7 @@ async def geocoding_endpoint(
         query = line_data.query
         if query not in unique_queries:
             # 最初に出現したクエリの情報をコピー
-            unique_queries[query] = {
-                "data": line_data,
-                "indices": [idx]
-            }
+            unique_queries[query] = {"data": line_data, "indices": [idx]}
         else:
             # 既存のクエリに元のインデックスを追加
             unique_queries[query]["indices"].append(idx)
@@ -193,16 +195,18 @@ async def geocoding_endpoint(
     logger.debug(f"ジオコーディングリクエストID: {request_id}")
 
     # StreamingResponseを使って結果を非同期的に返す
-    @wrap_asyncgenerator_logger(meta_info={"X-Request-Id": request_id})
+    @wrap_asyncgenerator_logger(
+        meta_info={"X-Request-Id": request_id}, max_length=GEOCODING_LOG_MAX_LENGTH
+    )
     async def generate_results():
         # 並行処理用のタスクリスト
         tasks = []
-        
+
         # 重複排除したクエリごとにタスクを作成
         for query, query_info in unique_queries.items():
             line_data = query_info["data"]
             original_indices = query_info["indices"]
-            
+
             # 処理タスクを作成
             task = process_optimized_geocode(
                 original_indices=original_indices,
@@ -215,30 +219,33 @@ async def geocoding_endpoint(
                 has_satellite_cache=line_data.has_satellite_cache,
                 has_streetview_cache=line_data.has_streetview_cache,
                 cached_lat=line_data.latitude,
-                cached_lng=line_data.longitude
+                cached_lng=line_data.longitude,
             )
             tasks.append(task)
-        
+
         # 並行実行（ただし、レート制限を考慮して一度に実行するタスク数を制限）
         chunk_size = GEOCODING_BATCH_SIZE
         total_chunks = (len(tasks) + chunk_size - 1) // chunk_size
         processed_chunks = 0
-        
+
         for i in range(0, len(tasks), chunk_size):
-            chunk = tasks[i:i+chunk_size]
+            chunk = tasks[i : i + chunk_size]
             chunk_results = await asyncio.gather(*chunk)
             processed_chunks += 1
-            
+
             # 進捗計算
             progress_base = int((processed_chunks / total_chunks) * 100)
-            
+
             # 結果を順番に返す
             for result_chunks in chunk_results:
                 for result_chunk in result_chunks:
                     # 進捗情報を埋め込み
                     try:
                         chunk_data = json.loads(result_chunk.rstrip())
-                        if "payload" in chunk_data and "progress" in chunk_data["payload"]:
+                        if (
+                            "payload" in chunk_data
+                            and "progress" in chunk_data["payload"]
+                        ):
                             if chunk_data["payload"]["progress"] == -1:
                                 chunk_data["payload"]["progress"] = progress_base
                             yield json.dumps(chunk_data) + "\n"
@@ -246,11 +253,11 @@ async def geocoding_endpoint(
                             yield result_chunk
                     except:
                         yield result_chunk
-            
+
             # APIレート制限対策の待機
             if i + chunk_size < len(tasks):
                 await asyncio.sleep(1)
-        
+
         # 全ての処理が完了したことを通知
         yield json.dumps({"type": "COMPLETE", "payload": {}}) + "\n"
 
@@ -259,9 +266,6 @@ async def geocoding_endpoint(
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "Transfer-Encoding": "chunked"},
     )
-
-
-
 
 
 @app.get("/backend/config")
@@ -290,7 +294,11 @@ async def get_config(request: Request, current_user: Dict = Depends(get_current_
             "IMAGEN_PERSON_GENERATIONS": IMAGEN_PERSON_GENERATIONS,
         }
         logger.debug("Config取得成功")
-        return create_dict_logger(config_values, {"X-Request-Id": request_id})
+        return create_dict_logger(
+            config_values,
+            {"X-Request-Id": request_id},
+            max_length=CONFIG_LOG_MAX_LENGTH,
+        )
     except Exception as e:
         logger.error("Config取得エラー: %s", str(e), exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
@@ -312,7 +320,11 @@ async def verify_auth(request: Request, current_user: Dict = Depends(get_current
             "expire_time": current_user.get("exp"),
         }
         logger.debug("認証検証完了")
-        return create_dict_logger(response_data, {"X-Request-Id": request_id})
+        return create_dict_logger(
+            response_data,
+            {"X-Request-Id": request_id},
+            max_length=VERIFY_AUTH_LOG_MAX_LENGTH,
+        )
     except Exception as e:
         logger.error("認証エラー: %s", str(e), exc_info=True)
         raise HTTPException(status_code=401, detail=str(e))
@@ -384,7 +396,9 @@ async def chat(
                 logger.debug(f"メッセージ[{i}]: role={role}, parts={parts_info}")
 
         # ストリーミングレスポンスの作成
-        @wrap_asyncgenerator_logger(meta_info={"X-Request-Id": request_id})
+        @wrap_asyncgenerator_logger(
+            meta_info={"X-Request-Id": request_id}, max_length=CHAT_LOG_MAX_LENGTH
+        )
         async def generate_stream():
             for chunk in common_message_function(
                 model=model,
@@ -496,7 +510,11 @@ async def speech2text(
             "timed_transcription": timed_transcription,
         }
 
-        return create_dict_logger(response_data, {"X-Request-Id": request_id})
+        return create_dict_logger(
+            response_data,
+            {"X-Request-Id": request_id},
+            max_length=SPEECH2TEXT_LOG_MAX_LENGTH,
+        )
     except HTTPException as he:
         raise he
     except Exception as e:
@@ -507,12 +525,12 @@ async def speech2text(
 @app.post("/backend/generate-image")
 async def generate_image_endpoint(
     request: Request,
-    image_request: GenerateImageRequest, 
-    current_user: Dict = Depends(get_current_user)
+    image_request: GenerateImageRequest,
+    current_user: Dict = Depends(get_current_user),
 ):
     request_id = request.headers.get("X-Request-Id", generate_request_id())
     logger.debug(f"リクエストID: {request_id}")
-    
+
     prompt = image_request.prompt
     model_name = image_request.model_name
     negative_prompt = image_request.negative_prompt
@@ -558,9 +576,13 @@ async def generate_image_endpoint(
         for img_obj in image_list:
             img_base64 = img_obj._as_base64_string()
             encode_images.append(img_base64)
-        
+
         response_data = {"images": encode_images}
-        return create_dict_logger(response_data, {'X-Request-Id': request_id})
+        return create_dict_logger(
+            response_data,
+            {"X-Request-Id": request_id},
+            max_length=GENERATE_IMAGE_LOG_MAX_LENGTH,
+        )
     except HTTPException as he:
         raise he
     except Exception as e:
@@ -575,9 +597,13 @@ async def logout(request: Request):
         request_id = request.headers.get("X-Request-Id", generate_request_id())
         logger.debug(f"リクエストID: {request_id}")
         logger.debug("ログアウト処理開始")
-        
+
         response_data = {"status": "success", "message": "ログアウトに成功しました"}
-        return create_dict_logger(response_data, {'X-Request-Id': request_id})
+        return create_dict_logger(
+            response_data,
+            {"X-Request-Id": request_id},
+            max_length=LOGOUT_LOG_MAX_LENGTH,
+        )
     except Exception as e:
         logger.error("ログアウト処理中にエラーが発生: %s", str(e), exc_info=True)
         raise HTTPException(status_code=401, detail=str(e))
