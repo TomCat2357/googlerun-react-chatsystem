@@ -9,7 +9,6 @@ from utils.common import (
     logger,
     wrap_asyncgenerator_logger,
     create_dict_logger,
-    generate_request_id,
     MAX_IMAGES,
     MAX_AUDIO_FILES,
     MAX_TEXT_FILES,
@@ -43,7 +42,15 @@ from utils.common import (
     CHAT_LOG_MAX_LENGTH,
     GEOCODING_LOG_MAX_LENGTH,
     get_api_key_for_model,
+    log_request,
+    # 以下の行を追加
+    get_current_user,
+    GeocodeRequest,
+    ChatRequest,
+    SpeechToTextRequest,
+    GenerateImageRequest,
 )
+
 from utils.geocoding_service import get_google_maps_api_key, process_optimized_geocode
 
 from fastapi.responses import JSONResponse, StreamingResponse, FileResponse
@@ -54,7 +61,7 @@ from pydantic import BaseModel, Field
 from typing import Dict, Any, List, Optional, Callable
 from firebase_admin import auth, credentials
 import firebase_admin
-import os, json, asyncio, base64, time
+import os, json, asyncio, base64, time, re
 
 
 from utils.chat_utils import common_message_function
@@ -92,58 +99,67 @@ app.add_middleware(
 )
 
 
-# 認証ミドルウェア用の依存関係
-async def get_current_user(request: Request):
-    auth_header = request.headers.get("Authorization")
-    if not auth_header or not auth_header.startswith("Bearer "):
-        logger.warning("トークンが見つかりません")
-        raise HTTPException(status_code=401, detail="認証が必要です")
 
-    token = auth_header.split("Bearer ")[1]
-    try:
-        decoded_token = auth.verify_id_token(token, clock_skew_seconds=60)
-        return decoded_token
-    except Exception as e:
-        logger.error("認証エラー: %s", str(e), exc_info=True)
-        raise HTTPException(status_code=401, detail=str(e))
+@app.middleware("http")
+async def log_request_middleware(request: Request, call_next):
+    # OPTIONSリクエストの場合はリクエストIDのチェックをスキップ
+    if request.method == "OPTIONS":
+        return await call_next(request)
 
-
-# リクエストモデル（更新）
-class GeocodeLineData(BaseModel):
-    query: str
-    has_geocode_cache: Optional[bool] = False
-    has_satellite_cache: Optional[bool] = False
-    has_streetview_cache: Optional[bool] = False
-    latitude: Optional[float] = None
-    longitude: Optional[float] = None
-
-
-class GeocodeRequest(BaseModel):
-    mode: str
-    lines: List[GeocodeLineData]
-    options: Dict[str, Any]
-
-
-class ChatRequest(BaseModel):
-    messages: List[Dict[str, Any]]
-    model: str
-
-
-class SpeechToTextRequest(BaseModel):
-    audio_data: str
-
-
-class GenerateImageRequest(BaseModel):
-    prompt: str
-    model_name: str
-    negative_prompt: Optional[str] = None
-    number_of_images: Optional[int] = None
-    seed: Optional[int] = None
-    aspect_ratio: Optional[str] = None
-    language: Optional[str] = "auto"
-    add_watermark: Optional[bool] = None
-    safety_filter_level: Optional[str] = None
-    person_generation: Optional[str] = None
+    request_id = request.headers.get("X-Request-Id", "")
+    
+    # リクエストIDのバリデーション (Fで始まる12桁の16進数)
+    if not request_id or not re.match(r'^F[0-9a-f]{12}$', request_id):
+        logger.error({
+            "event": "invalid_request_id",
+            "path": request.url.path,
+            "method": request.method,
+            "client": request.client.host if request.client else "unknown",
+            "request_id": request_id
+        })
+        
+        # 不正なリクエストIDの場合、403 Forbiddenを返す
+        return JSONResponse(
+            status_code=403,
+            content={
+                "error": "無効なリクエストIDです"
+            }
+        )
+    
+    start_time = time.time()
+    
+    # リクエスト基本情報のロギング
+    path = request.url.path
+    method = request.method
+    client_host = request.client.host if request.client else "unknown"
+    
+    # リクエスト開始ログ
+    logger.info({
+        "event": "request_received",
+        "X-Request-Id": request_id,
+        "path": path,
+        "method": method,
+        "client": client_host,
+        "user_agent": request.headers.get("user-agent", "unknown")
+    })
+    
+    # 次の処理へ
+    response = await call_next(request)
+    
+    # 処理時間の計算
+    process_time = time.time() - start_time
+    
+    # レスポンス情報のロギング
+    logger.info({
+        "event": "request_completed",
+        "X-Request-Id": request_id,
+        "path": path,
+        "method": method,
+        "status_code": response.status_code,
+        "process_time_sec": round(process_time, 4)
+    })
+    
+    return response
 
 
 @app.post("/backend/geocoding")
@@ -191,7 +207,7 @@ async def geocoding_endpoint(
     logger.debug(f"重複排除後のクエリ数: {len(unique_queries)} (元: {len(lines)})")
 
     # リクエストIDを取得
-    request_id = request.headers.get("X-Request-Id", generate_request_id())
+    request_id = request.headers.get("X-Request-Id", "")
     logger.debug(f"ジオコーディングリクエストID: {request_id}")
 
     # StreamingResponseを使って結果を非同期的に返す
@@ -271,7 +287,7 @@ async def geocoding_endpoint(
 @app.get("/backend/config")
 async def get_config(request: Request, current_user: Dict = Depends(get_current_user)):
     try:
-        request_id = request.headers.get("X-Request-Id", generate_request_id())
+        request_id = request.headers.get("X-Request-Id", "")
         logger.debug("リクエストID: %s", request_id)
 
         config_values = {
@@ -309,7 +325,7 @@ async def verify_auth(request: Request, current_user: Dict = Depends(get_current
     try:
         logger.debug("認証検証開始")
         logger.debug("トークンの復号化成功。ユーザー: %s", current_user.get("email"))
-        request_id = request.headers.get("X-Request-Id", generate_request_id())
+        request_id = request.headers.get("X-Request-Id", "")
         logger.debug("リクエストID: %s", request_id)
         response_data = {
             "status": "success",
@@ -334,11 +350,12 @@ async def verify_auth(request: Request, current_user: Dict = Depends(get_current
 async def chat(
     request: Request,
     chat_request: ChatRequest,
-    current_user: Dict = Depends(get_current_user),
+    current_user: Dict = Depends(get_current_user)
 ):
     logger.debug("チャットリクエストを処理中")
     try:
-        request_id = request.headers.get("X-Request-Id", generate_request_id())
+        request_id = await log_request(request, chat_request, CHAT_LOG_MAX_LENGTH)
+        # request_id = request.headers.get("X-Request-Id", "") - この行は削除、request_idが依存関係から来るため
         logger.debug(f"リクエストID: {request_id}")
 
         messages = chat_request.messages
@@ -349,6 +366,7 @@ async def chat(
             raise HTTPException(
                 status_code=400, detail="モデル情報が提供されていません"
             )
+
 
         model_api_key = get_api_key_for_model(model)
 
@@ -429,7 +447,7 @@ async def speech2text(
 ):
     logger.debug("音声認識処理開始")
     try:
-        request_id = request.headers.get("X-Request-Id", generate_request_id())
+        request_id = request.headers.get("X-Request-Id", "")
         logger.debug(f"リクエストID: {request_id}")
 
         audio_data = speech_request.audio_data
@@ -528,7 +546,7 @@ async def generate_image_endpoint(
     image_request: GenerateImageRequest,
     current_user: Dict = Depends(get_current_user),
 ):
-    request_id = request.headers.get("X-Request-Id", generate_request_id())
+    request_id = request.headers.get("X-Request-Id", "")
     logger.debug(f"リクエストID: {request_id}")
 
     prompt = image_request.prompt
@@ -594,7 +612,7 @@ async def generate_image_endpoint(
 @app.post("/backend/logout")
 async def logout(request: Request):
     try:
-        request_id = request.headers.get("X-Request-Id", generate_request_id())
+        request_id = request.headers.get("X-Request-Id", "")
         logger.debug(f"リクエストID: {request_id}")
         logger.debug("ログアウト処理開始")
 

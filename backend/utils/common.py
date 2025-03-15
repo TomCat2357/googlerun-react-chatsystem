@@ -368,3 +368,62 @@ def sanitize_request_data(data: Any, sensitive_keys: List[str] = None) -> Any:
         return [sanitize_request_data(item, sensitive_keys) for item in data]
     else:
         return data
+
+# 既存のimportに追加
+from pydantic import BaseModel, Field
+from typing import Dict, Any, List, Optional, Callable
+from fastapi import Request, HTTPException
+from firebase_admin import auth
+
+# モデルクラス定義
+class GeocodeLineData(BaseModel):
+    query: str
+    has_geocode_cache: Optional[bool] = False
+    has_satellite_cache: Optional[bool] = False
+    has_streetview_cache: Optional[bool] = False
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+
+
+class GeocodeRequest(BaseModel):
+    mode: str
+    lines: List[GeocodeLineData]
+    options: Dict[str, Any]
+
+
+class ChatRequest(BaseModel):
+    messages: List[Dict[str, Any]]
+    model: str
+
+
+class SpeechToTextRequest(BaseModel):
+    audio_data: str
+
+
+class GenerateImageRequest(BaseModel):
+    prompt: str
+    model_name: str
+    negative_prompt: Optional[str] = None
+    number_of_images: Optional[int] = None
+    seed: Optional[int] = None
+    aspect_ratio: Optional[str] = None
+    language: Optional[str] = "auto"
+    add_watermark: Optional[bool] = None
+    safety_filter_level: Optional[str] = None
+    person_generation: Optional[str] = None
+
+# 認証ミドルウェア用の依存関係
+async def get_current_user(request: Request):
+    auth_header = request.headers.get("Authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
+        logger.warning("トークンが見つかりません")
+        raise HTTPException(status_code=401, detail="認証が必要です")
+
+    token = auth_header.split("Bearer ")[1]
+    try:
+        decoded_token = auth.verify_id_token(token, clock_skew_seconds=60)
+        return decoded_token
+    except Exception as e:
+        logger.error("認証エラー: %s", str(e), exc_info=True)
+        raise HTTPException(status_code=401, detail=str(e))
+
