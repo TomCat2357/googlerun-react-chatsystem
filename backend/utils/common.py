@@ -2,12 +2,13 @@
 import logging
 import os
 import json
-from typing import List, Any, Optional
+from typing import Dict, List, Any, Optional, Callable
 from functools import wraps
 from dotenv import load_dotenv
 from copy import copy
-from uuid import uuid4
-from fastapi import Request
+from fastapi import Request, HTTPException
+from pydantic import BaseModel, Field
+from firebase_admin import auth
 
 # .envファイルを読み込み
 load_dotenv("./config/.env")
@@ -86,6 +87,7 @@ VERIFY_AUTH_LOG_MAX_LENGTH = int(os.getenv("VERIFY_AUTH_LOG_MAX_LENGTH"))
 SPEECH2TEXT_LOG_MAX_LENGTH = int(os.getenv("SPEECH2TEXT_LOG_MAX_LENGTH"))
 GENERATE_IMAGE_LOG_MAX_LENGTH = int(os.getenv("GENERATE_IMAGE_LOG_MAX_LENGTH"))
 LOGOUT_LOG_MAX_LENGTH = int(os.getenv("LOGOUT_LOG_MAX_LENGTH"))
+MIDDLE_WARE_LOG_MAX_LENGTH = int(os.getenv("MIDDLE_WARE_LOG_MAX_LENGTH"))
 
 # 環境変数DEBUGの値を取得し、デバッグモードの設定を行う
 # デフォルトは空文字列
@@ -121,6 +123,68 @@ else:
 logger = logging.getLogger(__name__)
 
 
+def sanitize_request_data(data: Any, sensitive_keys: List[str] = []) -> Any:
+    """
+    リクエストデータから機密情報を削除する関数
+
+    Args:
+        data (Any): サニタイズするデータ
+        sensitive_keys (List[str]): 機密キーのリスト（省略可）
+
+    Returns:
+        Any: サニタイズされたデータ
+    """
+    if isinstance(data, dict):
+        sanitized = {}
+        for key, value in data.items():
+            if isinstance(key, str) and any(
+                s_key in key.lower() for s_key in sensitive_keys
+            ):
+                sanitized[key] = "[REDACTED]"
+            elif isinstance(value, (dict, list)):
+                sanitized[key] = sanitize_request_data(value, sensitive_keys)
+            else:
+                sanitized[key] = value
+        return sanitized
+    elif isinstance(data, list):
+        return [sanitize_request_data(item, sensitive_keys) for item in data]
+    else:
+        return data
+
+
+def sanitize_data_decorator(sensitive_keys: List[str] = []):
+    """
+    データ内の機密情報を処理するデコレーター
+
+    Args:
+        sensitive_keys (List[str]): 機密情報として扱うキーのリスト。デフォルトはNone。
+
+    Returns:
+        callable: デコレーター関数
+    """
+
+    def decorator(func):
+        @wraps(func)
+        def wrapper(data, max_length=65536, *args, **kwargs):
+            # 入力データから機密情報を処理
+            sanitized_input = sanitize_request_data(data, sensitive_keys)
+
+            # 元の関数を実行
+            result = func(sanitized_input, max_length, *args, **kwargs)
+
+            # 出力データも念のため機密情報を処理
+            sanitized_output = sanitize_request_data(result, sensitive_keys)
+
+            return sanitized_output
+
+        return wrapper
+
+    return decorator
+
+
+@sanitize_data_decorator(
+    sensitive_keys=["authorization", "token", "password", "secret", "api_key", "apikey"]
+)
 def limit_nested_data(data: any, max_length: int = 65536) -> any:
     """
     data に対して再帰的に処理を行い、max_length に基づいて長さを制限する関数。
@@ -218,163 +282,6 @@ def get_api_key_for_model(model: str) -> Optional[str]:
     return json.loads(os.getenv("MODEL_API_KEYS", "{}")).get(source, "")
 
 
-async def log_request(
-    request: Request, request_body: Optional[Any] = None, max_length: int = 1000
-):
-    """
-    リクエスト情報をログに記録する共通の依存関係関数
-
-    Args:
-        request (Request): FastAPIのRequestオブジェクト
-        request_body (Optional[Any]): リクエストボディ（Pydanticモデルなど）
-        max_length (int): ログの最大長
-
-    Returns:
-        str: リクエストID
-    """
-    request_id = request.headers.get("X-Request-Id", "")
-
-    # パスからエンドポイント名を抽出（例: "/backend/chat" → "chat"）
-    path = request.url.path
-    endpoint_name = path.split("/")[-1] if "/" in path else path
-
-    # リクエスト情報をログに記録
-    log_data = {
-        "event": "endpoint_request",
-        "endpoint": endpoint_name,
-        "path": path,
-        "method": request.method,
-        "X-Request-Id": request_id,
-        "client": request.client.host if request.client else "unknown",
-    }
-
-    # リクエストボディが提供されている場合はログに追加
-    if request_body is not None:
-        try:
-            # dict形式に変換（Pydanticのモデルの場合）
-            if hasattr(request_body, "dict"):
-                body_dict = request_body.dict()
-            else:
-                body_dict = request_body
-
-            # 機密データをサニタイズ
-            sanitized_body = sanitize_request_data(body_dict)
-
-            # サイズが大きい場合は特別処理
-            if isinstance(sanitized_body, dict):
-                # 特定のフィールドの長さを確認（例：messages、promptなど）
-                for field_name in ["messages", "prompt", "audio_data", "files"]:
-                    if field_name in sanitized_body and isinstance(
-                        sanitized_body[field_name], list
-                    ):
-                        items_count = len(sanitized_body[field_name])
-                        if items_count > 10:  # 10個以上の項目がある場合
-                            # 最初と最後の数項目だけを保持
-                            first_items = sanitized_body[field_name][:3]
-                            last_items = (
-                                sanitized_body[field_name][-2:]
-                                if items_count > 5
-                                else []
-                            )
-                            sanitized_body[field_name] = [
-                                *first_items,
-                                f"... {items_count - len(first_items) - len(last_items)} items omitted ...",
-                                *last_items,
-                            ]
-
-            log_data["body"] = sanitized_body
-
-        except Exception as e:
-            # リクエストボディの処理中にエラーが発生した場合
-            log_data["body_error"] = f"リクエストボディの処理中にエラー: {str(e)}"
-
-    # 長さ制限を適用
-    truncated_log = limit_nested_data(log_data, max_length=max_length)
-
-    # 切り詰めが行われたかを確認
-    original_size = len(str(log_data))
-    truncated_size = len(str(truncated_log))
-
-    if original_size != truncated_size:
-        truncated_log["_truncated"] = True
-        truncated_log["_original_size"] = original_size
-
-    logger.info(truncated_log)
-
-    # リクエストIDを返す
-    return request_id
-
-
-def log_request_body(
-    request_id: str, endpoint_name: str, body: any, max_length: int = 1000
-) -> None:
-    """
-    リクエストボディを安全にログに記録する関数
-
-    Args:
-        request_id (str): リクエストID
-        endpoint_name (str): エンドポイント名
-        body (any): ログに記録するリクエストボディ（機密データは処理済みであること）
-        max_length (int): ログの最大長
-    """
-    try:
-        log_data = {
-            "event": "request_body",
-            "X-Request-Id": request_id,
-            "endpoint": endpoint_name,
-            "body": body,
-        }
-
-        # 長いデータを制限
-        truncated_log = limit_nested_data(log_data, max_length=max_length)
-        logger.info(truncated_log)
-    except Exception as e:
-        logger.error(f"リクエストボディのログ記録中にエラー: {str(e)}", exc_info=True)
-
-
-def sanitize_request_data(data: Any, sensitive_keys: List[str] = None) -> Any:
-    """
-    リクエストデータから機密情報を削除する関数
-
-    Args:
-        data (Any): サニタイズするデータ
-        sensitive_keys (List[str]): 機密キーのリスト（省略可）
-
-    Returns:
-        Any: サニタイズされたデータ
-    """
-    if sensitive_keys is None:
-        sensitive_keys = ["authorization", "token", "password", "secret", "api_key"]
-
-    if isinstance(data, dict):
-        sanitized = {}
-        for key, value in data.items():
-            if isinstance(key, str) and any(
-                s_key in key.lower() for s_key in sensitive_keys
-            ):
-                sanitized[key] = "[REDACTED]"
-            elif isinstance(value, (dict, list)):
-                sanitized[key] = sanitize_request_data(value, sensitive_keys)
-            elif isinstance(value, str) and len(value) > 1000:
-                # 長い文字列は切り詰める
-                if key.lower() in ["audio_data", "image", "content", "prompt"]:
-                    sanitized[key] = f"[BINARY_DATA: {len(value)} chars]"
-                else:
-                    sanitized[key] = value[:100] + "... [truncated]"
-            else:
-                sanitized[key] = value
-        return sanitized
-    elif isinstance(data, list):
-        return [sanitize_request_data(item, sensitive_keys) for item in data]
-    else:
-        return data
-
-# 既存のimportに追加
-from pydantic import BaseModel, Field
-from typing import Dict, Any, List, Optional, Callable
-from fastapi import Request, HTTPException
-from firebase_admin import auth
-
 # モデルクラス定義
 class GeocodeLineData(BaseModel):
     query: str
@@ -412,6 +319,7 @@ class GenerateImageRequest(BaseModel):
     safety_filter_level: Optional[str] = None
     person_generation: Optional[str] = None
 
+
 # 認証ミドルウェア用の依存関係
 async def get_current_user(request: Request):
     auth_header = request.headers.get("Authorization")
@@ -426,4 +334,3 @@ async def get_current_user(request: Request):
     except Exception as e:
         logger.error("認証エラー: %s", str(e), exc_info=True)
         raise HTTPException(status_code=401, detail=str(e))
-

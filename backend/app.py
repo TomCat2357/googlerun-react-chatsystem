@@ -9,6 +9,7 @@ from utils.common import (
     logger,
     wrap_asyncgenerator_logger,
     create_dict_logger,
+    limit_nested_data,
     MAX_IMAGES,
     MAX_AUDIO_FILES,
     MAX_TEXT_FILES,
@@ -41,9 +42,8 @@ from utils.common import (
     LOGOUT_LOG_MAX_LENGTH,
     CHAT_LOG_MAX_LENGTH,
     GEOCODING_LOG_MAX_LENGTH,
+    MIDDLE_WARE_LOG_MAX_LENGTH,
     get_api_key_for_model,
-    log_request,
-    # 以下の行を追加
     get_current_user,
     GeocodeRequest,
     ChatRequest,
@@ -99,7 +99,6 @@ app.add_middleware(
 )
 
 
-
 @app.middleware("http")
 async def log_request_middleware(request: Request, call_next):
     # OPTIONSリクエストの場合はリクエストIDのチェックをスキップ
@@ -107,58 +106,85 @@ async def log_request_middleware(request: Request, call_next):
         return await call_next(request)
 
     request_id = request.headers.get("X-Request-Id", "")
-    
+
     # リクエストIDのバリデーション (Fで始まる12桁の16進数)
-    if not request_id or not re.match(r'^F[0-9a-f]{12}$', request_id):
-        logger.error({
-            "event": "invalid_request_id",
-            "path": request.url.path,
-            "method": request.method,
-            "client": request.client.host if request.client else "unknown",
-            "request_id": request_id
-        })
-        
+    if not request_id or not re.match(r"^F[0-9a-f]{12}$", request_id):
+        logger.error(
+            limit_nested_data(
+                {
+                    
+                    "event": "invalid_request_id",
+                    "path": request.url.path,
+                    "method": request.method,
+                    "client": request.client.host if request.client else "unknown",
+                    "request_id": request_id,
+                },
+                MIDDLE_WARE_LOG_MAX_LENGTH,
+            )
+        )
+
         # 不正なリクエストIDの場合、403 Forbiddenを返す
         return JSONResponse(
-            status_code=403,
-            content={
-                "error": "無効なリクエストIDです"
-            }
+            status_code=403, content={"error": "無効なリクエストIDです"}
         )
-    
+
     start_time = time.time()
-    
-    # リクエスト基本情報のロギング
+
+    # リクエストの基本情報を収集してロギング
+    # URLパスの取得
     path = request.url.path
+    # HTTPメソッドの取得
     method = request.method
+    # クライアントのIPアドレスを取得（取得できない場合は"unknown"）
     client_host = request.client.host if request.client else "unknown"
-    
-    # リクエスト開始ログ
-    logger.info({
-        "event": "request_received",
-        "X-Request-Id": request_id,
-        "path": path,
-        "method": method,
-        "client": client_host,
-        "user_agent": request.headers.get("user-agent", "unknown")
-    })
-    
+    # リクエストボディの取得とデコード
+    body = await request.body()
+    # ボディデータを指定された最大長に制限してデコード
+    decoded_data = body.decode("utf-8")
+    # authentificationを取得
+    auth_header = request.headers.get("Authorization", "")
+
+    # リクエスト受信時の詳細情報をログに記録
+    # - リクエストID、パス、メソッド、クライアントIP
+    # - ユーザーエージェント、リクエストボディを含む
+    logger.info(
+        limit_nested_data(
+            {
+                "Authorization": auth_header,
+                "event": "request_received",
+                "X-Request-Id": request_id,
+                "path": path,
+                "method": method,
+                "client": client_host,
+                "user_agent": request.headers.get("user-agent", "unknown"),
+                "request_body": decoded_data,
+            },
+            MIDDLE_WARE_LOG_MAX_LENGTH,
+        )
+    )
+
     # 次の処理へ
     response = await call_next(request)
-    
+
     # 処理時間の計算
     process_time = time.time() - start_time
-    
+
     # レスポンス情報のロギング
-    logger.info({
-        "event": "request_completed",
-        "X-Request-Id": request_id,
-        "path": path,
-        "method": method,
-        "status_code": response.status_code,
-        "process_time_sec": round(process_time, 4)
-    })
-    
+    logger.info(
+        limit_nested_data(
+            {
+                "Authorization": auth_header,
+                "event": "request_completed",
+                "X-Request-Id": request_id,
+                "path": path,
+                "method": method,
+                "status_code": response.status_code,
+                "process_time_sec": round(process_time, 4),
+            },
+            MIDDLE_WARE_LOG_MAX_LENGTH,
+        )
+    )
+
     return response
 
 
@@ -350,12 +376,12 @@ async def verify_auth(request: Request, current_user: Dict = Depends(get_current
 async def chat(
     request: Request,
     chat_request: ChatRequest,
-    current_user: Dict = Depends(get_current_user)
+    current_user: Dict = Depends(get_current_user),
 ):
     logger.debug("チャットリクエストを処理中")
     try:
-        request_id = await log_request(request, chat_request, CHAT_LOG_MAX_LENGTH)
-        # request_id = request.headers.get("X-Request-Id", "") - この行は削除、request_idが依存関係から来るため
+        # request_id = await log_request(request, chat_request, CHAT_LOG_MAX_LENGTH)
+        request_id = request.headers.get("X-Request-Id", "")
         logger.debug(f"リクエストID: {request_id}")
 
         messages = chat_request.messages
@@ -366,7 +392,6 @@ async def chat(
             raise HTTPException(
                 status_code=400, detail="モデル情報が提供されていません"
             )
-
 
         model_api_key = get_api_key_for_model(model)
 
