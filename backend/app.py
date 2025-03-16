@@ -261,7 +261,7 @@ async def geocoding_endpoint(
 
     # StreamingResponseを使って結果を非同期的に返す
     @wrap_asyncgenerator_logger(
-        meta_info={"X-Request-Id": request_id}, max_length=GEOCODING_LOG_MAX_LENGTH
+        meta_info={"X-Request-Id": request_id,'path' : request.url.path}, max_length=GEOCODING_LOG_MAX_LENGTH
     )
     async def generate_results():
         # 並行処理用のタスクリスト
@@ -387,7 +387,7 @@ async def verify_auth(request: Request, current_user: Dict = Depends(get_current
         logger.debug("認証検証完了")
         return create_dict_logger(
             response_data,
-            {"X-Request-Id": request_id},
+            {"X-Request-Id": request_id,'path' : request.url.path},
             max_length=VERIFY_AUTH_LOG_MAX_LENGTH,
         )
     except Exception as e:
@@ -463,7 +463,7 @@ async def chat(
 
         # ストリーミングレスポンスの作成
         @wrap_asyncgenerator_logger(
-            meta_info={"X-Request-Id": request_id}, max_length=CHAT_LOG_MAX_LENGTH
+            meta_info={"X-Request-Id": request_id,'path' : request.url.path}, max_length=CHAT_LOG_MAX_LENGTH
         )
         async def generate_stream():
             for chunk in common_message_function(
@@ -578,7 +578,7 @@ async def speech2text(
 
         return create_dict_logger(
             response_data,
-            {"X-Request-Id": request_id},
+            {"X-Request-Id": request_id,'path' : request.url.path},
             max_length=SPEECH2TEXT_LOG_MAX_LENGTH,
         )
     except HTTPException as he:
@@ -646,7 +646,7 @@ async def generate_image_endpoint(
         response_data = {"images": encode_images}
         return create_dict_logger(
             response_data,
-            {"X-Request-Id": request_id},
+            {"X-Request-Id": request_id,'path' : request.url.path},
             max_length=GENERATE_IMAGE_LOG_MAX_LENGTH,
         )
     except HTTPException as he:
@@ -667,7 +667,7 @@ async def logout(request: Request):
         response_data = {"status": "success", "message": "ログアウトに成功しました"}
         return create_dict_logger(
             response_data,
-            {"X-Request-Id": request_id},
+            {"X-Request-Id": request_id,'path' : request.url.path},
             max_length=LOGOUT_LOG_MAX_LENGTH,
         )
     except Exception as e:
