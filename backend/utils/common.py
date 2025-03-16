@@ -137,12 +137,14 @@ def sanitize_request_data(data: Any, max_length: int = 65536, sensitive_keys: Li
 
     Args:
         data (Any): サニタイズするデータ
+        max_length : 最大文字数。Falseに評価されるときは無限
         sensitive_keys (List[str]): 機密キーのリスト（省略可）
+        
 
     Returns:
         Any: サニタイズされたデータ
     """
-    if isinstance(data, (str, bytes, bytearray)) and len(data) > max_length:
+    if max_length and isinstance(data, (str, bytes, bytearray)) and len(data) > max_length:
         return data[:max_length]+'[TRANCATED]'
     elif isinstance(data, dict):
         sanitized = {}
@@ -151,10 +153,8 @@ def sanitize_request_data(data: Any, max_length: int = 65536, sensitive_keys: Li
                 s_key in key.lower() for s_key in sensitive_keys
             ):
                 sanitized[key] = "[REDACTED]"
-            elif isinstance(value, (dict, list)):
+            elif isinstance(value, (dict, list,str, bytes, bytearray)):
                 sanitized[key] = sanitize_request_data(value, max_length = max_length, sensitive_keys=sensitive_keys)
-            elif isinstance(value, (str, bytes, bytearray)) and len(value) > max_length:
-                sanitized[key] = value[:max_length]+'[TRANCATED]'
                 
         return sanitized
     elif isinstance(data, list):

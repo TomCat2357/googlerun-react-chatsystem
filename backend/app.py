@@ -72,6 +72,7 @@ from utils.chat_utils import common_message_function
 from utils.speech2text import transcribe_streaming_v2
 from utils.generate_image import generate_image
 from functools import partial
+
 # センシティブ情報は先に登録しておく
 sanitize_request_data = partial(sanitize_request_data, sensitive_keys=SENSITIVE_KEYS)
 create_dict_logger = partial(create_dict_logger, sensitive_keys=SENSITIVE_KEYS)
@@ -126,16 +127,13 @@ async def log_request_middleware(request: Request, call_next):
         not path == "/"
         and not any(path == unneed for unneed in UNNEED_REQUEST_ID_PATH)
         and not any(
-            path.startswith(unneed)
-            for unneed in UNNEED_REQUEST_ID_PATH_STARTSWITH
+            path.startswith(unneed) for unneed in UNNEED_REQUEST_ID_PATH_STARTSWITH
         )
-        and not any(
-            path.endswith(unneed)
-            for unneed in UNNEED_REQUEST_ID_PATH_ENDSWITH
-        )
+        and not any(path.endswith(unneed) for unneed in UNNEED_REQUEST_ID_PATH_ENDSWITH)
         and not (request_id and re.match(r"^F[0-9a-f]{12}$", request_id))
     ):
         # エラー情報をログに記録
+        logger.debug("エラー処理")
         logger.error(
             sanitize_request_data(
                 {
@@ -166,12 +164,11 @@ async def log_request_middleware(request: Request, call_next):
     body = await request.body()
     # ボディデータを指定された最大長に制限してデコード
     decoded_data = body.decode("utf-8")
-    # authentificationを取得
-    auth_header = request.headers.get("Authorization", "")
 
     # リクエスト受信時の詳細情報をログに記録
     # - リクエストID、パス、メソッド、クライアントIP
     # - ユーザーエージェント、リクエストボディを含む
+    logger.debug("リクエスト受信")
     logger.info(
         sanitize_request_data(
             {
@@ -194,6 +191,7 @@ async def log_request_middleware(request: Request, call_next):
     process_time = time.time() - start_time
 
     # レスポンス情報のロギング
+    logger.debug("リクエスト処理終了")
     logger.info(
         sanitize_request_data(
             {
@@ -261,7 +259,8 @@ async def geocoding_endpoint(
 
     # StreamingResponseを使って結果を非同期的に返す
     @wrap_asyncgenerator_logger(
-        meta_info={"X-Request-Id": request_id,'path' : request.url.path}, max_length=GEOCODING_LOG_MAX_LENGTH
+        meta_info={"X-Request-Id": request_id, "path": request.url.path, "e-mail" : current_user.get("email")},
+        max_length=GEOCODING_LOG_MAX_LENGTH,
     )
     async def generate_results():
         # 並行処理用のタスクリスト
@@ -361,7 +360,7 @@ async def get_config(request: Request, current_user: Dict = Depends(get_current_
         logger.debug("Config取得成功")
         return create_dict_logger(
             config_values,
-            {"X-Request-Id": request_id, "path": request.url.path},
+            {"X-Request-Id": request_id, "path": request.url.path, "e-mail" : current_user.get("email")},
             max_length=CONFIG_LOG_MAX_LENGTH,
         )
     except Exception as e:
@@ -387,7 +386,7 @@ async def verify_auth(request: Request, current_user: Dict = Depends(get_current
         logger.debug("認証検証完了")
         return create_dict_logger(
             response_data,
-            {"X-Request-Id": request_id,'path' : request.url.path},
+            {"X-Request-Id": request_id, "path": request.url.path, "e-mail" : current_user.get("email")},
             max_length=VERIFY_AUTH_LOG_MAX_LENGTH,
         )
     except Exception as e:
@@ -463,7 +462,8 @@ async def chat(
 
         # ストリーミングレスポンスの作成
         @wrap_asyncgenerator_logger(
-            meta_info={"X-Request-Id": request_id,'path' : request.url.path}, max_length=CHAT_LOG_MAX_LENGTH
+            meta_info={"X-Request-Id": request_id, "path": request.url.path, "e-mail" : current_user.get("email")},
+            max_length=CHAT_LOG_MAX_LENGTH,
         )
         async def generate_stream():
             for chunk in common_message_function(
@@ -578,7 +578,7 @@ async def speech2text(
 
         return create_dict_logger(
             response_data,
-            {"X-Request-Id": request_id,'path' : request.url.path},
+            {"X-Request-Id": request_id, "path": request.url.path, "e-mail" : current_user.get("email")},
             max_length=SPEECH2TEXT_LOG_MAX_LENGTH,
         )
     except HTTPException as he:
@@ -646,7 +646,7 @@ async def generate_image_endpoint(
         response_data = {"images": encode_images}
         return create_dict_logger(
             response_data,
-            {"X-Request-Id": request_id,'path' : request.url.path},
+            {"X-Request-Id": request_id, "path": request.url.path, "e-mail" : current_user.get("email")},
             max_length=GENERATE_IMAGE_LOG_MAX_LENGTH,
         )
     except HTTPException as he:
@@ -667,7 +667,7 @@ async def logout(request: Request):
         response_data = {"status": "success", "message": "ログアウトに成功しました"}
         return create_dict_logger(
             response_data,
-            {"X-Request-Id": request_id,'path' : request.url.path},
+            {"X-Request-Id": request_id, "path": request.url.path},
             max_length=LOGOUT_LOG_MAX_LENGTH,
         )
     except Exception as e:
@@ -720,9 +720,10 @@ if __name__ == "__main__":
     # Hypercornの設定
     config = Config()
     config.bind = [f"0.0.0.0:{PORT}"]
-    config.loglevel = "info" if not DEBUG else "debug"
-    config.accesslog = "-"
-    config.errorlog = "-"
+    # config.loglevel = "info" if not DEBUG else "debug"
+    # config.accesslog = "-"
+    # config.errorlog = "-"
+    config.loglevel = "info"
     config.workers = 1
 
     # SSL/TLS設定（証明書と秘密鍵のパスを指定）
