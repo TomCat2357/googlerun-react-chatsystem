@@ -12,7 +12,8 @@ const SpeechToTextPage = () => {
 
   const token = useToken();
   const API_BASE_URL: string = Config.API_BASE_URL;
-  const MAX_PAYLOAD_SIZE = Config.getServerConfig().MAX_PAYLOAD_SIZE || 500000;
+  // 以下の行を削除または変更
+  // const MAX_PAYLOAD_SIZE = Config.getServerConfig().MAX_PAYLOAD_SIZE || 500000;
 
   // 音声データ関連
   const [audioData, setAudioData] = useState("");
@@ -321,4 +322,4 @@ const SpeechToTextPage = () => {
   );
 };
 
-export default SpeechToTextPage;
+export default SpeechToTextPage

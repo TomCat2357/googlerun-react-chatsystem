@@ -622,12 +622,14 @@ const GeocodingPage = () => {
         initialResults.push({
           ...cachedResult,
           isCached: true,
-          satelliteImage: lineData.has_satellite_cache
+          satelliteImage: lineData.has_satellite_cache && cachedResult.latitude !== null && cachedResult.longitude !== null
             ? getCachedImage(cachedResult.latitude, cachedResult.longitude, options, "satellite")
             : undefined,
-          streetViewImage: lineData.has_streetview_cache
+
+          streetViewImage: lineData.has_streetview_cache && cachedResult.latitude !== null && cachedResult.longitude !== null
             ? getCachedImage(cachedResult.latitude, cachedResult.longitude, options, "streetview")
             : undefined,
+
           imageLoading: (showSatellite && !lineData.has_satellite_cache) ||
             (showStreetView && !lineData.has_streetview_cache)
         });
