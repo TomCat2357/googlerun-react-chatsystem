@@ -1,6 +1,6 @@
 # %%
 import requests
-from utils.logger import logger
+from utils.common import logger
 
 
 def get_static_map(

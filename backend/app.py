@@ -112,7 +112,6 @@ async def log_request_middleware(request: Request, call_next):
         logger.error(
             limit_nested_data(
                 {
-                    
                     "event": "invalid_request_id",
                     "path": request.url.path,
                     "method": request.method,
@@ -150,7 +149,6 @@ async def log_request_middleware(request: Request, call_next):
     logger.info(
         limit_nested_data(
             {
-                "Authorization": auth_header,
                 "event": "request_received",
                 "X-Request-Id": request_id,
                 "path": path,
@@ -173,7 +171,6 @@ async def log_request_middleware(request: Request, call_next):
     logger.info(
         limit_nested_data(
             {
-                "Authorization": auth_header,
                 "event": "request_completed",
                 "X-Request-Id": request_id,
                 "path": path,
@@ -338,7 +335,7 @@ async def get_config(request: Request, current_user: Dict = Depends(get_current_
         logger.debug("Config取得成功")
         return create_dict_logger(
             config_values,
-            {"X-Request-Id": request_id},
+            {"X-Request-Id": request_id, "path": request.url.path},
             max_length=CONFIG_LOG_MAX_LENGTH,
         )
     except Exception as e:

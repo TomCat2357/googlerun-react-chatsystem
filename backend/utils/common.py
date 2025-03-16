@@ -322,6 +322,21 @@ class GenerateImageRequest(BaseModel):
 
 # 認証ミドルウェア用の依存関係
 async def get_current_user(request: Request):
+    """
+    Extracts and verifies the current user's authentication token from the request headers.
+    
+    Validates the Authorization header, verifies the Firebase ID token, and returns the decoded token.
+    Raises an HTTPException with a 401 status code if authentication fails.
+    
+    Args:
+        request (Request): The incoming HTTP request containing authentication headers.
+    
+    Returns:
+        dict: The decoded Firebase ID token for the authenticated user.
+    
+    Raises:
+        HTTPException: If no token is present or token verification fails.
+    """
     auth_header = request.headers.get("Authorization")
     if not auth_header or not auth_header.startswith("Bearer "):
         logger.warning("トークンが見つかりません")
@@ -330,6 +345,7 @@ async def get_current_user(request: Request):
     token = auth_header.split("Bearer ")[1]
     try:
         decoded_token = auth.verify_id_token(token, clock_skew_seconds=60)
+        logger.info("認証成功 expire_time : %s", decoded_token.get('exp'))
         return decoded_token
     except Exception as e:
         logger.error("認証エラー: %s", str(e), exc_info=True)
