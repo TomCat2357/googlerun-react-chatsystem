@@ -43,6 +43,9 @@ from utils.common import (
     CHAT_LOG_MAX_LENGTH,
     GEOCODING_LOG_MAX_LENGTH,
     MIDDLE_WARE_LOG_MAX_LENGTH,
+    UNNEED_REQUEST_ID_PATH,
+    UNNEED_REQUEST_ID_PATH_STARTSWITH,
+    UNNEED_REQUEST_ID_PATH_ENDSWITH,
     get_api_key_for_model,
     get_current_user,
     GeocodeRequest,
@@ -92,7 +95,7 @@ logger.debug("ORIGINS: %s", ORIGINS)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ORIGINS,
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["Content-Type", "Authorization", "X-Request-Id"],
     expose_headers=["Authorization"],
@@ -102,13 +105,32 @@ app.add_middleware(
 @app.middleware("http")
 async def log_request_middleware(request: Request, call_next):
     # OPTIONSリクエストの場合はリクエストIDのチェックをスキップ
+    # URLパスの取得
+    path = request.url.path
+    # OPTIONSリクエスト、静的アセット、viteのアイコンへのリクエストは処理をスキップ
     if request.method == "OPTIONS":
         return await call_next(request)
 
+    # リクエストヘッダーからリクエストIDを取得
     request_id = request.headers.get("X-Request-Id", "")
 
     # リクエストIDのバリデーション (Fで始まる12桁の16進数)
-    if not request_id or not re.match(r"^F[0-9a-f]{12}$", request_id):
+    # ルートパス以外のアクセスでリクエストIDが無効な場合はエラーを返す
+
+    if (
+        not path == "/"
+        and not any(path == unneed for unneed in UNNEED_REQUEST_ID_PATH)
+        and not any(
+            path.startswith(unneed)
+            for unneed in UNNEED_REQUEST_ID_PATH_STARTSWITH
+        )
+        and not any(
+            path.endswith(unneed)
+            for unneed in UNNEED_REQUEST_ID_PATH_ENDSWITH
+        )
+        and not (request_id and re.match(r"^F[0-9a-f]{12}$", request_id))
+    ):
+        # エラー情報をログに記録
         logger.error(
             limit_nested_data(
                 {
@@ -126,7 +148,6 @@ async def log_request_middleware(request: Request, call_next):
         return JSONResponse(
             status_code=403, content={"error": "無効なリクエストIDです"}
         )
-
     start_time = time.time()
 
     # リクエストの基本情報を収集してロギング

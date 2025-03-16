@@ -89,6 +89,10 @@ GENERATE_IMAGE_LOG_MAX_LENGTH = int(os.getenv("GENERATE_IMAGE_LOG_MAX_LENGTH"))
 LOGOUT_LOG_MAX_LENGTH = int(os.getenv("LOGOUT_LOG_MAX_LENGTH"))
 MIDDLE_WARE_LOG_MAX_LENGTH = int(os.getenv("MIDDLE_WARE_LOG_MAX_LENGTH"))
 
+UNNEED_REQUEST_ID_PATH=os.getenv('UNNEED_REQUEST_ID_PATH', '').split(',')
+UNNEED_REQUEST_ID_PATH_STARTSWITH=os.getenv('UNNEED_REQUEST_ID_PATH_STARTSWITH', '').split(',')
+UNNEED_REQUEST_ID_PATH_ENDSWITH=os.getenv('UNNEED_REQUEST_ID_PATH_ENDSWITH', '').split(',')
+
 # 環境変数DEBUGの値を取得し、デバッグモードの設定を行う
 # デフォルトは空文字列
 debug = os.getenv("DEBUG", "")
@@ -273,7 +277,7 @@ def create_dict_logger(
     logger.info(enriched_dict)
 
     # 更新された辞書を返す
-    return enriched_dict
+    return input_dict
 
 
 def get_api_key_for_model(model: str) -> Optional[str]:
