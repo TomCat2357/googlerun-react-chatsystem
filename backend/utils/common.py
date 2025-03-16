@@ -301,7 +301,7 @@ async def get_current_user(request: Request):
     token = auth_header.split("Bearer ")[1]
     try:
         decoded_token = auth.verify_id_token(token, clock_skew_seconds=60)
-        logger.info("認証成功 expire_time : %s", decoded_token.get('exp'))
+        logger.info("認証成功")
         return decoded_token
     except Exception as e:
         logger.error("認証エラー: %s", str(e), exc_info=True)
