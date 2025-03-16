@@ -9,7 +9,7 @@ from utils.common import (
     logger,
     wrap_asyncgenerator_logger,
     create_dict_logger,
-    limit_nested_data,
+    sanitize_request_data,
     MAX_IMAGES,
     MAX_AUDIO_FILES,
     MAX_TEXT_FILES,
@@ -46,6 +46,7 @@ from utils.common import (
     UNNEED_REQUEST_ID_PATH,
     UNNEED_REQUEST_ID_PATH_STARTSWITH,
     UNNEED_REQUEST_ID_PATH_ENDSWITH,
+    SENSITIVE_KEYS,
     get_api_key_for_model,
     get_current_user,
     GeocodeRequest,
@@ -70,6 +71,10 @@ import os, json, asyncio, base64, time, re
 from utils.chat_utils import common_message_function
 from utils.speech2text import transcribe_streaming_v2
 from utils.generate_image import generate_image
+from functools import partial
+# センシティブ情報は先に登録しておく
+sanitize_request_data = partial(sanitize_request_data, sensitive_keys=SENSITIVE_KEYS)
+create_dict_logger = partial(create_dict_logger, sensitive_keys=SENSITIVE_KEYS)
 
 # Firebase Admin SDKの初期化
 try:
@@ -132,7 +137,7 @@ async def log_request_middleware(request: Request, call_next):
     ):
         # エラー情報をログに記録
         logger.error(
-            limit_nested_data(
+            sanitize_request_data(
                 {
                     "event": "invalid_request_id",
                     "path": request.url.path,
@@ -168,7 +173,7 @@ async def log_request_middleware(request: Request, call_next):
     # - リクエストID、パス、メソッド、クライアントIP
     # - ユーザーエージェント、リクエストボディを含む
     logger.info(
-        limit_nested_data(
+        sanitize_request_data(
             {
                 "event": "request_received",
                 "X-Request-Id": request_id,
@@ -190,7 +195,7 @@ async def log_request_middleware(request: Request, call_next):
 
     # レスポンス情報のロギング
     logger.info(
-        limit_nested_data(
+        sanitize_request_data(
             {
                 "event": "request_completed",
                 "X-Request-Id": request_id,

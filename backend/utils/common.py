@@ -89,9 +89,13 @@ GENERATE_IMAGE_LOG_MAX_LENGTH = int(os.getenv("GENERATE_IMAGE_LOG_MAX_LENGTH"))
 LOGOUT_LOG_MAX_LENGTH = int(os.getenv("LOGOUT_LOG_MAX_LENGTH"))
 MIDDLE_WARE_LOG_MAX_LENGTH = int(os.getenv("MIDDLE_WARE_LOG_MAX_LENGTH"))
 
+# request_idを必要としないパス。重要性が低いので未設定許容
 UNNEED_REQUEST_ID_PATH=os.getenv('UNNEED_REQUEST_ID_PATH', '').split(',')
 UNNEED_REQUEST_ID_PATH_STARTSWITH=os.getenv('UNNEED_REQUEST_ID_PATH_STARTSWITH', '').split(',')
 UNNEED_REQUEST_ID_PATH_ENDSWITH=os.getenv('UNNEED_REQUEST_ID_PATH_ENDSWITH', '').split(',')
+
+#ログでマスクするセンシティブ情報。設定しなければエラーがでる
+SENSITIVE_KEYS=os.getenv('SENSITIVE_KEYS').split(',')
 
 # 環境変数DEBUGの値を取得し、デバッグモードの設定を行う
 # デフォルトは空文字列
@@ -127,7 +131,7 @@ else:
 logger = logging.getLogger(__name__)
 
 
-def sanitize_request_data(data: Any, sensitive_keys: List[str] = []) -> Any:
+def sanitize_request_data(data: Any, max_length: int = 65536, sensitive_keys: List[str] = []) -> Any:
     """
     リクエストデータから機密情報を削除する関数
 
@@ -138,7 +142,9 @@ def sanitize_request_data(data: Any, sensitive_keys: List[str] = []) -> Any:
     Returns:
         Any: サニタイズされたデータ
     """
-    if isinstance(data, dict):
+    if isinstance(data, (str, bytes, bytearray)) and len(data) > max_length:
+        return data[:max_length]+'[TRANCATED]'
+    elif isinstance(data, dict):
         sanitized = {}
         for key, value in data.items():
             if isinstance(key, str) and any(
@@ -146,71 +152,16 @@ def sanitize_request_data(data: Any, sensitive_keys: List[str] = []) -> Any:
             ):
                 sanitized[key] = "[REDACTED]"
             elif isinstance(value, (dict, list)):
-                sanitized[key] = sanitize_request_data(value, sensitive_keys)
-            else:
-                sanitized[key] = value
+                sanitized[key] = sanitize_request_data(value, max_length = max_length, sensitive_keys=sensitive_keys)
+            elif isinstance(value, (str, bytes, bytearray)) and len(value) > max_length:
+                sanitized[key] = value[:max_length]+'[TRANCATED]'
+                
         return sanitized
     elif isinstance(data, list):
-        return [sanitize_request_data(item, sensitive_keys) for item in data]
+        return [sanitize_request_data(item, max_length=max_length,sensitive_keys=sensitive_keys) for item in data]
     else:
         return data
 
-
-def sanitize_data_decorator(sensitive_keys: List[str] = []):
-    """
-    データ内の機密情報を処理するデコレーター
-
-    Args:
-        sensitive_keys (List[str]): 機密情報として扱うキーのリスト。デフォルトはNone。
-
-    Returns:
-        callable: デコレーター関数
-    """
-
-    def decorator(func):
-        @wraps(func)
-        def wrapper(data, max_length=65536, *args, **kwargs):
-            # 入力データから機密情報を処理
-            sanitized_input = sanitize_request_data(data, sensitive_keys)
-
-            # 元の関数を実行
-            result = func(sanitized_input, max_length, *args, **kwargs)
-
-            # 出力データも念のため機密情報を処理
-            sanitized_output = sanitize_request_data(result, sensitive_keys)
-
-            return sanitized_output
-
-        return wrapper
-
-    return decorator
-
-
-@sanitize_data_decorator(
-    sensitive_keys=["authorization", "token", "password", "secret", "api_key", "apikey"]
-)
-def limit_nested_data(data: any, max_length: int = 65536) -> any:
-    """
-    data に対して再帰的に処理を行い、max_length に基づいて長さを制限する関数。
-
-    Args:
-        data: 処理対象のオブジェクト。
-        max_length: 長さの制限値 (デフォルトは 65536)。
-
-    Returns:
-        処理後のオブジェクト。
-    """
-
-    if isinstance(data, (str, bytes)):
-        return data[:max_length]
-    elif isinstance(data, (list, set)):
-        return type(data)(limit_nested_data(item, max_length) for item in data)
-    elif isinstance(data, dict):
-        return {
-            key: limit_nested_data(value, max_length) for key, value in data.items()
-        }
-    else:
-        return data
 
 
 def wrap_asyncgenerator_logger(
@@ -238,7 +189,7 @@ def wrap_asyncgenerator_logger(
                     streaming_log = {}
 
                 # chunkの長さを制限する
-                streaming_log["chunk"] = limit_nested_data(chunk, max_length=max_length)
+                streaming_log["chunk"] = sanitize_request_data(chunk, max_length=max_length)
 
                 # ログ出力
                 logger.info(streaming_log)
@@ -252,7 +203,8 @@ def wrap_asyncgenerator_logger(
 
 
 def create_dict_logger(
-    input_dict: dict = {}, meta_info: dict = {}, max_length: int = 1000
+    input_dict: dict = {}, meta_info: dict = {}, max_length: int = 1000,
+    sensitive_keys :List[str] = []
 ) -> dict:
     """
     辞書にメタ情報を追加してログ出力する関数を生成する
@@ -268,7 +220,7 @@ def create_dict_logger(
     enriched_dict = copy(meta_info)
 
     # input_dictの各値を処理して長すぎる場合は切り詰める
-    truncated_input = limit_nested_data(input_dict, max_length=max_length)
+    truncated_input = sanitize_request_data(input_dict, max_length=max_length,sensitive_keys=sensitive_keys)
 
     # 切り詰めた辞書をenriched_dictに追加
     enriched_dict.update(truncated_input)
