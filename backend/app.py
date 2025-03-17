@@ -10,6 +10,7 @@ from utils.common import (
     wrap_asyncgenerator_logger,
     create_dict_logger,
     sanitize_request_data,
+    log_request,
     MAX_IMAGES,
     MAX_AUDIO_FILES,
     MAX_TEXT_FILES,
@@ -169,7 +170,7 @@ async def log_request_middleware(request: Request, call_next):
     # - リクエストID、パス、メソッド、クライアントIP
     # - ユーザーエージェント、リクエストボディを含む
     logger.debug("リクエスト受信")
-    logger.info(
+    logger.debug(
         sanitize_request_data(
             {
                 "event": "request_received",
@@ -178,7 +179,8 @@ async def log_request_middleware(request: Request, call_next):
                 "method": method,
                 "client": client_host,
                 "user_agent": request.headers.get("user-agent", "unknown"),
-                "request_body": decoded_data,
+                #"request_body": decoded_data,
+                
             },
             MIDDLE_WARE_LOG_MAX_LENGTH,
         )
@@ -192,7 +194,7 @@ async def log_request_middleware(request: Request, call_next):
 
     # レスポンス情報のロギング
     logger.debug("リクエスト処理終了")
-    logger.info(
+    logger.debug(
         sanitize_request_data(
             {
                 "event": "request_completed",
@@ -209,6 +211,8 @@ async def log_request_middleware(request: Request, call_next):
     return response
 
 
+
+
 @app.post("/backend/geocoding")
 async def geocoding_endpoint(
     request: Request,
@@ -220,6 +224,9 @@ async def geocoding_endpoint(
     クライアントからキャッシュ情報を受け取り、
     最小限のAPI呼び出しで結果と画像を取得する
     """
+    # リクエストの情報を取得
+    request_info = await log_request(request, current_user, GEOCODING_LOG_MAX_LENGTH)
+        
     mode = geocoding_request.mode
     lines = geocoding_request.lines
     options = geocoding_request.options
@@ -253,13 +260,10 @@ async def geocoding_endpoint(
 
     logger.debug(f"重複排除後のクエリ数: {len(unique_queries)} (元: {len(lines)})")
 
-    # リクエストIDを取得
-    request_id = request.headers.get("X-Request-Id", "")
-    logger.debug(f"ジオコーディングリクエストID: {request_id}")
 
     # StreamingResponseを使って結果を非同期的に返す
     @wrap_asyncgenerator_logger(
-        meta_info={"X-Request-Id": request_id, "path": request.url.path, "e-mail" : current_user.get("email")},
+        meta_info={key : value for key, value in request_info.items() if key in ('X-Request-Id', 'path', 'email')},
         max_length=GEOCODING_LOG_MAX_LENGTH,
     )
     async def generate_results():

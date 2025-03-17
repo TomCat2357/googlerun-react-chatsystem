@@ -144,8 +144,27 @@ def sanitize_request_data(data: Any, max_length: int = 65536, sensitive_keys: Li
     Returns:
         Any: サニタイズされたデータ
     """
+    try:
+        data = json.loads(data)
+    except:
+        pass
     if max_length and isinstance(data, (str, bytes, bytearray)) and len(data) > max_length:
-        return data[:max_length]+'[TRANCATED]'
+        if isinstance(data, str):
+            return data[:max_length]+'[TRUNCATED]'
+        elif isinstance(data, (bytes, bytearray)):
+            # バイナリデータを文字列に変換してから切り詰める
+            try:
+                # UTF-8でデコードを試みる
+                return data.decode('utf-8', errors='replace')[:max_length]+'[TRUNCATED]'
+            except Exception:
+                # デコードに失敗した場合はbyteアレイのまま
+                return data[:max_length]+b'[TRUNCATED]'
+    elif isinstance(data, (bytes, bytearray)):
+        # 長さが制限を超えていなくても、バイナリデータは文字列に変換
+        try:
+            return data.decode('utf-8', errors='replace')
+        except Exception:
+            return data.hex()
     elif isinstance(data, dict):
         sanitized = {}
         for key, value in data.items():
@@ -153,16 +172,38 @@ def sanitize_request_data(data: Any, max_length: int = 65536, sensitive_keys: Li
                 s_key in key.lower() for s_key in sensitive_keys
             ):
                 sanitized[key] = "[REDACTED]"
-            elif isinstance(value, (dict, list,str, bytes, bytearray)):
-                sanitized[key] = sanitize_request_data(value, max_length = max_length, sensitive_keys=sensitive_keys)
-                
+            elif isinstance(value, (dict, list, str, bytes, bytearray)):
+                sanitized[key] = sanitize_request_data(value, max_length=max_length, sensitive_keys=sensitive_keys)
+            else:
+                sanitized[key] = value
         return sanitized
     elif isinstance(data, list):
-        return [sanitize_request_data(item, max_length=max_length,sensitive_keys=sensitive_keys) for item in data]
+        return [sanitize_request_data(item, max_length=max_length, sensitive_keys=sensitive_keys) for item in data]
     else:
         return data
 
 
+async def log_request(request : Request, current_user : Dict, log_max_length: int):
+
+    request_info = {
+        "event": "request_received",
+        "X-Request-Id": request.headers.get("X-Request-Id", ""),
+        "email" : current_user.get("email", 'unknown'),
+        "path": request.url.path,
+        "method": request.method,
+        "client": request.client.host if request.client else "unknown",
+        "user_agent": request.headers.get("user-agent", "unknown"),
+        "request_body": await request.body(),
+    }
+
+    # 受けたリクエストの情報をロガー表示する
+    logger.info(
+        sanitize_request_data(
+            request_info,
+            log_max_length,
+        )
+    )
+    return request_info
 
 def wrap_asyncgenerator_logger(
     meta_info: dict = {}, max_length: int = 1000
