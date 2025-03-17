@@ -97,6 +97,10 @@ UNNEED_REQUEST_ID_PATH_ENDSWITH=os.getenv('UNNEED_REQUEST_ID_PATH_ENDSWITH', '')
 #ログでマスクするセンシティブ情報。設定しなければエラーがでる
 SENSITIVE_KEYS=os.getenv('SENSITIVE_KEYS').split(',')
 
+# 認証不要パスの設定 (.envから取得)
+PUBLIC_PATHS = os.getenv("PUBLIC_PATHS").split(",")
+PUBLIC_PATH_PREFIXES = os.getenv("PUBLIC_PATH_PREFIXES").split(",")
+
 # 環境変数DEBUGの値を取得し、デバッグモードの設定を行う
 # デフォルトは空文字列
 debug = os.getenv("DEBUG", "")

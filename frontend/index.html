@@ -5,6 +5,57 @@
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>チャットシステム</title>
+    <script>
+      // 認証トークンをセッションストレージから取得
+      function getAuthToken() {
+        // Firebaseのセッションストレージからトークンを検索
+        for (let i = 0; i < sessionStorage.length; i++) {
+          const key = sessionStorage.key(i);
+          if (key && key.includes('firebase:authUser')) {
+            try {
+              const userData = JSON.parse(sessionStorage.getItem(key));
+              return userData.stsTokenManager?.accessToken || null;
+            } catch (e) {
+              console.error('トークン取得エラー:', e);
+              return null;
+            }
+          }
+        }
+        return null;
+      }
+
+      // 保護されたアセットへのリクエスト時に認証トークンを追加
+      const originalFetch = window.fetch;
+      window.fetch = function(input, init) {
+        const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+        
+        // /assets/へのリクエストにトークンを追加
+        if (url && url.includes('/assets/')) {
+          const token = getAuthToken();
+          if (token) {
+            init = init || {};
+            init.headers = init.headers || {};
+            init.headers = {
+              ...init.headers,
+              'Authorization': `Bearer ${token}`
+            };
+          }
+        }
+        
+        return originalFetch.call(this, input, init);
+      };
+
+      // アセット読み込みエラー時のハンドリング
+      window.addEventListener('error', function(e) {
+        // 401エラーによるアセット読み込み失敗の場合はログインページへリダイレクト
+        if (e.target && (e.target.src || e.target.href)) {
+          const url = e.target.src || e.target.href;
+          if (url.includes('/assets/')) {
+            window.location.href = '/';
+          }
+        }
+      }, true);
+    </script>
   </head>
   <body>
     <div id="root"></div>

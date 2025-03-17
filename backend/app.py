@@ -53,11 +53,13 @@ from utils.common import (
     ChatRequest,
     SpeechToTextRequest,
     GenerateImageRequest,
+    PUBLIC_PATHS,
+    PUBLIC_PATH_PREFIXES,
 )
 
 from utils.geocoding_service import get_google_maps_api_key, process_optimized_geocode
 
-from fastapi.responses import JSONResponse, StreamingResponse, FileResponse
+from fastapi.responses import JSONResponse, StreamingResponse, FileResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.routing import APIRoute
@@ -107,6 +109,43 @@ app.add_middleware(
     expose_headers=["Authorization"],
 )
 
+@app.middleware("http")
+async def assets_auth_middleware(request: Request, call_next):
+    """アセットリクエストを認証で保護するミドルウェア"""
+    path = request.url.path
+    
+    # 公開パスへのアクセスは許可
+    if path in PUBLIC_PATHS or any(path.startswith(prefix) for prefix in PUBLIC_PATH_PREFIXES):
+        return await call_next(request)
+    
+    # OPTIONSリクエストはスキップ
+    if request.method == "OPTIONS":
+        return await call_next(request)
+        
+    # assets、または保護されたページへのアクセスは認証をチェック
+    if path.startswith("/assets/") or path.startswith("/app/"):
+        auth_header = request.headers.get("Authorization")
+        
+        if not auth_header or not auth_header.startswith("Bearer "):
+            logger.warning(f"認証なしでの保護されたアセットへのアクセス: {path}")
+            # HTMLリクエストならリダイレクト、それ以外は401
+            accept_header = request.headers.get("Accept", "")
+            if "text/html" in accept_header:
+                return RedirectResponse(url="/", status_code=302)
+            return JSONResponse(status_code=401, content={"error": "認証が必要です"})
+        
+        # トークン検証
+        token = auth_header.split("Bearer ")[1]
+        try:
+            decoded_token = auth.verify_id_token(token)
+            # 認証成功、リクエスト続行
+            return await call_next(request)
+        except Exception as e:
+            logger.error(f"トークン検証エラー: {str(e)}")
+            return JSONResponse(status_code=401, content={"error": "無効なトークン"})
+    
+    # その他のリクエストは通常処理
+    return await call_next(request)
 
 @app.middleware("http")
 async def log_request_middleware(request: Request, call_next):
@@ -676,11 +715,17 @@ async def logout(request: Request):
 
 
 # 静的ファイル配信設定
-# 静的ファイルのマウント
+# ログインページに必要なアセット（認証不要）
+app.mount(
+    "/login-assets",
+    StaticFiles(directory=os.path.join(FRONTEND_PATH, "login-assets")),
+    name="login-assets"
+)
+# 保護されたアセット（認証必要）
 app.mount(
     "/assets",
     StaticFiles(directory=os.path.join(FRONTEND_PATH, "assets")),
-    name="assets",
+    name="assets"
 )
 
 

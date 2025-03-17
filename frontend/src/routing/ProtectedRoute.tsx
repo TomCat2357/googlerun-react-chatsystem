@@ -9,7 +9,7 @@ interface ProtectedRouteProps {
 }
 
 export default function ProtectedRoute({ children }: ProtectedRouteProps) {
-  const { currentUser, checkAuthStatus, loading } = useAuth();
+  const { currentUser, loading } = useAuth();
   const navigate = useNavigate();
   const [authChecked, setAuthChecked] = useState(false);
 
@@ -19,25 +19,15 @@ export default function ProtectedRoute({ children }: ProtectedRouteProps) {
     const verifyAuth = async () => {
       if (loading) return;
 
-      try {
-        console.log('ProtectedRoute: Starting auth verification');
-        const isAuthenticated = await checkAuthStatus();
-        console.log('Authentication result:', isAuthenticated);
+      if (!isMounted) return;
 
-        if (!isMounted) return;
-
-        // frontend/src/routing/ProtectedRoute.tsx のリダイレクト部分を修正
-        if (!isAuthenticated) {
-          console.log('Redirecting to login page');
-          navigate(Config.getClientPath('/'), { replace: true });
-        } else {
-          setAuthChecked(true);
-        }
-      } catch (error) {
-        console.error('認証チェックエラー:', error);
-        if (isMounted) {
-          navigate('/', { replace: true });
-        }
+      // ユーザーがログインしているかクライアントサイドでチェック
+      if (!currentUser) {
+        console.log('未認証のためログインページにリダイレクト');
+        navigate(Config.getClientPath('/'), { replace: true });
+      } else {
+        console.log('クライアントサイドでの認証確認成功');
+        setAuthChecked(true);
       }
     };
 
@@ -46,7 +36,7 @@ export default function ProtectedRoute({ children }: ProtectedRouteProps) {
     return () => {
       isMounted = false;
     };
-  }, [loading, checkAuthStatus, navigate, currentUser]);
+  }, [loading, navigate, currentUser]);
 
   // 認証チェック中またはチェックが完了していない場合はローディング画面を表示
   if (loading || !authChecked) {

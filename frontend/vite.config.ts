@@ -16,14 +16,22 @@ export default defineConfig({
       output: {
         // コード分割戦略の最適化
         manualChunks: (id) => {
-          // React関連ライブラリ
+          // ログインと認証関連コンポーネント（公開アセット）
+          if (id.includes('/components/Login/') || 
+              id.includes('/components/Auth/') ||
+              id.includes('firebase/auth') ||
+              id.includes('/routing/') && id.includes('ProtectedRoute')) {
+            return 'login-vendor';
+          }
+          
+          // React関連ライブラリ（公開アセット）
           if (id.includes('node_modules/react') || 
               id.includes('node_modules/react-dom') || 
               id.includes('node_modules/react-router')) {
-            return 'vendor-react';
+            return 'login-react';
           }
           
-          // Firebase関連ライブラリ
+          // Firebase関連ライブラリ（公開・非公開両方で使用）
           if (id.includes('node_modules/firebase')) {
             return 'vendor-firebase';
           }
@@ -50,6 +58,22 @@ export default defineConfig({
           if (id.includes('/utils/')) {
             return 'app-utils';
           }
+        },
+        // ファイル出力先の調整
+        chunkFileNames: (chunkInfo) => {
+          // ログインページに必要なチャンクは認証不要のディレクトリに
+          if (chunkInfo.name === 'login-vendor' || chunkInfo.name === 'login-react') {
+            return 'login-assets/[name]-[hash].js';
+          }
+          return 'assets/[name]-[hash].js';
+        },
+        assetFileNames: (assetInfo) => {
+          const info = assetInfo.name || '';
+          // ログインページに必要なアセットは認証不要のディレクトリに
+          if (info.includes('login') || info.includes('auth')) {
+            return 'login-assets/[name]-[hash][extname]';
+          }
+          return 'assets/[name]-[hash][extname]';
         }
       }
     },
