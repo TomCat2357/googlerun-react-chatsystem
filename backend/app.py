@@ -179,8 +179,7 @@ async def log_request_middleware(request: Request, call_next):
                 "method": method,
                 "client": client_host,
                 "user_agent": request.headers.get("user-agent", "unknown"),
-                #"request_body": decoded_data,
-                
+                # "request_body": decoded_data,
             },
             MIDDLE_WARE_LOG_MAX_LENGTH,
         )
@@ -211,8 +210,6 @@ async def log_request_middleware(request: Request, call_next):
     return response
 
 
-
-
 @app.post("/backend/geocoding")
 async def geocoding_endpoint(
     request: Request,
@@ -226,7 +223,8 @@ async def geocoding_endpoint(
     """
     # リクエストの情報を取得
     request_info = await log_request(request, current_user, GEOCODING_LOG_MAX_LENGTH)
-        
+    logger.debug("リクエスト情報: %s", request_info)
+
     mode = geocoding_request.mode
     lines = geocoding_request.lines
     options = geocoding_request.options
@@ -260,10 +258,13 @@ async def geocoding_endpoint(
 
     logger.debug(f"重複排除後のクエリ数: {len(unique_queries)} (元: {len(lines)})")
 
-
     # StreamingResponseを使って結果を非同期的に返す
     @wrap_asyncgenerator_logger(
-        meta_info={key : value for key, value in request_info.items() if key in ('X-Request-Id', 'path', 'email')},
+        meta_info={
+            key: request_info[key]
+            for key in ("X-Request-Id", "path", "email")
+            if key in request_info
+        },
         max_length=GEOCODING_LOG_MAX_LENGTH,
     )
     async def generate_results():
@@ -339,8 +340,11 @@ async def geocoding_endpoint(
 @app.get("/backend/config")
 async def get_config(request: Request, current_user: Dict = Depends(get_current_user)):
     try:
-        request_id = request.headers.get("X-Request-Id", "")
-        logger.debug("リクエストID: %s", request_id)
+
+        request_info = await log_request(
+            request, current_user, GEOCODING_LOG_MAX_LENGTH
+        )
+        logger.debug("リクエスト情報: %s", request_info)
 
         config_values = {
             "MAX_IMAGES": MAX_IMAGES,
@@ -364,7 +368,11 @@ async def get_config(request: Request, current_user: Dict = Depends(get_current_
         logger.debug("Config取得成功")
         return create_dict_logger(
             config_values,
-            {"X-Request-Id": request_id, "path": request.url.path, "e-mail" : current_user.get("email")},
+            meta_info={
+                key: request_info[key]
+                for key in ("X-Request-Id", "path", "email")
+                if key in request_info
+            },
             max_length=CONFIG_LOG_MAX_LENGTH,
         )
     except Exception as e:
@@ -377,8 +385,10 @@ async def verify_auth(request: Request, current_user: Dict = Depends(get_current
     try:
         logger.debug("認証検証開始")
         logger.debug("トークンの復号化成功。ユーザー: %s", current_user.get("email"))
-        request_id = request.headers.get("X-Request-Id", "")
-        logger.debug("リクエストID: %s", request_id)
+        request_info = await log_request(
+            request, current_user, VERIFY_AUTH_LOG_MAX_LENGTH
+        )
+
         response_data = {
             "status": "success",
             "user": {
@@ -390,7 +400,11 @@ async def verify_auth(request: Request, current_user: Dict = Depends(get_current
         logger.debug("認証検証完了")
         return create_dict_logger(
             response_data,
-            {"X-Request-Id": request_id, "path": request.url.path, "e-mail" : current_user.get("email")},
+            meta_info={
+                k: request_info[k]
+                for k in ("X-Request-Id", "path", "email")
+                if k in request_info
+            },
             max_length=VERIFY_AUTH_LOG_MAX_LENGTH,
         )
     except Exception as e:
@@ -406,9 +420,8 @@ async def chat(
 ):
     logger.debug("チャットリクエストを処理中")
     try:
-        # request_id = await log_request(request, chat_request, CHAT_LOG_MAX_LENGTH)
-        request_id = request.headers.get("X-Request-Id", "")
-        logger.debug(f"リクエストID: {request_id}")
+        request_info = await log_request(request, current_user, CHAT_LOG_MAX_LENGTH)
+        logger.debug("リクエスト情報: %s", request_info)
 
         messages = chat_request.messages
         model = chat_request.model
@@ -466,7 +479,11 @@ async def chat(
 
         # ストリーミングレスポンスの作成
         @wrap_asyncgenerator_logger(
-            meta_info={"X-Request-Id": request_id, "path": request.url.path, "e-mail" : current_user.get("email")},
+            meta_info={
+                k: request_info[k]
+                for k in ("X-Request-Id", "path", "email")
+                if k in request_info
+            },
             max_length=CHAT_LOG_MAX_LENGTH,
         )
         async def generate_stream():
@@ -499,8 +516,9 @@ async def speech2text(
 ):
     logger.debug("音声認識処理開始")
     try:
-        request_id = request.headers.get("X-Request-Id", "")
-        logger.debug(f"リクエストID: {request_id}")
+        request_info = await log_request(
+            request, current_user, VERIFY_AUTH_LOG_MAX_LENGTH
+        )
 
         audio_data = speech_request.audio_data
 
@@ -582,7 +600,11 @@ async def speech2text(
 
         return create_dict_logger(
             response_data,
-            {"X-Request-Id": request_id, "path": request.url.path, "e-mail" : current_user.get("email")},
+            meta_info={
+                k: request_info[k]
+                for k in ("X-Request-Id", "path", "email")
+                if k in request_info
+            },
             max_length=SPEECH2TEXT_LOG_MAX_LENGTH,
         )
     except HTTPException as he:
@@ -598,8 +620,9 @@ async def generate_image_endpoint(
     image_request: GenerateImageRequest,
     current_user: Dict = Depends(get_current_user),
 ):
-    request_id = request.headers.get("X-Request-Id", "")
-    logger.debug(f"リクエストID: {request_id}")
+    request_info = await log_request(
+        request, current_user, GENERATE_IMAGE_LOG_MAX_LENGTH
+    )
 
     prompt = image_request.prompt
     model_name = image_request.model_name
@@ -650,7 +673,11 @@ async def generate_image_endpoint(
         response_data = {"images": encode_images}
         return create_dict_logger(
             response_data,
-            {"X-Request-Id": request_id, "path": request.url.path, "e-mail" : current_user.get("email")},
+            meta_info={
+                k: request_info[k]
+                for k in ("X-Request-Id", "path", "email")
+                if k in request_info
+            },
             max_length=GENERATE_IMAGE_LOG_MAX_LENGTH,
         )
     except HTTPException as he:
@@ -664,14 +691,18 @@ async def generate_image_endpoint(
 @app.post("/backend/logout")
 async def logout(request: Request):
     try:
-        request_id = request.headers.get("X-Request-Id", "")
-        logger.debug(f"リクエストID: {request_id}")
+        request_info = await log_request(request, None, LOGOUT_LOG_MAX_LENGTH)
+
         logger.debug("ログアウト処理開始")
 
         response_data = {"status": "success", "message": "ログアウトに成功しました"}
         return create_dict_logger(
             response_data,
-            {"X-Request-Id": request_id, "path": request.url.path},
+            meta_info={
+                k: request_info[k]
+                for k in ("X-Request-Id", "path")
+                if k in request_info
+            },
             max_length=LOGOUT_LOG_MAX_LENGTH,
         )
     except Exception as e:
