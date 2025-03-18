@@ -11,8 +11,8 @@ interface AuthContextType {
   setCurrentUser: (user: User | null) => void;
   checkAuthStatus: () => Promise<boolean>;
   loading: boolean;
-  refreshToken: () => Promise<string | null>;        
-  checkTokenExpiration: () => Promise<string | null>; 
+  refreshToken: () => Promise<string | null>;
+  checkTokenExpiration: () => Promise<string | null>;
 }
 
 // 認証コンテキストの作成
@@ -21,7 +21,7 @@ const AuthContext = createContext<AuthContextType | null>(null);
 // 認証プロバイダーコンポーネント
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true); 
+  const [loading, setLoading] = useState(true);
   const auth = getAuth();
 
   // ここに定数とトークン関連の関数を追加
@@ -60,7 +60,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const expirationTime = decodedToken.exp;
       const currentTime = Math.floor(Date.now() / 1000);
       console.log(`トークンの有効期限: ${expirationTime}, 現在の時刻: ${currentTime}, リフレッシュまで: ${expirationTime - currentTime - TOKEN_REFRESH_THRESHOLD}秒`);
-    
+
       if (expirationTime - currentTime < TOKEN_REFRESH_THRESHOLD) {
         console.log('トークンの有効期限が閾値を下回ったため、トークンをリフレッシュします');
         const newToken = await refreshToken();
@@ -108,7 +108,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       unsubscribe();
     };
   }, [auth]);
-  
+
   // トークンリフレッシュ監視のuseEffect
   useEffect(() => {
     console.log('トークンリフレッシュ用のuseEffectが実行されました');
@@ -127,37 +127,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       clearInterval(tokenRefreshInterval);
     };
   }, []);
-  
+
   // バックエンドとの認証状態の検証
   const checkAuthStatus = async () => {
     console.log('checkAuthStatus関数が呼び出されました');
     try {
-      if (!auth.currentUser) {
-        console.log('ログイン中のユーザーが存在しません');
-        console.log('Authオブジェクトの状態:', auth);
-        console.log('currentUserの状態:', currentUser);
-        return false;
-      }
-      // 最新のトークンを取得
-      const token = await auth.currentUser.getIdToken(false);
-      console.log('取得した最新トークン(先頭10文字):', token.substring(0, 10) + '...');
+      // Firebaseの認証状態のみをチェック
+      const isAuthenticated = !!auth.currentUser;
+      console.log('認証状態（Firebase側のみ）:', isAuthenticated);
+      return isAuthenticated;
 
-      // リクエストIDを生成
-      const requestId = generateRequestId();
-      console.log(`認証確認用リクエストID: ${requestId}`);
-      
-      // バックエンドへ認証確認リクエスト
-      console.log('バックエンドへ認証確認のリクエストを送信します...');
-      const response = await axios.get(`${Config.API_BASE_URL}/backend/verify-auth`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "X-Request-Id": requestId, // リクエストIDをヘッダーに追加
-        },
-      });
-      console.log('バックエンドからのレスポンス:', response.data);
-      const isSuccess = response.data.status === 'success';
-      console.log('認証ステータス:', isSuccess);
-      return isSuccess;
     } catch (error: any) {
       console.error('認証チェック中にエラーが発生しました:', {
         name: error.name,
@@ -175,8 +154,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setCurrentUser,
     checkAuthStatus,
     loading,
-    refreshToken,        
-    checkTokenExpiration 
+    refreshToken,
+    checkTokenExpiration
   };
 
   console.log('AuthProviderがレンダリングされました。提供する値:', value);
