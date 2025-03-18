@@ -1,8 +1,5 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { User, getAuth, onAuthStateChanged } from 'firebase/auth';
-import axios from 'axios';
-import * as Config from '../config'; // config.ts からインポート
-import { generateRequestId } from '../utils/requestIdUtils'; // リクエストID生成関数をインポート
 
 
 // interfaceの更新も必要
