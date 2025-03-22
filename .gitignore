@@ -1,6 +1,8 @@
 *test*
 *.git*
+*.csv
 .env
+*.json
 *key*.json
 *.key
 .env.local

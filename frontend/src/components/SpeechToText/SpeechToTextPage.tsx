@@ -74,17 +74,19 @@ const SpeechToTextPage = () => {
       editedTranscriptSegments, // 編集内容も保存
     };
     
-    const jsonString = JSON.stringify(session);
-    const encoder = new TextEncoder();
-    const binaryData = encoder.encode(jsonString);
-    const blob = new Blob([binaryData], { type: "application/octet-stream" });
+    // JSONオブジェクトを文字列に変換（整形してインデントを付ける）
+    const jsonString = JSON.stringify(session, null, 2);
+    
+    // バイナリエンコーディングを削除し、JSONファイルとして保存
+    const blob = new Blob([jsonString], { type: "application/json" });
 
     let safeDescription = description.trim() ? description.trim() : "session";
     let safeRecordingDate = recordingDate.trim()
       ? recordingDate.trim().replace(/[:]/g, "-")
       : new Date().toISOString().replace(/[:]/g, "-");
 
-    const filename = `${safeDescription}_${safeRecordingDate}.bin`;
+    // 拡張子を.binから.jsonに変更
+    const filename = `${safeDescription}_${safeRecordingDate}.json`;
 
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -250,7 +252,7 @@ const SpeechToTextPage = () => {
           </button>
           <input
             type="file"
-            accept=".bin"
+            accept=".json"
             ref={fileInputSessionRef}
             style={{ display: "none" }}
             onChange={handleLoadSession}
