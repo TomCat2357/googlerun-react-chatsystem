@@ -8,7 +8,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN python3.10 -m pip install --upgrade pip
 
 # 4. pyannote.audio, faster-whisper, CTranslate2のインストール
-RUN python3.10 -m pip install pyannote.audio faster-whisper polars google-cloud-storage
+RUN python3.10 -m pip install pyannote.audio faster-whisper polars google-cloud-storage python-dotenv
 
 # 5. 作業ディレクトリ
 WORKDIR /app

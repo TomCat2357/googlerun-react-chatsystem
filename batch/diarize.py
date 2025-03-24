@@ -5,9 +5,13 @@ import torchaudio
 import pandas as pd
 import os
 import io
+from dotenv import load_dotenv
 from google.cloud import storage
 import csv
 from pyannote.audio import Pipeline
+
+load_dotenv()
+
 
 def is_gcs_path(path):
     """GCSパスかどうかを判定する"""
@@ -106,7 +110,7 @@ def diarize_audio(audio_path, output_csv, min_speakers=None, max_speakers=None, 
         
         pipeline = Pipeline.from_pretrained(
             "pyannote/speaker-diarization-3.1",
-            use_auth_token="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"
+            use_auth_token=os.environ["HF_AUTH_TOKEN"]
         )
         
         # GPUの場合はCUDAを使用
