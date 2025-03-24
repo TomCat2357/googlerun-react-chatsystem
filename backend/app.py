@@ -563,7 +563,8 @@ async def speech2text(
             hrs = int(seconds // 3600)
             mins = int((seconds % 3600) // 60)
             secs = int(seconds % 60)
-            return f"{hrs:02d}:{mins:02d}:{secs:02d}"
+            msecs = int(seconds * 1000) % 1000
+            return f"{hrs:02d}:{mins:02d}:{secs:02d}.{msecs:03d}"
 
         for response in responses:
             for result in response.results:
