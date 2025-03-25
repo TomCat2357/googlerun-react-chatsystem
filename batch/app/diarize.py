@@ -46,13 +46,15 @@ def save_dataframe(df, output_path):
 
 def diarize_audio(audio_path, output_csv, hf_auth_token, min_speakers=None, max_speakers=None, num_speakers=None):
     """音声ファイルの話者分け（ダイアリゼーション）を実行してCSVに保存する"""
-    now = time.time()
+    start_time = time.time()
     
     try:
         # GPUの設定
         device = torch.device("cuda")
         print("Using GPU for diarization")
         
+        print("Initializing pyannote pipeline...")
+        pipeline_start_time = time.time()
         # pyannoteのパイプライン設定
         pipeline = Pipeline.from_pretrained(
             "pyannote/speaker-diarization-3.1",
@@ -61,9 +63,15 @@ def diarize_audio(audio_path, output_csv, hf_auth_token, min_speakers=None, max_
         
         # デバイス設定（常にGPUを使用）
         pipeline.to(device)
+        pipeline_init_time = time.time() - pipeline_start_time
+        print(f"Pipeline initialization completed in {pipeline_init_time:.2f} seconds")
         
         # 音声ファイルを読み込む
+        print("Loading audio file...")
+        load_start_time = time.time()
         waveform, sample_rate = torchaudio.load(audio_path)
+        load_time = time.time() - load_start_time
+        print(f"Audio loading completed in {load_time:.2f} seconds")
         
         # ダイアリゼーションパラメータの設定
         diarization_params = {}
@@ -77,12 +85,18 @@ def diarize_audio(audio_path, output_csv, hf_auth_token, min_speakers=None, max_
                 diarization_params["max_speakers"] = max_speakers
         
         # 話者分け（ダイアリゼーション）の実行
+        print("Running speaker diarization...")
+        diarize_start_time = time.time()
         diarization = pipeline(
             {"waveform": waveform, "sample_rate": sample_rate},
             **diarization_params
         )
+        diarize_time = time.time() - diarize_start_time
+        print(f"Core diarization completed in {diarize_time:.2f} seconds")
         
         # 結果をデータフレームに変換
+        print("Processing results...")
+        process_start_time = time.time()
         data = []
         for segment, _, speaker in diarization.itertracks(yield_label=True):
             data.append({
@@ -93,15 +107,33 @@ def diarize_audio(audio_path, output_csv, hf_auth_token, min_speakers=None, max_
         
         # Pandasデータフレームに変換
         df = pd.DataFrame(data)
+        process_time = time.time() - process_start_time
+        print(f"Results processing completed in {process_time:.2f} seconds")
         
         # CSVとして保存
+        print("Saving results to CSV...")
+        save_start_time = time.time()
         save_dataframe(df, output_csv)
+        save_time = time.time() - save_start_time
+        print(f"Results saving completed in {save_time:.2f} seconds")
         
-        print(f"Speaker diarization (GPU) completed in {time.time() - now:.2f} seconds")
+        total_time = time.time() - start_time
+        print(f"Speaker diarization (GPU) completed in {total_time:.2f} seconds")
+        
+        # 時間の内訳を表示
+        print("\n=== Diarization Time Breakdown ===")
+        print(f"Pipeline initialization: {pipeline_init_time:.2f} seconds")
+        print(f"Audio loading: {load_time:.2f} seconds")
+        print(f"Core diarization: {diarize_time:.2f} seconds")
+        print(f"Results processing: {process_time:.2f} seconds")
+        print(f"Results saving: {save_time:.2f} seconds")
+        print(f"Total: {total_time:.2f} seconds")
+        
         return df
         
     except Exception as e:
-        print(f"Error during diarization on GPU: {e}")
+        error_time = time.time() - start_time
+        print(f"Error during diarization on GPU after {error_time:.2f} seconds: {e}")
         raise Exception(f"GPUでの実行に失敗しました: {e}")
 
 def main():

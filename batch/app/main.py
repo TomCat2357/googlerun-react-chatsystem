@@ -55,25 +55,33 @@ def main():
     try:
         # ステップ1: 音声変換
         print("=== Step 1: Converting audio to WAV format with GPU acceleration ===")
+        step1_start_time = time.time()
         convert_cmd = [
             "python3", "convert_audio.py",
             args.audio_path,
             temp_wav_path
         ]
         subprocess.run(convert_cmd, check=True)
+        step1_end_time = time.time()
+        step1_duration = step1_end_time - step1_start_time
+        print(f"Step 1 completed in {step1_duration:.2f} seconds")
         
         # ステップ2: 文字起こし
         print("\n=== Step 2: Running transcription using GPU ===")
+        step2_start_time = time.time()
         transcribe_cmd = [
             "python3", "transcribe.py",
             temp_wav_path,
-            transcription_csv,
-            "--use_gpu"  # GPU使用フラグを追加（transcribe.pyにこのオプションがあることを前提）
+            transcription_csv
         ]
         subprocess.run(transcribe_cmd, check=True)
+        step2_end_time = time.time()
+        step2_duration = step2_end_time - step2_start_time
+        print(f"Step 2 completed in {step2_duration:.2f} seconds")
         
         # ステップ3: 話者分離（常にGPUを使用）
         print("\n=== Step 3: Running speaker diarization on GPU ===")
+        step3_start_time = time.time()
         diarize_cmd = [
             "python3", "diarize.py",
             temp_wav_path,
@@ -88,9 +96,13 @@ def main():
             diarize_cmd.extend(["--num-speakers", str(args.num_speakers)])
         
         subprocess.run(diarize_cmd, check=True)
+        step3_end_time = time.time()
+        step3_duration = step3_end_time - step3_start_time
+        print(f"Step 3 completed in {step3_duration:.2f} seconds")
         
         # ステップ4: 結果の結合
         print("\n=== Step 4: Combining results ===")
+        step4_start_time = time.time()
         combine_cmd = [
             "python3", "combine_results.py",
             transcription_csv,
@@ -98,9 +110,22 @@ def main():
             args.output_file
         ]
         subprocess.run(combine_cmd, check=True)
+        step4_end_time = time.time()
+        step4_duration = step4_end_time - step4_start_time
+        print(f"Step 4 completed in {step4_duration:.2f} seconds")
         
-        print(f"\nTotal processing completed in {time.time() - total_start_time:.2f} seconds")
-        print(f"Final results saved to {args.output_file}")
+        # 全体処理時間
+        total_duration = time.time() - total_start_time
+        
+        # 各ステップの処理時間サマリー
+        print("\n=== Processing Time Summary ===")
+        print(f"Step 1 (Audio Conversion): {step1_duration:.2f} seconds")
+        print(f"Step 2 (Transcription): {step2_duration:.2f} seconds")
+        print(f"Step 3 (Speaker Diarization): {step3_duration:.2f} seconds")
+        print(f"Step 4 (Combining Results): {step4_duration:.2f} seconds")
+        print(f"Total processing time: {total_duration:.2f} seconds")
+        
+        print(f"\nFinal results saved to {args.output_file}")
         
     finally:
         # デバッグモードでない場合は中間ファイルを削除

@@ -8,10 +8,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN python3.10 -m pip install --upgrade pip
 
 # 4. pyannote.audio, faster-whisper, CTranslate2のインストール
-RUN python3.10 -m pip install pyannote.audio faster-whisper polars google-cloud-storage python-dotenv
+RUN python3.10 -m pip install pyannote.audio faster-whisper polars google-cloud-storage
 
 # 5. 作業ディレクトリ
 WORKDIR /app
 
-# 6. デフォルトコマンド
-CMD ["bash"]
+# アプリケーションファイルのコピー
+COPY ./app /app
+
+# 必要に応じて実行権限を付与（オプション）
+RUN chmod +x /app/*.py
+
+# 6. デフォルトコマンド（メインのPythonスクリプトに変更）
+# 例: main.pyというファイルがある場合
+CMD ["python3", "/app/main.py"]

@@ -46,9 +46,14 @@ def transcribe_audio(audio_path, output_csv):
     """音声ファイルの文字起こしを実行してCSVに保存する"""
     now = time.time()
     
+    print("Initializing Whisper model on GPU...")
     # Whisperモデルの初期化 - GPUが利用可能な場合はGPUを使用
     model = WhisperModel("large", device="cuda")
     
+    model_init_time = time.time()
+    print(f"Model initialization completed in {model_init_time - now:.2f} seconds")
+    
+    print("Starting transcription...")
     # 文字起こしの実行
     segments, info = model.transcribe(audio_path, beam_size=5)
     
@@ -61,13 +66,21 @@ def transcribe_audio(audio_path, output_csv):
             "text": segment.text
         })
     
+    transcription_time = time.time()
+    print(f"Core transcription completed in {transcription_time - model_init_time:.2f} seconds")
+    
     # Pandasデータフレームに変換
     df = pd.DataFrame(data)
     
+    print("Saving results...")
     # CSVとして保存
     save_dataframe(df, output_csv)
     
-    print(f"Transcription completed in {time.time() - now:.2f} seconds")
+    save_time = time.time()
+    print(f"Results saving completed in {save_time - transcription_time:.2f} seconds")
+    
+    total_time = time.time() - now
+    print(f"Total transcription process completed in {total_time:.2f} seconds")
     return df
 
 def main():
