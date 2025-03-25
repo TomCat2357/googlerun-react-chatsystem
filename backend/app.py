@@ -48,13 +48,20 @@ from utils.common import (
     UNNEED_REQUEST_ID_PATH_STARTSWITH,
     UNNEED_REQUEST_ID_PATH_ENDSWITH,
     SENSITIVE_KEYS,
+    HF_AUTH_TOKEN,
+    GCS_BUCKET_NAME,
+    PUBSUB_TOPIC,
+    EMAIL_NOTIFICATION,
     get_api_key_for_model,
     get_current_user,
     GeocodeRequest,
     ChatRequest,
     SpeechToTextRequest,
     GenerateImageRequest,
+    WhisperRequest,
+    WhisperJobRequest,
 )
+
 
 from utils.geocoding_service import get_google_maps_api_key, process_optimized_geocode
 
@@ -64,10 +71,12 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.routing import APIRoute
 from pydantic import BaseModel, Field
 from typing import Dict, Any, List, Optional, Callable
-from firebase_admin import auth, credentials
+from firebase_admin import auth, credentials, firestore
 import firebase_admin
 import os, json, asyncio, base64, time, re
-
+import uuid
+from datetime import datetime
+from google.cloud import storage, pubsub_v1
 
 from utils.chat_utils import common_message_function
 from utils.speech2text import transcribe_streaming_v2
@@ -92,6 +101,9 @@ except ValueError:
     else:
         logger.debug("Firebase認証情報なしで初期化")
         firebase_admin.initialize_app()  # 名前を指定しない
+
+# Firestoreクライアントの初期化
+db = firestore.client()
 
 # FastAPIアプリケーションの初期化
 app = FastAPI()
@@ -709,6 +721,365 @@ async def logout(request: Request):
     except Exception as e:
         logger.error("ログアウト処理中にエラーが発生: %s", str(e), exc_info=True)
         raise HTTPException(status_code=401, detail=str(e))
+
+
+@app.post("/backend/whisper")
+async def whisper_upload(
+    request: Request,
+    whisper_request: WhisperRequest,
+    current_user: Dict = Depends(get_current_user),
+):
+    """音声データを受け取り、Cloud Storageにアップロードしてバッチ処理を開始する"""
+    request_info = await log_request(request, current_user, CHAT_LOG_MAX_LENGTH)
+    logger.debug("Whisperアップロードのリクエスト情報: %s", request_info)
+
+    try:
+        # リクエストデータの取得
+        audio_data = whisper_request.audio_data
+        filename = whisper_request.filename
+        description = whisper_request.description
+        recording_date = whisper_request.recording_date
+
+        # ユーザー情報の取得
+        user_id = current_user.get("uid")
+        user_email = current_user.get("email")
+
+        if not audio_data:
+            raise HTTPException(
+                status_code=400, detail="音声データが提供されていません"
+            )
+
+        # Base64デコード
+        try:
+            if audio_data.startswith("data:"):
+                audio_bytes = base64.b64decode(audio_data.split(",")[1])
+            else:
+                audio_bytes = base64.b64decode(audio_data)
+            logger.debug(f"受信した音声サイズ: {len(audio_bytes) / 1024:.2f} KB")
+        except Exception as e:
+            logger.error(f"音声データのBase64デコードエラー: {str(e)}")
+            raise HTTPException(
+                status_code=400, detail=f"音声データの解析に失敗しました: {str(e)}"
+            )
+
+        # ジョブIDの生成
+        job_id = str(uuid.uuid4())
+
+        # 安全なファイル名の生成
+        timestamp = int(time.time())
+        safe_filename = re.sub(r"[^\w\-\.]", "_", filename)
+
+        # Cloud Storageへのアップロード
+        storage_client = storage.Client()
+        bucket = storage_client.bucket(GCS_BUCKET_NAME)
+
+        # 音声ファイルのGCSパス
+        file_extension = os.path.splitext(safe_filename)[1]
+        gcs_audio_path = f"whisper/{user_id}/{job_id}/original{file_extension}"
+
+        # アップロード
+        blob = bucket.blob(gcs_audio_path)
+        blob.upload_from_string(audio_bytes)
+        logger.debug(f"音声ファイルをGCSにアップロード: {gcs_audio_path}")
+
+        # メタデータを作成
+        job_data = {
+            "id": job_id,
+            "user_id": user_id,
+            "user_email": user_email,
+            "filename": safe_filename,
+            "description": description or "",
+            "recording_date": recording_date or "",
+            "gcs_audio_path": gcs_audio_path,
+            "status": "processing",
+            "created_at": timestamp,
+            "updated_at": timestamp,
+            "error_message": None,
+        }
+
+        # メタデータをGCSに保存
+        metadata_blob = bucket.blob(f"whisper/{user_id}/{job_id}/metadata.json")
+        metadata_blob.upload_from_string(
+            json.dumps(job_data), content_type="application/json"
+        )
+        logger.debug(f"メタデータをGCSに保存: {job_id}")
+
+        # Pub/Subを使用してバッチ処理をトリガー
+        try:
+            publisher = pubsub_v1.PublisherClient()
+            topic_path = PUBSUB_TOPIC
+
+            message_data = {
+                "job_id": job_id,
+                "user_id": user_id,
+                "user_email": user_email,
+                "gcs_audio_path": gcs_audio_path,
+            }
+
+            message_bytes = json.dumps(message_data).encode("utf-8")
+            publish_future = publisher.publish(topic_path, data=message_bytes)
+            publish_future.result()  # 非同期処理の完了を待つ
+
+            logger.debug(f"Pub/Subにメッセージを送信: {job_id}")
+        except Exception as e:
+            logger.error(f"Pub/Sub送信エラー: {str(e)}", exc_info=True)
+            # エラーがあってもアップロードは成功とする（バックグラウンドで処理）
+
+        # 成功レスポンス
+        return {
+            "status": "success",
+            "job_id": job_id,
+            "message": "音声ファイルがアップロードされ、処理が開始されました",
+        }
+
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        logger.error(f"Whisperアップロードエラー: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/backend/whisper/jobs")
+async def get_whisper_jobs(
+    request: Request,
+    current_user: Dict = Depends(get_current_user),
+):
+    """ユーザーのWhisperジョブ一覧をGCSから取得する"""
+    request_info = await log_request(request, current_user, CHAT_LOG_MAX_LENGTH)
+    logger.debug("Whisperジョブ一覧取得: %s", request_info)
+
+    try:
+        user_id = current_user.get("uid")
+
+        # GCSからジョブ一覧を取得
+        storage_client = storage.Client()
+        bucket = storage_client.bucket(GCS_BUCKET_NAME)
+
+        # ユーザーのフォルダパス
+        user_prefix = f"whisper/{user_id}/"
+
+        # プレフィックスと区切り文字を使ってリストアップ
+        # これによりジョブIDのディレクトリのみを一覧できる
+        blobs = bucket.list_blobs(prefix=user_prefix, delimiter="/")
+        job_prefixes = list(blobs.prefixes)  # ジョブIDの一覧を取得
+
+        jobs_list = []
+        for job_prefix in job_prefixes:
+            # job_idを抽出（例: whisper/user_id/job_id/ → job_id）
+            job_id = job_prefix.split("/")[-2]
+
+            # メタデータファイルを取得
+            metadata_blob = bucket.blob(f"{job_prefix}metadata.json")
+
+            if metadata_blob.exists():
+                try:
+                    metadata = json.loads(metadata_blob.download_as_string())
+
+                    # 状態を確認
+                    transcription_blob = bucket.blob(f"{job_prefix}transcription.json")
+                    if (
+                        transcription_blob.exists()
+                        and metadata.get("status") == "processing"
+                    ):
+                        # 結果ファイルがあるが状態がprocessingのままの場合は完了とみなす
+                        metadata["status"] = "completed"
+
+                    jobs_list.append(
+                        {
+                            "id": metadata.get("id", job_id),
+                            "filename": metadata.get("filename", "unknown"),
+                            "description": metadata.get("description", ""),
+                            "status": metadata.get("status", "processing"),
+                            "created_at": metadata.get("created_at", 0),
+                            "error_message": metadata.get("error_message"),
+                        }
+                    )
+                except Exception as e:
+                    logger.error(f"メタデータ読み込みエラー ({job_id}): {str(e)}")
+                    # エラーの場合でもリストには含める
+                    jobs_list.append(
+                        {
+                            "id": job_id,
+                            "filename": "読み込みエラー",
+                            "status": "error",
+                            "created_at": 0,
+                            "error_message": f"メタデータ読み込みエラー: {str(e)}",
+                        }
+                    )
+
+        # 作成日時でソート（新しい順）
+        jobs_list.sort(key=lambda x: x.get("created_at", 0), reverse=True)
+
+        return {"status": "success", "jobs": jobs_list}
+
+    except Exception as e:
+        logger.error(f"Whisperジョブ一覧取得エラー: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/backend/whisper/jobs/{job_id}")
+async def get_whisper_job(
+    request: Request,
+    job_id: str,
+    current_user: Dict = Depends(get_current_user),
+):
+    """特定のWhisperジョブの詳細と結果をGCSから取得する"""
+    request_info = await log_request(request, current_user, CHAT_LOG_MAX_LENGTH)
+    logger.debug(f"Whisperジョブ詳細取得 ({job_id}): %s", request_info)
+
+    try:
+        user_id = current_user.get("uid")
+
+        # GCSからメタデータを取得
+        storage_client = storage.Client()
+        bucket = storage_client.bucket(GCS_BUCKET_NAME)
+
+        # メタデータファイルのパス
+        metadata_path = f"whisper/{user_id}/{job_id}/metadata.json"
+        metadata_blob = bucket.blob(metadata_path)
+
+        if not metadata_blob.exists():
+            raise HTTPException(
+                status_code=404, detail=f"ジョブが見つかりません: {job_id}"
+            )
+
+        # メタデータを読み込む
+        job_data = json.loads(metadata_blob.download_as_string())
+
+        # 権限チェック
+        if job_data.get("user_id") != user_id:
+            raise HTTPException(
+                status_code=403, detail="このジョブにアクセスする権限がありません"
+            )
+
+        # レスポンスの基本情報
+        response_data = {
+            "id": job_data.get("id"),
+            "filename": job_data.get("filename"),
+            "description": job_data.get("description"),
+            "recording_date": job_data.get("recording_date"),
+            "status": job_data.get("status"),
+            "created_at": job_data.get("created_at"),
+            "error_message": job_data.get("error_message"),
+        }
+
+        # 処理完了の場合は結果を取得
+        transcription_path = f"whisper/{user_id}/{job_id}/transcription.json"
+        transcription_blob = bucket.blob(transcription_path)
+
+        if transcription_blob.exists():
+            # 状態更新（結果があるのに処理中の場合は完了とみなす）
+            if job_data.get("status") == "processing":
+                job_data["status"] = "completed"
+                metadata_blob.upload_from_string(
+                    json.dumps(job_data), content_type="application/json"
+                )
+                response_data["status"] = "completed"
+
+            # 結果ファイルの読み込み
+            result_content = transcription_blob.download_as_string()
+            segments = json.loads(result_content)
+            response_data["segments"] = segments
+
+            # 音声ファイルの署名付きURL生成（一時的にアクセス可能なURL）
+            audio_blob = bucket.blob(job_data.get("gcs_audio_path"))
+            if audio_blob.exists():
+                # 1時間有効の署名付きURL
+                audio_url = audio_blob.generate_signed_url(
+                    version="v4", expiration=datetime.timedelta(hours=1), method="GET"
+                )
+                response_data["gcs_audio_url"] = audio_url
+
+        return response_data
+
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        logger.error(f"Whisperジョブ詳細取得エラー: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/backend/whisper/jobs/{job_id}/edit")
+async def update_whisper_transcript(
+    request: Request,
+    job_id: str,
+    edit_request: WhisperJobRequest,
+    current_user: Dict = Depends(get_current_user),
+):
+    """文字起こし編集内容をGCSに保存する"""
+    request_info = await log_request(request, current_user, CHAT_LOG_MAX_LENGTH)
+    logger.debug(f"Whisper編集リクエスト ({job_id}): %s", request_info)
+
+    try:
+        user_id = current_user.get("uid")
+
+        # GCSからメタデータを取得
+        storage_client = storage.Client()
+        bucket = storage_client.bucket(GCS_BUCKET_NAME)
+
+        # メタデータファイルのパス
+        metadata_path = f"whisper/{user_id}/{job_id}/metadata.json"
+        metadata_blob = bucket.blob(metadata_path)
+
+        if not metadata_blob.exists():
+            raise HTTPException(
+                status_code=404, detail=f"ジョブが見つかりません: {job_id}"
+            )
+
+        # メタデータを読み込む
+        job_data = json.loads(metadata_blob.download_as_string())
+
+        # 権限チェック
+        if job_data.get("user_id") != user_id:
+            raise HTTPException(
+                status_code=403, detail="このジョブにアクセスする権限がありません"
+            )
+
+        # ステータスチェック
+        transcription_path = f"whisper/{user_id}/{job_id}/transcription.json"
+        transcription_blob = bucket.blob(transcription_path)
+
+        if not transcription_blob.exists():
+            raise HTTPException(
+                status_code=400, detail="このジョブにはまだ結果ファイルがありません"
+            )
+
+        # 編集データの検証
+        segments = edit_request.segments
+        if not segments:
+            raise HTTPException(
+                status_code=400, detail="編集データが提供されていません"
+            )
+
+        # 編集結果ファイルをアップロード
+        edited_path = f"whisper/{user_id}/{job_id}/transcription_edited.json"
+        edited_blob = bucket.blob(edited_path)
+        edited_blob.upload_from_string(
+            json.dumps(segments, ensure_ascii=False, indent=2),
+            content_type="application/json",
+        )
+
+        # 最新の編集済みファイルを通常の結果ファイルとして上書き保存
+        transcription_blob.upload_from_string(
+            json.dumps(segments, ensure_ascii=False, indent=2),
+            content_type="application/json",
+        )
+
+        # メタデータを更新
+        job_data["updated_at"] = int(time.time())
+        job_data["status"] = "completed"
+        metadata_blob.upload_from_string(
+            json.dumps(job_data, ensure_ascii=False, indent=2),
+            content_type="application/json",
+        )
+
+        return {"status": "success", "message": "編集内容が保存されました"}
+
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        logger.error(f"Whisper編集保存エラー: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # 静的ファイル配信設定

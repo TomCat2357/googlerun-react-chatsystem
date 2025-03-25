@@ -6,8 +6,6 @@ import * as Config from "../../config";
 const MainPage = () => {
   const navigate = useNavigate();
 
-
-
   return (
     <div className="min-h-screen bg-dark-primary">
       <main className="container mx-auto px-4 py-8">
@@ -41,6 +39,7 @@ const MainPage = () => {
             </h2>
             <p className="text-gray-300">音声データをテキストに変換する</p>
           </div>
+          
           {/* 画像生成へのリンクカード */}
           <div
             onClick={() => navigate(Config.getClientPath("/app/generate-image"))}
@@ -48,6 +47,15 @@ const MainPage = () => {
           >
             <h2 className="text-xl font-bold text-white mb-2">画像生成</h2>
             <p className="text-gray-300">AIによる画像生成</p>
+          </div>
+
+          {/* Whisper音声文字起こしへのリンクカード */}
+          <div
+            onClick={() => navigate(Config.getClientPath("/app/whisper"))}
+            className="bg-dark-secondary p-6 rounded-lg shadow-lg cursor-pointer hover:bg-dark-accent transition-colors"
+          >
+            <h2 className="text-xl font-bold text-white mb-2">Whisper文字起こし</h2>
+            <p className="text-gray-300">バッチ処理による話者分離と文字起こし</p>
           </div>
         </div>
       </main>

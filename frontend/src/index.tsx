@@ -26,6 +26,10 @@ const SpeechToTextPage = React.lazy(
 const GenerateImagePage = React.lazy(
   () => import("./components/GenerateImage/GenerateImagePage")
 );
+// WhisperPageを追加
+const WhisperPage = React.lazy(
+  () => import("./components/Whisper/WhisperPage")
+);
 
 // ローディング表示用コンポーネント
 const LoadingFallback = () => (
@@ -60,6 +64,11 @@ function App() {
                         <Route
                           path="generate-image"
                           element={<GenerateImagePage />}
+                        />
+                        {/* WhisperPageへのルートを追加 */}
+                        <Route
+                          path="whisper"
+                          element={<WhisperPage />}
                         />
                       </Routes>
                     </Suspense>

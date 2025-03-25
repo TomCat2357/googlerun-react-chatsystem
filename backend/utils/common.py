@@ -97,6 +97,14 @@ UNNEED_REQUEST_ID_PATH_ENDSWITH=os.getenv('UNNEED_REQUEST_ID_PATH_ENDSWITH', '')
 #ログでマスクするセンシティブ情報。設定しなければエラーがでる
 SENSITIVE_KEYS=os.getenv('SENSITIVE_KEYS').split(',')
 
+# Hugging Faceの認証トークン。pyannote用
+HF_AUTH_TOKEN=os.getenv('HF_AUTH_TOKEN')
+
+# GCS関連の設定
+GCS_BUCKET_NAME = os.getenv("GCS_BUCKET_NAME")
+PUBSUB_TOPIC = os.getenv("PUBSUB_TOPIC")
+EMAIL_NOTIFICATION = bool(os.getenv("EMAIL_NOTIFICATION"))
+
 # 環境変数DEBUGの値を取得し、デバッグモードの設定を行う
 # デフォルトは空文字列
 debug = os.getenv("DEBUG", "")
@@ -316,6 +324,16 @@ class GenerateImageRequest(BaseModel):
     safety_filter_level: Optional[str] = None
     person_generation: Optional[str] = None
 
+
+# WhisperのAPI用モデルクラス
+class WhisperRequest(BaseModel):
+    audio_data: str
+    filename: str
+    description: Optional[str] = ""
+    recording_date: Optional[str] = ""
+
+class WhisperJobRequest(BaseModel):
+    segments: List[Dict[str, Any]]
 
 # 認証ミドルウェア用の依存関係
 async def get_current_user(request: Request):
