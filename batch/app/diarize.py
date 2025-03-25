@@ -6,7 +6,7 @@ import pandas as pd
 import os
 import io
 from google.cloud import storage
-import csv
+import json
 from pyannote.audio import Pipeline
 
 def is_gcs_path(path):
@@ -14,17 +14,15 @@ def is_gcs_path(path):
     return path.startswith("gs://")
 
 def save_dataframe_to_local(df, output_path):
-    """データフレームをローカルファイルとして保存する"""
+    """データフレームをローカルJSONファイルとして保存する"""
     os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
-    df.to_csv(output_path, index=False, quoting=csv.QUOTE_ALL)
+    df.to_json(output_path, orient="records", indent=2)
     print(f"Results saved to local file: {output_path}")
 
 def save_dataframe_to_gcs(df, gcs_uri):
-    """データフレームをGCSに保存する"""
-    # CSVをメモリ内に作成
-    csv_buffer = io.StringIO()
-    df.to_csv(csv_buffer, index=False, quoting=csv.QUOTE_ALL)
-    csv_content = csv_buffer.getvalue()
+    """データフレームをGCSのJSONに保存する"""
+    # JSONをメモリ内に作成
+    json_content = df.to_json(orient="records", indent=2)
     
     # GCSに保存
     path_without_prefix = gcs_uri[5:]
@@ -34,7 +32,7 @@ def save_dataframe_to_gcs(df, gcs_uri):
     bucket = storage_client.bucket(bucket_name)
     blob = bucket.blob(blob_path)
     
-    blob.upload_from_string(csv_content, content_type='text/csv')
+    blob.upload_from_string(json_content, content_type='application/json')
     print(f"Results saved to GCS: {gcs_uri}")
 
 def save_dataframe(df, output_path):
@@ -44,8 +42,8 @@ def save_dataframe(df, output_path):
     else:
         save_dataframe_to_local(df, output_path)
 
-def diarize_audio(audio_path, output_csv, hf_auth_token, min_speakers=None, max_speakers=None, num_speakers=None):
-    """音声ファイルの話者分け（ダイアリゼーション）を実行してCSVに保存する"""
+def diarize_audio(audio_path, output_json, hf_auth_token, min_speakers=None, max_speakers=None, num_speakers=None):
+    """音声ファイルの話者分け（ダイアリゼーション）を実行してJSONに保存する"""
     start_time = time.time()
     
     try:
@@ -110,10 +108,10 @@ def diarize_audio(audio_path, output_csv, hf_auth_token, min_speakers=None, max_
         process_time = time.time() - process_start_time
         print(f"Results processing completed in {process_time:.2f} seconds")
         
-        # CSVとして保存
-        print("Saving results to CSV...")
+        # JSONとして保存
+        print("Saving results to JSON...")
         save_start_time = time.time()
-        save_dataframe(df, output_csv)
+        save_dataframe(df, output_json)
         save_time = time.time() - save_start_time
         print(f"Results saving completed in {save_time:.2f} seconds")
         
@@ -139,7 +137,7 @@ def diarize_audio(audio_path, output_csv, hf_auth_token, min_speakers=None, max_
 def main():
     parser = argparse.ArgumentParser(description='音声ファイルの話者分離を実行する')
     parser.add_argument('audio_path', help='音声ファイルのパス (WAV形式)')
-    parser.add_argument('output_csv', help='出力CSVファイルのパス')
+    parser.add_argument('output_json', help='出力JSONファイルのパス')
     parser.add_argument('hf_auth_token', help='HuggingFace認証トークン (必須)')
     parser.add_argument('--min-speakers', type=int, help='最小話者数')
     parser.add_argument('--max-speakers', type=int, help='最大話者数')
@@ -152,7 +150,7 @@ def main():
     
     diarize_audio(
         args.audio_path, 
-        args.output_csv,
+        args.output_json,
         args.hf_auth_token,
         min_speakers=args.min_speakers,
         max_speakers=args.max_speakers,

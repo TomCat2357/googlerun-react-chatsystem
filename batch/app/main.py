@@ -32,7 +32,7 @@ def check_gpu_availability():
 def main():
     parser = argparse.ArgumentParser(description='音声ファイルの文字起こしと話者分離を実行する統合スクリプト')
     parser.add_argument('audio_path', help='音声ファイルのパス (ローカルまたはGCS)')
-    parser.add_argument('output_file', help='出力CSVファイルのパス (ローカルまたはGCS)')
+    parser.add_argument('output_file', help='出力JSONファイルのパス (ローカルまたはGCS)')
     parser.add_argument('hf_auth_token', help='HuggingFace認証トークン (必須)')
     parser.add_argument('--min-speakers', type=int, help='最小話者数')
     parser.add_argument('--max-speakers', type=int, help='最大話者数')
@@ -49,8 +49,8 @@ def main():
     # 入出力ファイルのパスを準備
     base_name = Path(args.audio_path).stem
     temp_wav_path = f"temp_{base_name}.wav"
-    transcription_csv = f"temp_{base_name}_transcription.csv"
-    diarization_csv = f"temp_{base_name}_diarization.csv"
+    transcription_json = f"temp_{base_name}_transcription.json"
+    diarization_json = f"temp_{base_name}_diarization.json"
     
     try:
         # ステップ1: 音声変換
@@ -72,7 +72,7 @@ def main():
         transcribe_cmd = [
             "python3", "transcribe.py",
             temp_wav_path,
-            transcription_csv
+            transcription_json
         ]
         subprocess.run(transcribe_cmd, check=True)
         step2_end_time = time.time()
@@ -85,7 +85,7 @@ def main():
         diarize_cmd = [
             "python3", "diarize.py",
             temp_wav_path,
-            diarization_csv,
+            diarization_json,
             args.hf_auth_token
         ]
         if args.min_speakers:
@@ -105,8 +105,8 @@ def main():
         step4_start_time = time.time()
         combine_cmd = [
             "python3", "combine_results.py",
-            transcription_csv,
-            diarization_csv,
+            transcription_json,
+            diarization_json,
             args.output_file
         ]
         subprocess.run(combine_cmd, check=True)
@@ -131,7 +131,7 @@ def main():
         # デバッグモードでない場合は中間ファイルを削除
         if not args.debug:
             print("\nCleaning up temporary files...")
-            temp_files = [temp_wav_path, transcription_csv, diarization_csv]
+            temp_files = [temp_wav_path, transcription_json, diarization_json]
             for file_path in temp_files:
                 try:
                     if os.path.exists(file_path):
@@ -142,8 +142,8 @@ def main():
         else:
             print("\nDebug mode: Keeping temporary files:")
             print(f"- Audio: {temp_wav_path}")
-            print(f"- Transcription: {transcription_csv}")
-            print(f"- Diarization: {diarization_csv}")
+            print(f"- Transcription: {transcription_json}")
+            print(f"- Diarization: {diarization_json}")
 
 if __name__ == "__main__":
     main()

@@ -3,24 +3,22 @@ import pandas as pd
 import os
 import io
 from google.cloud import storage
-import csv
+import json
 
 def is_gcs_path(path):
     """GCSパスかどうかを判定する"""
     return path.startswith("gs://")
 
 def save_dataframe_to_local(df, output_path):
-    """データフレームをローカルファイルとして保存する"""
+    """データフレームをローカルJSONファイルとして保存する"""
     os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
-    df.to_csv(output_path, index=False, quoting=csv.QUOTE_ALL)
+    df.to_json(output_path, orient="records", indent=2)
     print(f"Results saved to local file: {output_path}")
 
 def save_dataframe_to_gcs(df, gcs_uri):
-    """データフレームをGCSに保存する"""
-    # CSVをメモリ内に作成
-    csv_buffer = io.StringIO()
-    df.to_csv(csv_buffer, index=False, quoting=csv.QUOTE_ALL)
-    csv_content = csv_buffer.getvalue()
+    """データフレームをGCSのJSONに保存する"""
+    # JSONをメモリ内に作成
+    json_content = df.to_json(orient="records", indent=2)
     
     # GCSに保存
     path_without_prefix = gcs_uri[5:]
@@ -30,7 +28,7 @@ def save_dataframe_to_gcs(df, gcs_uri):
     bucket = storage_client.bucket(bucket_name)
     blob = bucket.blob(blob_path)
     
-    blob.upload_from_string(csv_content, content_type='text/csv')
+    blob.upload_from_string(json_content, content_type='application/json')
     print(f"Results saved to GCS: {gcs_uri}")
 
 def save_dataframe(df, output_path):
@@ -40,10 +38,10 @@ def save_dataframe(df, output_path):
     else:
         save_dataframe_to_local(df, output_path)
 
-def read_csv(file_path):
-    """CSVファイルを読み込む（GCSまたはローカル）"""
+def read_json(file_path):
+    """JSONファイルを読み込む（GCSまたはローカル）"""
     if is_gcs_path(file_path):
-        # GCSからCSVを読み込む
+        # GCSからJSONを読み込む
         path_without_prefix = file_path[5:]
         bucket_name, blob_path = path_without_prefix.split("/", 1)
         
@@ -52,16 +50,16 @@ def read_csv(file_path):
         blob = bucket.blob(blob_path)
         
         content = blob.download_as_text()
-        return pd.read_csv(io.StringIO(content))
+        return pd.read_json(io.StringIO(content), orient="records")
     else:
-        # ローカルからCSVを読み込む
-        return pd.read_csv(file_path)
+        # ローカルからJSONを読み込む
+        return pd.read_json(file_path, orient="records")
 
-def combine_results(transcription_csv, diarization_csv, output_csv):
+def combine_results(transcription_json, diarization_json, output_json):
     """文字起こしと話者分離の結果を結合する"""
-    # CSVファイルを読み込む
-    transcription_df = read_csv(transcription_csv)
-    speaker_df = read_csv(diarization_csv)
+    # JSONファイルを読み込む
+    transcription_df = read_json(transcription_json)
+    speaker_df = read_json(diarization_json)
     
     # 結果を格納する新しいデータフレームの作成
     result_df = transcription_df.copy()
@@ -101,20 +99,20 @@ def combine_results(transcription_csv, diarization_csv, output_csv):
             best_speaker = max(speaker_overlaps.items(), key=lambda x: x[1])[0]
             result_df.at[i, 'speaker'] = best_speaker
     
-    # CSVとして保存
-    save_dataframe(result_df, output_csv)
+    # JSONとして保存
+    save_dataframe(result_df, output_json)
     
     print("Results combined successfully")
     return result_df
 
 def main():
     parser = argparse.ArgumentParser(description='文字起こしと話者分離の結果を結合する')
-    parser.add_argument('transcription_csv', help='文字起こし結果のCSVファイルパス')
-    parser.add_argument('diarization_csv', help='話者分離結果のCSVファイルパス')
-    parser.add_argument('output_csv', help='結合結果を保存するCSVファイルパス')
+    parser.add_argument('transcription_json', help='文字起こし結果のJSONファイルパス')
+    parser.add_argument('diarization_json', help='話者分離結果のJSONファイルパス')
+    parser.add_argument('output_json', help='結合結果を保存するJSONファイルパス')
     args = parser.parse_args()
     
-    combine_results(args.transcription_csv, args.diarization_csv, args.output_csv)
+    combine_results(args.transcription_json, args.diarization_json, args.output_json)
 
 if __name__ == "__main__":
     main()
