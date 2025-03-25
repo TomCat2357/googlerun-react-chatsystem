@@ -21,4 +21,5 @@ RUN chmod +x /app/*.py
 
 # 6. デフォルトコマンド（メインのPythonスクリプトに変更）
 # 例: main.pyというファイルがある場合
-CMD ["python3", "/app/main.py"]
+#CMD ["python3", "/app/main.py"]
+CMD ["bash"]
