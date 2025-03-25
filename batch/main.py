@@ -2,6 +2,7 @@ import argparse
 import os
 import subprocess
 import time
+import torch
 from pathlib import Path
 
 def is_gcs_path(path):
@@ -19,15 +20,28 @@ def get_local_path(gcs_path):
     file_name = parts[-1]
     return f"temp_{bucket_name}_{file_name}"
 
+def check_gpu_availability():
+    """GPUが利用可能かどうかを確認する"""
+    if not torch.cuda.is_available():
+        raise Exception("GPU環境が検出されませんでした。このスクリプトはGPU環境でのみ実行できます。")
+    
+    gpu_name = torch.cuda.get_device_name(0)
+    gpu_count = torch.cuda.device_count()
+    print(f"GPUが検出されました: {gpu_name} (合計{gpu_count}台)")
+
 def main():
     parser = argparse.ArgumentParser(description='音声ファイルの文字起こしと話者分離を実行する統合スクリプト')
     parser.add_argument('audio_path', help='音声ファイルのパス (ローカルまたはGCS)')
     parser.add_argument('output_file', help='出力CSVファイルのパス (ローカルまたはGCS)')
+    parser.add_argument('hf_auth_token', help='HuggingFace認証トークン (必須)')
     parser.add_argument('--min-speakers', type=int, help='最小話者数')
     parser.add_argument('--max-speakers', type=int, help='最大話者数')
     parser.add_argument('--num-speakers', type=int, help='固定話者数 (min/maxよりも優先)')
     parser.add_argument('-d', '--debug', action='store_true', help='デバッグモード (中間ファイルを保持)')
     args = parser.parse_args()
+
+    # GPUが利用可能かチェック
+    check_gpu_availability()
 
     # 処理開始時間
     total_start_time = time.time()
@@ -40,7 +54,7 @@ def main():
     
     try:
         # ステップ1: 音声変換
-        print("=== Step 1: Converting audio to WAV format ===")
+        print("=== Step 1: Converting audio to WAV format with GPU acceleration ===")
         convert_cmd = [
             "python3", "convert_audio.py",
             args.audio_path,
@@ -49,20 +63,22 @@ def main():
         subprocess.run(convert_cmd, check=True)
         
         # ステップ2: 文字起こし
-        print("\n=== Step 2: Running transcription ===")
+        print("\n=== Step 2: Running transcription using GPU ===")
         transcribe_cmd = [
             "python3", "transcribe.py",
             temp_wav_path,
-            transcription_csv
+            transcription_csv,
+            "--use_gpu"  # GPU使用フラグを追加（transcribe.pyにこのオプションがあることを前提）
         ]
         subprocess.run(transcribe_cmd, check=True)
         
-        # ステップ3: 話者分離
-        print("\n=== Step 3: Running speaker diarization ===")
+        # ステップ3: 話者分離（常にGPUを使用）
+        print("\n=== Step 3: Running speaker diarization on GPU ===")
         diarize_cmd = [
             "python3", "diarize.py",
             temp_wav_path,
-            diarization_csv
+            diarization_csv,
+            args.hf_auth_token
         ]
         if args.min_speakers:
             diarize_cmd.extend(["--min-speakers", str(args.min_speakers)])

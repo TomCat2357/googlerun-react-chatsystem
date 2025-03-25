@@ -5,13 +5,9 @@ import torchaudio
 import pandas as pd
 import os
 import io
-from dotenv import load_dotenv
 from google.cloud import storage
 import csv
 from pyannote.audio import Pipeline
-
-load_dotenv()
-
 
 def is_gcs_path(path):
     """GCSパスかどうかを判定する"""
@@ -48,73 +44,23 @@ def save_dataframe(df, output_path):
     else:
         save_dataframe_to_local(df, output_path)
 
-def diarize_audio(audio_path, output_csv, min_speakers=None, max_speakers=None, num_speakers=None):
+def diarize_audio(audio_path, output_csv, hf_auth_token, min_speakers=None, max_speakers=None, num_speakers=None):
     """音声ファイルの話者分け（ダイアリゼーション）を実行してCSVに保存する"""
     now = time.time()
     
     try:
-        # CPU実行モードで設定（cuDNNバージョンの問題を回避）
+        # GPUの設定
         device = torch.device("cuda")
+        print("Using GPU for diarization")
         
         # pyannoteのパイプライン設定
         pipeline = Pipeline.from_pretrained(
             "pyannote/speaker-diarization-3.1",
-            use_auth_token="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"
+            use_auth_token=hf_auth_token
         )
         
-        # デバイス設定
+        # デバイス設定（常にGPUを使用）
         pipeline.to(device)
-        
-        # 音声ファイルを読み込む
-        waveform, sample_rate = torchaudio.load(audio_path)
-        
-        # ダイアリゼーションパラメータの設定
-        diarization_params = {}
-        
-        if num_speakers is not None:
-            diarization_params["num_speakers"] = num_speakers
-        else:
-            if min_speakers is not None:
-                diarization_params["min_speakers"] = min_speakers
-            if max_speakers is not None:
-                diarization_params["max_speakers"] = max_speakers
-        
-        # 話者分け（ダイアリゼーション）の実行
-        diarization = pipeline(
-            {"waveform": waveform, "sample_rate": sample_rate},
-            **diarization_params
-        )
-        
-        # 結果をデータフレームに変換
-        data = []
-        for segment, _, speaker in diarization.itertracks(yield_label=True):
-            data.append({
-                "start": segment.start,
-                "end": segment.end,
-                "speaker": speaker
-            })
-        
-        # Pandasデータフレームに変換
-        df = pd.DataFrame(data)
-        
-        # CSVとして保存
-        save_dataframe(df, output_csv)
-        
-        print(f"Speaker diarization completed in {time.time() - now:.2f} seconds")
-        return df
-        
-    except Exception as e:
-        print(f"Error during diarization: {e}")
-        # エラー発生時はGPUでの実行を試みる
-        print("Attempting to run with GPU...")
-        
-        pipeline = Pipeline.from_pretrained(
-            "pyannote/speaker-diarization-3.1",
-            use_auth_token=os.environ["HF_AUTH_TOKEN"]
-        )
-        
-        # GPUの場合はCUDAを使用
-        pipeline.to(torch.device("cuda"))
         
         # 音声ファイルを読み込む
         waveform, sample_rate = torchaudio.load(audio_path)
@@ -153,19 +99,29 @@ def diarize_audio(audio_path, output_csv, min_speakers=None, max_speakers=None, 
         
         print(f"Speaker diarization (GPU) completed in {time.time() - now:.2f} seconds")
         return df
+        
+    except Exception as e:
+        print(f"Error during diarization on GPU: {e}")
+        raise Exception(f"GPUでの実行に失敗しました: {e}")
 
 def main():
     parser = argparse.ArgumentParser(description='音声ファイルの話者分離を実行する')
     parser.add_argument('audio_path', help='音声ファイルのパス (WAV形式)')
     parser.add_argument('output_csv', help='出力CSVファイルのパス')
+    parser.add_argument('hf_auth_token', help='HuggingFace認証トークン (必須)')
     parser.add_argument('--min-speakers', type=int, help='最小話者数')
     parser.add_argument('--max-speakers', type=int, help='最大話者数')
     parser.add_argument('--num-speakers', type=int, help='固定話者数（min/maxよりも優先）')
     args = parser.parse_args()
     
+    # GPUが使用可能かチェック
+    if not torch.cuda.is_available():
+        raise Exception("GPUが利用できません。このスクリプトはGPU環境でのみ実行できます。")
+    
     diarize_audio(
         args.audio_path, 
-        args.output_csv, 
+        args.output_csv,
+        args.hf_auth_token,
         min_speakers=args.min_speakers,
         max_speakers=args.max_speakers,
         num_speakers=args.num_speakers

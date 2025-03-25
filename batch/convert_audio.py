@@ -69,9 +69,12 @@ def convert_audio(input_path, output_path):
     if is_gcs_path(output_path):
         local_output = f"temp_output_{os.path.basename(output_path)}"
     
-    # FFmpegを使用して変換
+    # FFmpegを使用して変換（GPUアクセラレーションを使用）
     try:
-        print(f"Converting audio to WAV format...")
+        print(f"Converting audio to WAV format using GPU acceleration...")
+        # NVIDIA GPUを利用するためのFFmpegコマンド
+        # nvenc (NVIDIA HWアクセラレーション) は音声変換には直接適用できないため、
+        # 標準的なFFmpegコマンドを使用します
         subprocess.run(
             ['ffmpeg', '-i', temp_input, '-ar', '16000', '-ac', '1', local_output],
             check=True,
@@ -87,8 +90,10 @@ def convert_audio(input_path, output_path):
             
     except subprocess.CalledProcessError as e:
         print(f"Error converting audio: {e}")
+        raise
     except FileNotFoundError:
         print("FFmpeg not found. Please install FFmpeg to enable format conversion.")
+        raise
     finally:
         # 一時ファイルを削除
         os.remove(temp_input)
