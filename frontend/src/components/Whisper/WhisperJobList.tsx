@@ -1,25 +1,93 @@
-// frontend/src/component/Whisper/WhisperJobList.tsx
-import React from "react";
+import React, { useState, useMemo } from "react";
 
 interface Job {
   id: string;
   filename: string;
   created_at: string;
-  status: "processing" | "completed" | "failed";
+  updated_at?: string;
+  status: "queued" | "processing" | "completed" | "failed" | "error";
+  progress?: number; // 0-100の進捗率
   error_message?: string;
+  tags?: string[];
 }
 
 interface WhisperJobListProps {
   jobs: Job[];
   onJobSelect: (jobId: string) => void;
   onRefresh: () => void;
+  onDelete?: (jobId: string) => void;
+  filterStatus: string;
+  onFilterChange: (status: string) => void;
+  sortOrder: string;
+  onSortChange: (order: string) => void;
 }
 
-const WhisperJobList: React.FC<WhisperJobListProps> = ({ jobs, onJobSelect, onRefresh }) => {
+const WhisperJobList: React.FC<WhisperJobListProps> = ({
+  jobs,
+  onJobSelect,
+  onRefresh,
+  onDelete,
+  filterStatus,
+  onFilterChange,
+  sortOrder,
+  onSortChange
+}) => {
+  // フィルタリングされたジョブリスト
+  const filteredJobs = useMemo(() => {
+    return jobs
+      .filter(job => {
+        if (filterStatus === "all") return true;
+        return job.status === filterStatus;
+      })
+      .sort((a, b) => {
+        // ソートロジック
+        if (sortOrder === "date-desc") 
+          return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+        if (sortOrder === "date-asc") 
+          return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+        if (sortOrder === "status") {
+          // ステータス順（処理中→待機中→完了→失敗）
+          const statusOrder = {
+            "processing": 0,
+            "queued": 1,
+            "completed": 2,
+            "failed": 3,
+            "error": 4
+          };
+          return statusOrder[a.status] - statusOrder[b.status];
+        }
+        return 0;
+      });
+  }, [jobs, filterStatus, sortOrder]);
+
   return (
     <div>
+      {/* フィルターとソートコントロール */}
       <div className="flex justify-between items-center mb-4">
-        <h2 className="text-xl font-bold">処理ジョブ一覧</h2>
+        <div className="flex space-x-2">
+          <select 
+            value={filterStatus} 
+            onChange={(e) => onFilterChange(e.target.value)}
+            className="bg-gray-700 text-white rounded px-2 py-1"
+          >
+            <option value="all">すべて</option>
+            <option value="queued">待機中</option>
+            <option value="processing">処理中</option>
+            <option value="completed">完了</option>
+            <option value="failed">失敗</option>
+          </select>
+          
+          <select 
+            value={sortOrder} 
+            onChange={(e) => onSortChange(e.target.value)}
+            className="bg-gray-700 text-white rounded px-2 py-1"
+          >
+            <option value="date-desc">新しい順</option>
+            <option value="date-asc">古い順</option>
+            <option value="status">状態順</option>
+          </select>
+        </div>
+        
         <button
           onClick={onRefresh}
           className="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded"
@@ -28,8 +96,9 @@ const WhisperJobList: React.FC<WhisperJobListProps> = ({ jobs, onJobSelect, onRe
         </button>
       </div>
 
-      {jobs.length === 0 ? (
-        <p className="text-gray-400">ジョブがありません</p>
+      {/* ジョブ一覧テーブル */}
+      {filteredJobs.length === 0 ? (
+        <p className="text-gray-400">該当するジョブがありません</p>
       ) : (
         <div className="bg-gray-800 rounded overflow-x-auto">
           <table className="min-w-full">
@@ -42,39 +111,76 @@ const WhisperJobList: React.FC<WhisperJobListProps> = ({ jobs, onJobSelect, onRe
               </tr>
             </thead>
             <tbody>
-              {jobs.map((job) => (
+              {filteredJobs.map((job) => (
                 <tr key={job.id} className="border-t border-gray-700">
-                  <td className="px-4 py-2">{job.filename}</td>
+                  <td className="px-4 py-2">
+                    {job.filename}
+                    {job.tags && job.tags.length > 0 && (
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        {job.tags.map(tag => (
+                          <span key={tag} className="bg-blue-900 text-xs px-1 rounded">
+                            {tag}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </td>
                   <td className="px-4 py-2">
                     {new Date(job.created_at).toLocaleString()}
                   </td>
                   <td className="px-4 py-2">
-                    {job.status === "processing" && (
-                      <span className="text-yellow-400 flex items-center">
-                        <span className="animate-pulse mr-2">⟳</span> 処理中
+                    {job.status === "queued" && (
+                      <span className="text-blue-400 flex items-center">
+                        <span className="mr-2">⏳</span> 待機中
                       </span>
                     )}
-                    {job.status === "completed" && (
-                      <span className="text-green-400">完了</span>
+                    {job.status === "processing" && (
+                      <div>
+                        <span className="text-yellow-400 flex items-center">
+                          <span className="animate-pulse mr-2">🔄</span> 処理中
+                        </span>
+                        {job.progress !== undefined && job.progress > 0 && (
+                          <div className="w-full bg-gray-700 rounded-full h-2 mt-1">
+                            <div 
+                              className="bg-yellow-400 h-2 rounded-full" 
+                              style={{ width: `${job.progress}%` }}
+                            ></div>
+                          </div>
+                        )}
+                      </div>
                     )}
-                    {job.status === "failed" && (
-                      <span className="text-red-400" title={job.error_message}>
-                        失敗
+                    {job.status === "completed" && (
+                      <span className="text-green-400 flex items-center">
+                        <span className="mr-2">✅</span> 完了
+                      </span>
+                    )}
+                    {(job.status === "failed" || job.status === "error") && (
+                      <span className="text-red-400 flex items-center" title={job.error_message}>
+                        <span className="mr-2">❌</span> {job.status === "failed" ? "失敗" : "エラー"}
                       </span>
                     )}
                   </td>
-                  <td className="px-4 py-2">
+                  <td className="px-4 py-2 flex gap-2">
                     <button
                       onClick={() => onJobSelect(job.id)}
-                      disabled={job.status === "processing"}
+                      disabled={job.status === "processing" || job.status === "queued"}
                       className={`px-3 py-1 rounded ${
-                        job.status === "processing"
+                        job.status === "processing" || job.status === "queued"
                           ? "bg-gray-500 cursor-not-allowed"
                           : "bg-blue-500 hover:bg-blue-600"
                       }`}
                     >
                       {job.status === "completed" ? "再生・編集" : "詳細"}
                     </button>
+                    
+                    {onDelete && (
+                      <button
+                        onClick={() => onDelete(job.id)}
+                        className="px-3 py-1 rounded bg-red-600 hover:bg-red-700 text-white"
+                      >
+                        削除
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}

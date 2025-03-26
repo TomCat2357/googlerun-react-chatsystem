@@ -191,12 +191,12 @@ def sanitize_request_data(data: Any, max_length: int = 65536, sensitive_keys: Li
         return data
 
 
-async def log_request(request : Request, current_user : Dict, log_max_length: int):
+async def log_request(request : Request, current_user : Dict|None, log_max_length: int):
 
     request_info = {
         "event": "request_received",
         "X-Request-Id": request.headers.get("X-Request-Id", ""),
-        "email" : current_user.get("email", 'unknown'),
+        "email" : current_user.get("email", 'unknown') if isinstance(current_user,dict) else '',
         "path": request.url.path,
         "method": request.method,
         "client": request.client.host if request.client else "unknown",
@@ -331,6 +331,7 @@ class WhisperRequest(BaseModel):
     filename: str
     description: Optional[str] = ""
     recording_date: Optional[str] = ""
+    tags: Optional[List[str]] = []  # タグのリスト
 
 class WhisperJobRequest(BaseModel):
     segments: List[Dict[str, Any]]

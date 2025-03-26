@@ -729,7 +729,7 @@ async def whisper_upload(
     whisper_request: WhisperRequest,
     current_user: Dict = Depends(get_current_user),
 ):
-    """音声データを受け取り、Cloud Storageにアップロードしてバッチ処理を開始する"""
+    """音声データを受け取りCloud Storageにアップロードする"""
     request_info = await log_request(request, current_user, CHAT_LOG_MAX_LENGTH)
     logger.debug("Whisperアップロードのリクエスト情報: %s", request_info)
 
@@ -739,6 +739,7 @@ async def whisper_upload(
         filename = whisper_request.filename
         description = whisper_request.description
         recording_date = whisper_request.recording_date
+        tags = whisper_request.tags or []  # タグ情報を追加
 
         # ユーザー情報の取得
         user_id = current_user.get("uid")
@@ -791,36 +792,42 @@ async def whisper_upload(
             "description": description or "",
             "recording_date": recording_date or "",
             "gcs_audio_path": gcs_audio_path,
-            "status": "processing",
+            "status": "queued",  # 初期状態は「待機中」
+            "progress": 0,       # 進捗率（0-100）
             "created_at": timestamp,
             "updated_at": timestamp,
+            "tags": tags,        # タグ情報
             "error_message": None,
         }
 
         # メタデータをGCSに保存
         metadata_blob = bucket.blob(f"whisper/{user_id}/{job_id}/metadata.json")
         metadata_blob.upload_from_string(
-            json.dumps(job_data), content_type="application/json"
+            json.dumps(job_data, ensure_ascii=False),
+            content_type="application/json"
         )
         logger.debug(f"メタデータをGCSに保存: {job_id}")
 
         # Pub/Subを使用してバッチ処理をトリガー
         try:
-            publisher = pubsub_v1.PublisherClient()
-            topic_path = PUBSUB_TOPIC
+            if PUBSUB_TOPIC and not PUBSUB_TOPIC.startswith("projects/your-project"):
+                publisher = pubsub_v1.PublisherClient()
+                topic_path = PUBSUB_TOPIC
 
-            message_data = {
-                "job_id": job_id,
-                "user_id": user_id,
-                "user_email": user_email,
-                "gcs_audio_path": gcs_audio_path,
-            }
+                message_data = {
+                    "job_id": job_id,
+                    "user_id": user_id,
+                    "user_email": user_email,
+                    "gcs_audio_path": gcs_audio_path,
+                }
 
-            message_bytes = json.dumps(message_data).encode("utf-8")
-            publish_future = publisher.publish(topic_path, data=message_bytes)
-            publish_future.result()  # 非同期処理の完了を待つ
+                message_bytes = json.dumps(message_data).encode("utf-8")
+                publish_future = publisher.publish(topic_path, data=message_bytes)
+                publish_future.result()  # 非同期処理の完了を待つ
 
-            logger.debug(f"Pub/Subにメッセージを送信: {job_id}")
+                logger.debug(f"Pub/Subにメッセージを送信: {job_id}")
+            else:
+                logger.warning("Pub/Subトピックが未設定または無効なため、バッチ処理は開始されません")
         except Exception as e:
             logger.error(f"Pub/Sub送信エラー: {str(e)}", exc_info=True)
             # エラーがあってもアップロードは成功とする（バックグラウンドで処理）
@@ -829,7 +836,7 @@ async def whisper_upload(
         return {
             "status": "success",
             "job_id": job_id,
-            "message": "音声ファイルがアップロードされ、処理が開始されました",
+            "message": "音声ファイルがアップロードされました。処理が開始されると状態が更新されます。",
         }
 
     except HTTPException as he:
@@ -859,7 +866,6 @@ async def get_whisper_jobs(
         user_prefix = f"whisper/{user_id}/"
 
         # プレフィックスと区切り文字を使ってリストアップ
-        # これによりジョブIDのディレクトリのみを一覧できる
         blobs = bucket.list_blobs(prefix=user_prefix, delimiter="/")
         job_prefixes = list(blobs.prefixes)  # ジョブIDの一覧を取得
 
@@ -875,25 +881,38 @@ async def get_whisper_jobs(
                 try:
                     metadata = json.loads(metadata_blob.download_as_string())
 
-                    # 状態を確認
-                    transcription_blob = bucket.blob(f"{job_prefix}transcription.json")
-                    if (
-                        transcription_blob.exists()
-                        and metadata.get("status") == "processing"
-                    ):
-                        # 結果ファイルがあるが状態がprocessingのままの場合は完了とみなす
-                        metadata["status"] = "completed"
+                    # ジョブデータの基本情報を取得
+                    job_data = {
+                        "id": metadata.get("id", job_id),
+                        "filename": metadata.get("filename", "unknown"),
+                        "description": metadata.get("description", ""),
+                        "status": metadata.get(
+                            "status", "queued"
+                        ),  # デフォルトはqueued
+                        "created_at": metadata.get("created_at", 0),
+                        "updated_at": metadata.get("updated_at", 0),
+                        "progress": metadata.get("progress", 0),
+                        "tags": metadata.get("tags", []),
+                        "error_message": metadata.get("error_message"),
+                    }
 
-                    jobs_list.append(
-                        {
-                            "id": metadata.get("id", job_id),
-                            "filename": metadata.get("filename", "unknown"),
-                            "description": metadata.get("description", ""),
-                            "status": metadata.get("status", "processing"),
-                            "created_at": metadata.get("created_at", 0),
-                            "error_message": metadata.get("error_message"),
-                        }
-                    )
+                    # 結果ファイルの有無を確認して状態を更新
+                    transcription_blob = bucket.blob(f"{job_prefix}transcription.json")
+                    if transcription_blob.exists() and job_data["status"] in [
+                        "queued",
+                        "processing",
+                    ]:
+                        # 結果ファイルがあるが状態が処理中や待機中の場合は完了とみなす
+                        job_data["status"] = "completed"
+                        # メタデータも更新
+                        metadata["status"] = "completed"
+                        metadata["updated_at"] = int(time.time())
+                        metadata_blob.upload_from_string(
+                            json.dumps(metadata, ensure_ascii=False),
+                            content_type="application/json",
+                        )
+
+                    jobs_list.append(job_data)
                 except Exception as e:
                     logger.error(f"メタデータ読み込みエラー ({job_id}): {str(e)}")
                     # エラーの場合でもリストには含める

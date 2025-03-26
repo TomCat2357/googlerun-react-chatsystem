@@ -8,6 +8,13 @@ import WhisperJobList from "./WhisperJobList";
 import WhisperTranscriptPlayer from "./WhisperTranscriptPlayer";
 import WhisperMetadataEditor from "./WhisperMetadataEditor";
 
+interface Segment {
+  start: number;
+  end: number;
+  text: string;
+  speaker: string;
+}
+
 const WhisperPage: React.FC = () => {
   const token = useToken();
   const API_BASE_URL: string = Config.API_BASE_URL;
@@ -17,19 +24,46 @@ const WhisperPage: React.FC = () => {
   const [audioInfo, setAudioInfo] = useState<any>(null);
   const [description, setDescription] = useState<string>("");
   const [recordingDate, setRecordingDate] = useState<string>("");
+  const [tags, setTags] = useState<string[]>([]);
   const [isUploading, setIsUploading] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string>("");
   const [jobs, setJobs] = useState<any[]>([]);
   const [selectedJob, setSelectedJob] = useState<string | null>(null);
   const [jobData, setJobData] = useState<any>(null);
   const [view, setView] = useState<"upload" | "jobs">("upload");
+  const [filterStatus, setFilterStatus] = useState<string>("all");
+  const [sortOrder, setSortOrder] = useState<string>("date-desc");
+  const [refreshInterval, setRefreshInterval] = useState<number | null>(null);
 
   // 初回読み込み時にジョブ一覧を取得
   useEffect(() => {
     if (token) {
       fetchJobs();
+      
+      // 5分ごとに自動更新する設定
+      const interval = window.setInterval(() => {
+        if (view === "jobs" && !selectedJob) {
+          fetchJobs();
+        }
+      }, 60000); // 1分ごと
+      
+      setRefreshInterval(interval);
+      
+      // コンポーネントのアンマウント時にインターバルをクリア
+      return () => {
+        if (refreshInterval) {
+          window.clearInterval(refreshInterval);
+        }
+      };
     }
   }, [token]);
+  
+  // view変更時にも更新
+  useEffect(() => {
+    if (view === "jobs") {
+      fetchJobs();
+    }
+  }, [view]);
 
   // ジョブ一覧を取得
   const fetchJobs = async () => {
@@ -85,7 +119,8 @@ const WhisperPage: React.FC = () => {
           audio_data: base64Data,
           filename: audioInfo?.fileName || "recorded_audio.wav",
           description: description,
-          recording_date: recordingDate
+          recording_date: recordingDate,
+          tags: tags.length > 0 ? tags : undefined // タグ情報を追加
         })
       });
 
@@ -104,6 +139,7 @@ const WhisperPage: React.FC = () => {
       setAudioInfo(null);
       setDescription("");
       setRecordingDate("");
+      setTags([]);
 
       // ジョブ一覧を更新して表示
       await fetchJobs();
@@ -145,7 +181,6 @@ const WhisperPage: React.FC = () => {
   };
 
   // 編集内容を保存
-  // 編集内容を保存
   const saveEditedTranscript = async (editedSegments: Segment[]) => {
     if (!selectedJob) return;
 
@@ -180,14 +215,50 @@ const WhisperPage: React.FC = () => {
       setErrorMessage(error instanceof Error ? error.message : String(error));
     }
   };
+
+  // ジョブの削除
+  const deleteJob = async (jobId: string) => {
+    if (!confirm('このジョブを削除してもよろしいですか？\nこの操作は取り消せません。')) {
+      return;
+    }
+
+    try {
+      const requestId = generateRequestId();
+      const response = await fetch(`${API_BASE_URL}/backend/whisper/jobs/${jobId}`, {
+        method: "DELETE",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`,
+          "X-Request-Id": requestId
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`ジョブの削除に失敗しました (${response.status})`);
+      }
+
+      alert("ジョブを削除しました");
+      fetchJobs();
+    } catch (error) {
+      console.error("ジョブ削除エラー:", error);
+      setErrorMessage(error instanceof Error ? error.message : String(error));
+    }
+  };
+
   return (
     <div className="p-4 overflow-y-auto bg-dark-primary text-white min-h-screen">
       <h1 className="text-3xl font-bold mb-4">Whisper 音声文字起こし（バッチ処理）</h1>
 
       {/* エラーメッセージ */}
       {errorMessage && (
-        <div className="mb-4 p-3 bg-red-700 text-white rounded">
+        <div className="mb-4 p-3 bg-red-700 text-white rounded flex justify-between items-center">
           <p>{errorMessage}</p>
+          <button 
+            onClick={() => setErrorMessage("")}
+            className="text-white hover:text-gray-200"
+          >
+            ✕
+          </button>
         </div>
       )}
 
@@ -218,6 +289,7 @@ const WhisperPage: React.FC = () => {
             onAudioInfoChange={setAudioInfo}
             onDescriptionChange={setDescription}
             onRecordingDateChange={setRecordingDate}
+            onTagsChange={setTags}
           />
 
           <WhisperMetadataEditor
@@ -257,6 +329,11 @@ const WhisperPage: React.FC = () => {
               jobs={jobs}
               onJobSelect={fetchJobDetails}
               onRefresh={fetchJobs}
+              onDelete={deleteJob}
+              filterStatus={filterStatus}
+              onFilterChange={setFilterStatus}
+              sortOrder={sortOrder}
+              onSortChange={setSortOrder}
             />
           )}
         </div>
