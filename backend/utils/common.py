@@ -90,15 +90,19 @@ LOGOUT_LOG_MAX_LENGTH = int(os.getenv("LOGOUT_LOG_MAX_LENGTH"))
 MIDDLE_WARE_LOG_MAX_LENGTH = int(os.getenv("MIDDLE_WARE_LOG_MAX_LENGTH"))
 
 # request_idを必要としないパス。重要性が低いので未設定許容
-UNNEED_REQUEST_ID_PATH=os.getenv('UNNEED_REQUEST_ID_PATH', '').split(',')
-UNNEED_REQUEST_ID_PATH_STARTSWITH=os.getenv('UNNEED_REQUEST_ID_PATH_STARTSWITH', '').split(',')
-UNNEED_REQUEST_ID_PATH_ENDSWITH=os.getenv('UNNEED_REQUEST_ID_PATH_ENDSWITH', '').split(',')
+UNNEED_REQUEST_ID_PATH = os.getenv("UNNEED_REQUEST_ID_PATH", "").split(",")
+UNNEED_REQUEST_ID_PATH_STARTSWITH = os.getenv(
+    "UNNEED_REQUEST_ID_PATH_STARTSWITH", ""
+).split(",")
+UNNEED_REQUEST_ID_PATH_ENDSWITH = os.getenv(
+    "UNNEED_REQUEST_ID_PATH_ENDSWITH", ""
+).split(",")
 
-#ログでマスクするセンシティブ情報。設定しなければエラーがでる
-SENSITIVE_KEYS=os.getenv('SENSITIVE_KEYS').split(',')
+# ログでマスクするセンシティブ情報。設定しなければエラーがでる
+SENSITIVE_KEYS = os.getenv("SENSITIVE_KEYS").split(",")
 
 # Hugging Faceの認証トークン。pyannote用
-HF_AUTH_TOKEN=os.getenv('HF_AUTH_TOKEN')
+HF_AUTH_TOKEN = os.getenv("HF_AUTH_TOKEN")
 
 # GCS関連の設定
 GCS_BUCKET_NAME = os.getenv("GCS_BUCKET_NAME")
@@ -139,7 +143,9 @@ else:
 logger = logging.getLogger(__name__)
 
 
-def sanitize_request_data(data: Any, max_length: int = 65536, sensitive_keys: List[str] = []) -> Any:
+def sanitize_request_data(
+    data: Any, max_length: int = 65536, sensitive_keys: List[str] = []
+) -> Any:
     """
     リクエストデータから機密情報を削除する関数
 
@@ -147,7 +153,7 @@ def sanitize_request_data(data: Any, max_length: int = 65536, sensitive_keys: Li
         data (Any): サニタイズするデータ
         max_length : 最大文字数。Falseに評価されるときは無限
         sensitive_keys (List[str]): 機密キーのリスト（省略可）
-        
+
 
     Returns:
         Any: サニタイズされたデータ
@@ -156,21 +162,27 @@ def sanitize_request_data(data: Any, max_length: int = 65536, sensitive_keys: Li
         data = json.loads(data)
     except:
         pass
-    if max_length and isinstance(data, (str, bytes, bytearray)) and len(data) > max_length:
+    if (
+        max_length
+        and isinstance(data, (str, bytes, bytearray))
+        and len(data) > max_length
+    ):
         if isinstance(data, str):
-            return data[:max_length]+'[TRUNCATED]'
+            return data[:max_length] + "[TRUNCATED]"
         elif isinstance(data, (bytes, bytearray)):
             # バイナリデータを文字列に変換してから切り詰める
             try:
                 # UTF-8でデコードを試みる
-                return data.decode('utf-8', errors='replace')[:max_length]+'[TRUNCATED]'
+                return (
+                    data.decode("utf-8", errors="replace")[:max_length] + "[TRUNCATED]"
+                )
             except Exception:
                 # デコードに失敗した場合はbyteアレイのまま
-                return data[:max_length]+b'[TRUNCATED]'
+                return data[:max_length] + b"[TRUNCATED]"
     elif isinstance(data, (bytes, bytearray)):
         # 長さが制限を超えていなくても、バイナリデータは文字列に変換
         try:
-            return data.decode('utf-8', errors='replace')
+            return data.decode("utf-8", errors="replace")
         except Exception:
             return data.hex()
     elif isinstance(data, dict):
@@ -181,22 +193,33 @@ def sanitize_request_data(data: Any, max_length: int = 65536, sensitive_keys: Li
             ):
                 sanitized[key] = "[REDACTED]"
             elif isinstance(value, (dict, list, str, bytes, bytearray)):
-                sanitized[key] = sanitize_request_data(value, max_length=max_length, sensitive_keys=sensitive_keys)
+                sanitized[key] = sanitize_request_data(
+                    value, max_length=max_length, sensitive_keys=sensitive_keys
+                )
             else:
                 sanitized[key] = value
         return sanitized
     elif isinstance(data, list):
-        return [sanitize_request_data(item, max_length=max_length, sensitive_keys=sensitive_keys) for item in data]
+        return [
+            sanitize_request_data(
+                item, max_length=max_length, sensitive_keys=sensitive_keys
+            )
+            for item in data
+        ]
     else:
         return data
 
 
-async def log_request(request : Request, current_user : Dict|None, log_max_length: int):
+async def log_request(request: Request, current_user: Dict | None, log_max_length: int):
 
     request_info = {
         "event": "request_received",
         "X-Request-Id": request.headers.get("X-Request-Id", ""),
-        "email" : current_user.get("email", 'unknown') if isinstance(current_user,dict) else '',
+        "email": (
+            current_user.get("email", "unknown")
+            if isinstance(current_user, dict)
+            else ""
+        ),
         "path": request.url.path,
         "method": request.method,
         "client": request.client.host if request.client else "unknown",
@@ -212,6 +235,7 @@ async def log_request(request : Request, current_user : Dict|None, log_max_lengt
         )
     )
     return request_info
+
 
 def wrap_asyncgenerator_logger(
     meta_info: dict = {}, max_length: int = 1000
@@ -238,7 +262,9 @@ def wrap_asyncgenerator_logger(
                     streaming_log = {}
 
                 # chunkの長さを制限する
-                streaming_log["chunk"] = sanitize_request_data(chunk, max_length=max_length)
+                streaming_log["chunk"] = sanitize_request_data(
+                    chunk, max_length=max_length
+                )
 
                 # ログ出力
                 logger.info(streaming_log)
@@ -252,8 +278,10 @@ def wrap_asyncgenerator_logger(
 
 
 def create_dict_logger(
-    input_dict: dict = {}, meta_info: dict = {}, max_length: int = 1000,
-    sensitive_keys :List[str] = []
+    input_dict: dict = {},
+    meta_info: dict = {},
+    max_length: int = 1000,
+    sensitive_keys: List[str] = [],
 ) -> dict:
     """
     辞書にメタ情報を追加してログ出力する関数を生成する
@@ -269,7 +297,9 @@ def create_dict_logger(
     enriched_dict = copy(meta_info)
 
     # input_dictの各値を処理して長すぎる場合は切り詰める
-    truncated_input = sanitize_request_data(input_dict, max_length=max_length,sensitive_keys=sensitive_keys)
+    truncated_input = sanitize_request_data(
+        input_dict, max_length=max_length, sensitive_keys=sensitive_keys
+    )
 
     # 切り詰めた辞書をenriched_dictに追加
     enriched_dict.update(truncated_input)
@@ -333,23 +363,25 @@ class WhisperRequest(BaseModel):
     recording_date: Optional[str] = ""
     tags: Optional[List[str]] = []  # タグのリスト
 
+
 class WhisperJobRequest(BaseModel):
     segments: List[Dict[str, Any]]
+
 
 # 認証ミドルウェア用の依存関係
 async def get_current_user(request: Request):
     """
     Extracts and verifies the current user's authentication token from the request headers.
-    
+
     Validates the Authorization header, verifies the Firebase ID token, and returns the decoded token.
     Raises an HTTPException with a 401 status code if authentication fails.
-    
+
     Args:
         request (Request): The incoming HTTP request containing authentication headers.
-    
+
     Returns:
         dict: The decoded Firebase ID token for the authenticated user.
-    
+
     Raises:
         HTTPException: If no token is present or token verification fails.
     """
