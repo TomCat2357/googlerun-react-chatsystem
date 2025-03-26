@@ -1,4 +1,4 @@
-# app.py
+# %% app.py
 from fastapi import (
     FastAPI,
     HTTPException,
@@ -793,18 +793,17 @@ async def whisper_upload(
             "recording_date": recording_date or "",
             "gcs_audio_path": gcs_audio_path,
             "status": "queued",  # 初期状態は「待機中」
-            "progress": 0,       # 進捗率（0-100）
+            "progress": 0,  # 進捗率（0-100）
             "created_at": timestamp,
             "updated_at": timestamp,
-            "tags": tags,        # タグ情報
+            "tags": tags,  # タグ情報
             "error_message": None,
         }
 
         # メタデータをGCSに保存
         metadata_blob = bucket.blob(f"whisper/{user_id}/{job_id}/metadata.json")
         metadata_blob.upload_from_string(
-            json.dumps(job_data, ensure_ascii=False),
-            content_type="application/json"
+            json.dumps(job_data, ensure_ascii=False), content_type="application/json"
         )
         logger.debug(f"メタデータをGCSに保存: {job_id}")
 
@@ -827,7 +826,9 @@ async def whisper_upload(
 
                 logger.debug(f"Pub/Subにメッセージを送信: {job_id}")
             else:
-                logger.warning("Pub/Subトピックが未設定または無効なため、バッチ処理は開始されません")
+                logger.warning(
+                    "Pub/Subトピックが未設定または無効なため、バッチ処理は開始されません"
+                )
         except Exception as e:
             logger.error(f"Pub/Sub送信エラー: {str(e)}", exc_info=True)
             # エラーがあってもアップロードは成功とする（バックグラウンドで処理）
@@ -865,66 +866,64 @@ async def get_whisper_jobs(
         # ユーザーのフォルダパス
         user_prefix = f"whisper/{user_id}/"
 
-        # プレフィックスと区切り文字を使ってリストアップ
-        blobs = bucket.list_blobs(prefix=user_prefix, delimiter="/")
-        job_prefixes = list(blobs.prefixes)  # ジョブIDの一覧を取得
+        # メタデータファイルを直接検索（ディレクトリ構造に依存しない方法）
+        blobs = bucket.list_blobs(prefix=user_prefix)
+        metadata_blobs = [blob for blob in blobs if blob.name.endswith("metadata.json")]
 
         jobs_list = []
-        for job_prefix in job_prefixes:
-            # job_idを抽出（例: whisper/user_id/job_id/ → job_id）
-            job_id = job_prefix.split("/")[-2]
+        for metadata_blob in metadata_blobs:
+            # job_idを抽出（パスから）
+            path_parts = metadata_blob.name.split("/")
+            if len(path_parts) >= 3:
+                job_id = path_parts[-2]  # 通常のパスパターン
+            else:
+                continue  # 想定外のパス形式は無視
 
-            # メタデータファイルを取得
-            metadata_blob = bucket.blob(f"{job_prefix}metadata.json")
+            try:
+                metadata = json.loads(metadata_blob.download_as_string())
 
-            if metadata_blob.exists():
-                try:
-                    metadata = json.loads(metadata_blob.download_as_string())
+                # ジョブデータの基本情報を取得
+                job_data = {
+                    "id": metadata.get("id", job_id),
+                    "filename": metadata.get("filename", "unknown"),
+                    "description": metadata.get("description", ""),
+                    "status": metadata.get("status", "queued"),
+                    "created_at": metadata.get("created_at", 0),
+                    "updated_at": metadata.get("updated_at", 0),
+                    "progress": metadata.get("progress", 0),
+                    "tags": metadata.get("tags", []),
+                    "error_message": metadata.get("error_message"),
+                }
 
-                    # ジョブデータの基本情報を取得
-                    job_data = {
-                        "id": metadata.get("id", job_id),
-                        "filename": metadata.get("filename", "unknown"),
-                        "description": metadata.get("description", ""),
-                        "status": metadata.get(
-                            "status", "queued"
-                        ),  # デフォルトはqueued
-                        "created_at": metadata.get("created_at", 0),
-                        "updated_at": metadata.get("updated_at", 0),
-                        "progress": metadata.get("progress", 0),
-                        "tags": metadata.get("tags", []),
-                        "error_message": metadata.get("error_message"),
-                    }
-
-                    # 結果ファイルの有無を確認して状態を更新
-                    transcription_blob = bucket.blob(f"{job_prefix}transcription.json")
-                    if transcription_blob.exists() and job_data["status"] in [
-                        "queued",
-                        "processing",
-                    ]:
-                        # 結果ファイルがあるが状態が処理中や待機中の場合は完了とみなす
-                        job_data["status"] = "completed"
-                        # メタデータも更新
-                        metadata["status"] = "completed"
-                        metadata["updated_at"] = int(time.time())
-                        metadata_blob.upload_from_string(
-                            json.dumps(metadata, ensure_ascii=False),
-                            content_type="application/json",
-                        )
-
-                    jobs_list.append(job_data)
-                except Exception as e:
-                    logger.error(f"メタデータ読み込みエラー ({job_id}): {str(e)}")
-                    # エラーの場合でもリストには含める
-                    jobs_list.append(
-                        {
-                            "id": job_id,
-                            "filename": "読み込みエラー",
-                            "status": "error",
-                            "created_at": 0,
-                            "error_message": f"メタデータ読み込みエラー: {str(e)}",
-                        }
+                # 結果ファイルの有無を確認して状態を更新
+                job_prefix = "/".join(metadata_blob.name.split("/")[:-1]) + "/"
+                transcription_blob = bucket.blob(f"{job_prefix}transcription.json")
+                if transcription_blob.exists() and job_data["status"] in [
+                    "queued",
+                    "processing",
+                ]:
+                    # 結果ファイルがあるが状態が処理中や待機中の場合は完了とみなす
+                    job_data["status"] = "completed"
+                    # メタデータも更新
+                    metadata["status"] = "completed"
+                    metadata["updated_at"] = int(time.time())
+                    metadata_blob.upload_from_string(
+                        json.dumps(metadata, ensure_ascii=False),
+                        content_type="application/json",
                     )
+
+                jobs_list.append(job_data)
+            except Exception as e:
+                logger.error(f"メタデータ読み込みエラー ({job_id}): {str(e)}")
+                jobs_list.append(
+                    {
+                        "id": job_id,
+                        "filename": "読み込みエラー",
+                        "status": "error",
+                        "created_at": 0,
+                        "error_message": f"メタデータ読み込みエラー: {str(e)}",
+                    }
+                )
 
         # 作成日時でソート（新しい順）
         jobs_list.sort(key=lambda x: x.get("created_at", 0), reverse=True)
@@ -1139,6 +1138,7 @@ async def static_file(path: str):
     return FileResponse(os.path.join(FRONTEND_PATH, "index.html"))
 
 
+# %%
 if __name__ == "__main__":
     import hypercorn.asyncio
     from hypercorn.config import Config
