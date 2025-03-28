@@ -5,8 +5,8 @@ interface Job {
   filename: string;
   created_at: string;
   updated_at?: string;
-  status: "queued" | "processing" | "completed" | "failed" | "error";
-  progress?: number; // 0-100の進捗率
+  status: "queued" | "processing" | "completed" | "failed" | "error" | "canceled"; // statusの型定義更新
+  progress?: number;
   error_message?: string;
   tags?: string[];
 }
@@ -50,9 +50,10 @@ const WhisperJobList: React.FC<WhisperJobListProps> = ({
           const statusOrder = {
             "processing": 0,
             "queued": 1,
-            "completed": 2,
-            "failed": 3,
-            "error": 4
+            "completed": 3,
+            "failed": 4,
+            "error": 5,
+            "canceled": 6
           };
           return statusOrder[a.status] - statusOrder[b.status];
         }
@@ -75,6 +76,7 @@ const WhisperJobList: React.FC<WhisperJobListProps> = ({
             <option value="processing">処理中</option>
             <option value="completed">完了</option>
             <option value="failed">失敗</option>
+            <option value="canceled">キャンセル</option>
           </select>
           
           <select 
@@ -154,6 +156,11 @@ const WhisperJobList: React.FC<WhisperJobListProps> = ({
                         <span className="mr-2">✅</span> 完了
                       </span>
                     )}
+                    {job.status === "canceled" && (
+                      <span className="text-gray-400 flex items-center">
+                        <span className="mr-2">🚫</span> キャンセル
+                      </span>
+                    )}
                     {(job.status === "failed" || job.status === "error") && (
                       <span className="text-red-400 flex items-center" title={job.error_message}>
                         <span className="mr-2">❌</span> {job.status === "failed" ? "失敗" : "エラー"}
@@ -163,22 +170,17 @@ const WhisperJobList: React.FC<WhisperJobListProps> = ({
                   <td className="px-4 py-2 flex gap-2">
                     <button
                       onClick={() => onJobSelect(job.id)}
-                      disabled={job.status === "processing" || job.status === "queued"}
-                      className={`px-3 py-1 rounded ${
-                        job.status === "processing" || job.status === "queued"
-                          ? "bg-gray-500 cursor-not-allowed"
-                          : "bg-blue-500 hover:bg-blue-600"
-                      }`}
+                      className="px-3 py-1 rounded bg-blue-500 hover:bg-blue-600"
                     >
                       {job.status === "completed" ? "再生・編集" : "詳細"}
                     </button>
                     
-                    {onDelete && (
+                    {onDelete && job.status !== "processing" && (
                       <button
                         onClick={() => onDelete(job.id)}
                         className="px-3 py-1 rounded bg-red-600 hover:bg-red-700 text-white"
                       >
-                        削除
+                        {job.status === "queued" ? "キャンセル" : "削除"}
                       </button>
                     )}
                   </td>

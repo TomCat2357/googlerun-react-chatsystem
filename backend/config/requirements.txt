@@ -9,7 +9,8 @@ google-cloud-speech==2.31.0
 google-cloud-secret-manager==2.23.1
 google-cloud-pubsub==2.29.0
 google-cloud-storage==2.19.0
-
+google-cloud-batch==0.17.35
+google-cloud-tasks==2.19.2
 
 # APIおよびHTTP
 fastapi==0.115.11

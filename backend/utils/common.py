@@ -108,6 +108,8 @@ HF_AUTH_TOKEN = os.getenv("HF_AUTH_TOKEN")
 GCS_BUCKET_NAME = os.getenv("GCS_BUCKET_NAME")
 PUBSUB_TOPIC = os.getenv("PUBSUB_TOPIC")
 EMAIL_NOTIFICATION = bool(os.getenv("EMAIL_NOTIFICATION"))
+BATCH_IMAGE_URL = os.getenv("BATCH_IMAGE_URL")
+
 
 # 環境変数DEBUGの値を取得し、デバッグモードの設定を行う
 # デフォルトは空文字列

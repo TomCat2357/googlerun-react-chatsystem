@@ -40,12 +40,12 @@ const WhisperPage: React.FC = () => {
     if (token) {
       fetchJobs();
       
-      // 5分ごとに自動更新する設定
+      // 30秒ごとに自動更新する設定
       const interval = window.setInterval(() => {
         if (view === "jobs" && !selectedJob) {
           fetchJobs();
         }
-      }, 60000); // 1分ごと
+      }, 30000); // 30秒ごと
       
       setRefreshInterval(interval);
       
@@ -93,21 +93,28 @@ const WhisperPage: React.FC = () => {
   // 音声アップロード処理
   const handleUpload = async () => {
     if (!audioData) {
-      setErrorMessage("アップロードする音声データがありません");
+      setErrorMessage("アップロードする音声ファイルを選択してください");
       return;
     }
 
-    setIsUploading(true);
-    setErrorMessage("");
+    if (!audioInfo || !audioInfo.fileName) {
+      setErrorMessage("音声データの情報が不完全です");
+      return;
+    }
 
     try {
-      // Base64の先頭部分を処理
-      let base64Data = audioData;
-      if (base64Data.startsWith('data:')) {
-        base64Data = base64Data.split(',')[1];
-      }
+      setIsUploading(true);
+      setErrorMessage("");
 
       const requestId = generateRequestId();
+      const requestData = {
+        audio_data: audioData,
+        filename: audioInfo.fileName,
+        description: description,
+        recording_date: recordingDate,
+        tags: tags
+      };
+
       const response = await fetch(`${API_BASE_URL}/backend/whisper`, {
         method: "POST",
         headers: {
@@ -115,13 +122,7 @@ const WhisperPage: React.FC = () => {
           "Authorization": `Bearer ${token}`,
           "X-Request-Id": requestId
         },
-        body: JSON.stringify({
-          audio_data: base64Data,
-          filename: audioInfo?.fileName || "recorded_audio.wav",
-          description: description,
-          recording_date: recordingDate,
-          tags: tags.length > 0 ? tags : undefined // タグ情報を追加
-        })
+        body: JSON.stringify(requestData)
       });
 
       if (!response.ok) {
@@ -130,20 +131,21 @@ const WhisperPage: React.FC = () => {
       }
 
       const responseData = await response.json();
-
-      // アップロード成功
-      alert("音声ファイルのアップロードが完了しました。処理が終わり次第メールで通知されます。");
-
-      // 状態をリセット
+      
+      // アップロード成功のメッセージを表示
+      alert(`音声ファイルがアップロードされました。順番に処理が開始されます。`);
+      
+      // フォームをクリア
       setAudioData("");
       setAudioInfo(null);
       setDescription("");
       setRecordingDate("");
       setTags([]);
-
-      // ジョブ一覧を更新して表示
-      await fetchJobs();
+      
+      // ジョブ一覧画面に切り替え
       setView("jobs");
+      fetchJobs();
+      
     } catch (error) {
       console.error("アップロードエラー:", error);
       setErrorMessage(error instanceof Error ? error.message : String(error));
@@ -183,9 +185,11 @@ const WhisperPage: React.FC = () => {
   // 編集内容を保存
   const saveEditedTranscript = async (editedSegments: Segment[]) => {
     if (!selectedJob) return;
-
+    
     try {
+      setErrorMessage("");
       const requestId = generateRequestId();
+      
       const response = await fetch(`${API_BASE_URL}/backend/whisper/jobs/${selectedJob}/edit`, {
         method: "POST",
         headers: {
@@ -193,39 +197,41 @@ const WhisperPage: React.FC = () => {
           "Authorization": `Bearer ${token}`,
           "X-Request-Id": requestId
         },
-        body: JSON.stringify({
-          segments: editedSegments.map(seg => ({
-            start: seg.start,
-            end: seg.end,
-            text: seg.text,
-            speaker: seg.speaker
-          }))
-        })
+        body: JSON.stringify({ segments: editedSegments })
       });
 
       if (!response.ok) {
-        throw new Error(`編集内容の保存に失敗しました (${response.status})`);
+        const errorData = await response.json().catch(() => null);
+        throw new Error(errorData?.detail || `編集内容の保存に失敗しました (${response.status})`);
       }
 
+      const data = await response.json();
       alert("編集内容を保存しました");
-      // 最新の内容を再取得
-      await fetchJobDetails(selectedJob);
+      
+      // ジョブデータを更新
+      setJobData({
+        ...jobData,
+        segments: editedSegments
+      });
+      
     } catch (error) {
       console.error("編集保存エラー:", error);
       setErrorMessage(error instanceof Error ? error.message : String(error));
     }
   };
 
-  // ジョブの削除
-  const deleteJob = async (jobId: string) => {
-    if (!confirm('このジョブを削除してもよろしいですか？\nこの操作は取り消せません。')) {
+  // ジョブのキャンセル
+  const cancelJob = async (jobId: string) => {
+    if (!confirm("このジョブをキャンセルしますか？")) {
       return;
     }
-
+    
     try {
+      setErrorMessage("");
       const requestId = generateRequestId();
-      const response = await fetch(`${API_BASE_URL}/backend/whisper/jobs/${jobId}`, {
-        method: "DELETE",
+      
+      const response = await fetch(`${API_BASE_URL}/backend/whisper/jobs/${jobId}/cancel`, {
+        method: "POST",
         headers: {
           "Content-Type": "application/json",
           "Authorization": `Bearer ${token}`,
@@ -234,13 +240,15 @@ const WhisperPage: React.FC = () => {
       });
 
       if (!response.ok) {
-        throw new Error(`ジョブの削除に失敗しました (${response.status})`);
+        const errorData = await response.json().catch(() => null);
+        throw new Error(errorData?.detail || `ジョブのキャンセルに失敗しました (${response.status})`);
       }
 
-      alert("ジョブを削除しました");
+      alert("ジョブがキャンセルされました");
       fetchJobs();
+      
     } catch (error) {
-      console.error("ジョブ削除エラー:", error);
+      console.error("キャンセルエラー:", error);
       setErrorMessage(error instanceof Error ? error.message : String(error));
     }
   };
@@ -261,6 +269,11 @@ const WhisperPage: React.FC = () => {
           </button>
         </div>
       )}
+
+      {/* 処理フロー説明（オプション） */}
+      <div className="mb-4 p-3 bg-gray-800 rounded text-sm">
+        <p><strong>処理フロー:</strong> 音声ファイルをアップロード → 自動的に処理キューに登録 → 順番に処理 → 処理完了後にメール通知</p>
+      </div>
 
       {/* タブ切り替え */}
       <div className="flex mb-6 border-b border-gray-600">
@@ -329,7 +342,7 @@ const WhisperPage: React.FC = () => {
               jobs={jobs}
               onJobSelect={fetchJobDetails}
               onRefresh={fetchJobs}
-              onDelete={deleteJob}
+              onDelete={cancelJob}
               filterStatus={filterStatus}
               onFilterChange={setFilterStatus}
               sortOrder={sortOrder}
