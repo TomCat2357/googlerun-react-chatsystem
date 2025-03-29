@@ -20,8 +20,8 @@ if os.path.exists(develop_config_path):
 
 
 # 環境変数
-PROJECT_ID = os.environ.get("GCP_PROJECT_ID")
-LOCATION = os.environ.get("GCP_REGION")
+GCP_PROJECT_ID = os.environ.get("GCP_PROJECT_ID")
+GCP_REGION = os.environ.get("GCP_REGION")
 PUBSUB_TOPIC = os.environ.get("PUBSUB_TOPIC")
 PUBSUB_SUBSCRIPTION = os.environ.get("PUBSUB_SUBSCRIPTION")
 GCS_BUCKET_NAME = os.environ.get("GCS_BUCKET_NAME")
@@ -73,7 +73,8 @@ def create_batch_job(job_id, user_id, user_email, gcs_audio_path, file_hash):
         "HF_AUTH_TOKEN": HF_AUTH_TOKEN,
         "GCS_BUCKET_NAME": GCS_BUCKET_NAME,
         "PUBSUB_TOPIC": PUBSUB_TOPIC,
-        "PROJECT_ID": PROJECT_ID
+        "GCP_PROJECT_ID": GCP_PROJECT_ID,
+        "GCP_REGION": GCP_REGION,
     }
     
     # コマンド設定
@@ -123,7 +124,7 @@ def create_batch_job(job_id, user_id, user_email, gcs_audio_path, file_hash):
     create_request = batch_v1.CreateJobRequest()
     create_request.job = job
     create_request.job_id = batch_job_name
-    create_request.parent = f"projects/{PROJECT_ID}/locations/{LOCATION}"
+    create_request.parent = f"projects/{GCP_PROJECT_ID}/locations/{GCP_REGION}"
     
     # ジョブを作成
     created_job = batch_client.create_job(create_request)
@@ -369,7 +370,7 @@ def whisper_queue_pubsub(cloud_event):
 def subscribe_to_pubsub():
     """Pub/Subサブスクリプションでメッセージを受信するループ処理"""
     subscriber = SubscriberClient()
-    subscription_path = subscriber.subscription_path(PROJECT_ID, PUBSUB_SUBSCRIPTION)
+    subscription_path = subscriber.subscription_path(GCP_PROJECT_ID, PUBSUB_SUBSCRIPTION)
     
     def callback(message):
         try:
