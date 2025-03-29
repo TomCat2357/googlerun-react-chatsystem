@@ -8,7 +8,7 @@ from fastapi import (
     Request,
 )
 
-from utils.logger import (
+from common_utils.logger import (
     logger,
     wrap_asyncgenerator_logger,
     create_dict_logger,
@@ -61,6 +61,9 @@ from utils.common import (
     WHISPER_JOBS_COLLECTION,
     get_api_key_for_model,
     get_current_user,
+    FirestoreEncoder,
+)
+from common_utils.class_types import (
     GeocodeRequest,
     ChatRequest,
     SpeechToTextRequest,
@@ -68,16 +71,14 @@ from utils.common import (
     WhisperRequest,
     WhisperJobRequest,
     WhisperJobData,
-    FirestoreEncoder
+    JobMessageData,
 )
-
 
 from utils.geocoding_service import get_google_maps_api_key, process_optimized_geocode
 
 from fastapi.responses import JSONResponse, StreamingResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.routing import APIRoute
 from pydantic import BaseModel, Field
 from typing import Dict, Any, List, Optional, Callable
 from firebase_admin import auth, credentials, firestore
@@ -92,8 +93,8 @@ from utils.chat_utils import common_message_function
 from utils.speech2text import transcribe_streaming_v2
 from utils.generate_image import generate_image
 from functools import partial
-from google.cloud import storage, batch_v1, firestore, tasks_v2
-from google.protobuf.duration_pb2 import Duration
+from google.cloud import storage, firestore
+
 
 firebase_db = firestore.Client()
 
@@ -741,7 +742,6 @@ async def upload_audio(
     request: Request, current_user: Dict = Depends(get_current_user)
 ):
 
-
     try:
         # リクエストデータの取得
         data = await request.json()
@@ -759,40 +759,63 @@ async def upload_audio(
         try:
             # 1. 基本チェック - データの存在と形式
             if not audio_data:
-                return JSONResponse(status_code=400, content={"detail": "音声データが提供されていません"})
-            
+                return JSONResponse(
+                    status_code=400,
+                    content={"detail": "音声データが提供されていません"},
+                )
+
             if not audio_data.startswith("data:"):
-                return JSONResponse(status_code=400, content={"detail": "無効な音声データ形式です"})
-            
+                return JSONResponse(
+                    status_code=400, content={"detail": "無効な音声データ形式です"}
+                )
+
             # 2. フォーマット構造のチェック
             if "," not in audio_data:
-                return JSONResponse(status_code=400, content={"detail": "無効なデータURI形式（区切り文字がありません）"})
-            
+                return JSONResponse(
+                    status_code=400,
+                    content={"detail": "無効なデータURI形式（区切り文字がありません）"},
+                )
+
             if ";" not in audio_data:
-                return JSONResponse(status_code=400, content={"detail": "無効なデータURI形式（パラメータ区切りがありません）"})
-            
+                return JSONResponse(
+                    status_code=400,
+                    content={
+                        "detail": "無効なデータURI形式（パラメータ区切りがありません）"
+                    },
+                )
+
             # 3. MIMEタイプのチェック
             mime_parts = audio_data.split(";")[0].split(":")
             if len(mime_parts) < 2:
-                return JSONResponse(status_code=400, content={"detail": "無効なMIMEタイプ形式"})
-            
+                return JSONResponse(
+                    status_code=400, content={"detail": "無効なMIMEタイプ形式"}
+                )
+
             mime_type = mime_parts[1]
             if not mime_type.startswith("audio/"):
-                return JSONResponse(status_code=400, content={"detail": f"無効な音声フォーマット: {mime_type}"})
-            
+                return JSONResponse(
+                    status_code=400,
+                    content={"detail": f"無効な音声フォーマット: {mime_type}"},
+                )
+
             # 4. Base64エンコーディングのチェック
             if not audio_data.split(",")[0].endswith("base64"):
-                return JSONResponse(status_code=400, content={"detail": "Base64でエンコードされていないデータです"})
-            
+                return JSONResponse(
+                    status_code=400,
+                    content={"detail": "Base64でエンコードされていないデータです"},
+                )
+
             # 5. データ処理の準備
             try:
                 audio_content = base64.b64decode(audio_data.split(",")[1])
             except Exception:
-                return JSONResponse(status_code=400, content={"detail": "Base64デコードに失敗しました"})
-            
+                return JSONResponse(
+                    status_code=400, content={"detail": "Base64デコードに失敗しました"}
+                )
+
             # ファイルのハッシュ値を計算
             file_hash = hashlib.md5(audio_content).hexdigest()
-            
+
             # MIMEタイプから拡張子を取得
             mime_mapping = {
                 "audio/wav": "wav",
@@ -806,13 +829,19 @@ async def upload_audio(
             }
             extension = mime_mapping.get(mime_type)
             if not extension:
-                return JSONResponse(status_code=400, content={"detail": f"サポートされていない音声フォーマット: {mime_type}"})
-            
+                return JSONResponse(
+                    status_code=400,
+                    content={
+                        "detail": f"サポートされていない音声フォーマット: {mime_type}"
+                    },
+                )
+
         except Exception as e:
-            return JSONResponse(status_code=500, content={"detail": f"音声データ処理エラー: {str(e)}"})
+            return JSONResponse(
+                status_code=500, content={"detail": f"音声データ処理エラー: {str(e)}"}
+            )
 
         # ここから先は検証済みのデータを使った処理を続行
-
 
         # GCSのパス設定（新構造）
         storage_client = storage.Client()
@@ -852,28 +881,32 @@ async def upload_audio(
         )
 
         # Firestoreに保存
-        db.collection(WHISPER_JOBS_COLLECTION).document(file_hash).set(whisper_job.model_dump())
+        db.collection(WHISPER_JOBS_COLLECTION).document(file_hash).set(
+            whisper_job.model_dump()
+        )
 
         # GCSにメタデータも保存（デバッグ用）
         meta_blob = bucket.blob(gcs_meta_path)
         # SERVER_TIMESTAMPはJSON化できないのでNoneに一時変更
         json_job_data = whisper_job.model_dump()
         meta_blob.upload_from_string(
-            json.dumps(json_job_data, cls=FirestoreEncoder), content_type="application/json"
+            json.dumps(json_job_data, cls=FirestoreEncoder),
+            content_type="application/json",
         )
-
 
         # Pub/Subに通知
         publisher = pubsub_v1.PublisherClient()
         topic_path = publisher.topic_path(GCP_PROJECT_ID, PUBSUB_TOPIC)
 
-        message_data = {
-            "job_id": job_id,
-            "user_id": user_id,
-            "user_email": user_email,
-            "file_hash": file_hash,
-            "event_type": "new_job",
-        }
+        message_data = JobMessageData(
+            job_id=job_id,
+            user_id=user_id,
+            user_email=user_email,
+            file_hash=file_hash,
+            event_type="new_job",
+            status="queued",
+            timestamp=datetime.datetime.now().isoformat(),
+        )
 
         message_bytes = json.dumps(message_data).encode("utf-8")
         publish_future = publisher.publish(topic_path, data=message_bytes)

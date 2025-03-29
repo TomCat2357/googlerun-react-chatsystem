@@ -1,10 +1,8 @@
 # utils/speech2text.py
 from google.cloud.speech_v2 import SpeechClient
 from google.cloud.speech_v2.types import cloud_speech as cloud_speech_types
-from utils.common import (
-    GCP_PROJECT_ID
-)
-from utils.logger import logger
+from utils.common import GCP_PROJECT_ID
+from common_utils.logger import logger
 
 
 def transcribe_streaming_v2(

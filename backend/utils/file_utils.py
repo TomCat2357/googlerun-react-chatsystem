@@ -1,5 +1,4 @@
 # utils/file_utils.py
-import logging
 import base64
 import io
 import os
@@ -9,7 +8,7 @@ from PIL import Image
 from typing import Dict, List, Any, Optional, Tuple
 import docx2txt
 from utils.common import MAX_LONG_EDGE, MAX_IMAGE_SIZE
-from logger import logger
+from common_utils.logger import logger
 
 
 def process_uploaded_image(image_data: str) -> str:

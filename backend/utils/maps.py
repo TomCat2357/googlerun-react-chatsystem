@@ -1,6 +1,6 @@
 # %%
 import requests
-from utils.logger import logger
+from common_utils.logger import logger
 
 
 def get_static_map(
@@ -76,7 +76,7 @@ def get_address(api_key, latitude, longitude):
     response = requests.get(base_url, params=params)
     if response.ok:
         logger.debug(
-"リバースジオコーディング成功。ステータスコード: %s", response.status_code
+            "リバースジオコーディング成功。ステータスコード: %s", response.status_code
         )
     else:
         logger.error(
