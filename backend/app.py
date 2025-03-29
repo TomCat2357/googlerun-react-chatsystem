@@ -50,13 +50,10 @@ from utils.common import (
     UNNEED_REQUEST_ID_PATH_STARTSWITH,
     UNNEED_REQUEST_ID_PATH_ENDSWITH,
     SENSITIVE_KEYS,
-    HF_AUTH_TOKEN,
     GCS_BUCKET_NAME,
     PUBSUB_TOPIC,
-    EMAIL_NOTIFICATION,
-    GCP_PROJECT_ID,
-    GCP_REGION,
-    BATCH_IMAGE_URL,
+
+    WHISPER_JOBS_COLLECTION,
     get_api_key_for_model,
     get_current_user,
     GeocodeRequest,
@@ -800,7 +797,7 @@ async def upload_audio(request: Request):
         }
         
         # Firestoreに保存
-        db.collection("whisper_jobs").document(job_id).set(job_data)
+        db.collection(WHISPER_JOBS_COLLECTION).document(job_id).set(job_data)
         
         # GCSにメタデータも保存（デバッグ用）
         meta_blob = bucket.blob(gcs_meta_path)
@@ -843,7 +840,7 @@ async def list_jobs(request: Request):
         
         # ユーザーのジョブ一覧を取得
         db = firestore.Client()
-        jobs_query = db.collection("whisper_jobs").where("user_id", "==", user_id).order_by("created_at", direction=firestore.Query.DESCENDING)
+        jobs_query = db.collection(WHISPER_JOBS_COLLECTION).where("user_id", "==", user_id).order_by("created_at", direction=firestore.Query.DESCENDING)
         jobs = jobs_query.stream()
         
         job_list = []
@@ -879,7 +876,7 @@ async def get_job_details(hash: str, request: Request):
         
         # Firestoreからハッシュ値に基づくジョブを検索
         db = firestore.Client()
-        jobs = db.collection("whisper_jobs").where("file_hash", "==", hash).where("user_id", "==", user_id).limit(1).get()
+        jobs = db.collection(WHISPER_JOBS_COLLECTION).where("file_hash", "==", hash).where("user_id", "==", user_id).limit(1).get()
         
         job = next(jobs, None)
         if not job:
@@ -950,7 +947,7 @@ async def cancel_whisper_job(
 
         # Firestoreからジョブデータを取得
         db = firestore.Client()
-        job_ref = db.collection("whisper_jobs").document(job_id)
+        job_ref = db.collection(WHISPER_JOBS_COLLECTION).document(job_id)
         job_doc = job_ref.get()
 
         if not job_doc.exists:
@@ -1034,7 +1031,7 @@ async def get_whisper_queue(
 
         # Firestoreからキュー内のジョブを取得
         db = firestore.Client()
-        jobs_query = db.collection("whisper_jobs").where(
+        jobs_query = db.collection(WHISPER_JOBS_COLLECTION).where(
             "status", "in", ["pending", "queued", "processing"]
         )
         jobs_docs = jobs_query.stream()
@@ -1082,7 +1079,7 @@ async def update_whisper_transcript(
 
         # Firestoreからメタデータを取得
         db = firestore.Client()
-        job_ref = db.collection("whisper_jobs").document(job_id)
+        job_ref = db.collection(WHISPER_JOBS_COLLECTION).document(job_id)
         job_doc = job_ref.get()
 
         if not job_doc.exists:

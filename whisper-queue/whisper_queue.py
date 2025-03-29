@@ -28,6 +28,8 @@ GCS_BUCKET_NAME = os.environ.get("GCS_BUCKET_NAME")
 BATCH_IMAGE_URL = os.environ.get("BATCH_IMAGE_URL")
 HF_AUTH_TOKEN = os.environ.get("HF_AUTH_TOKEN")
 EMAIL_NOTIFICATION = os.environ.get("EMAIL_NOTIFICATION", "false").lower() == "true"
+# コレクション名の環境変数を追加
+WHISPER_JOBS_COLLECTION = os.environ.get("WHISPER_JOBS_COLLECTION")
 
 # ログ設定
 logging.basicConfig(
@@ -52,6 +54,14 @@ def create_batch_job(job_id, user_id, user_email, gcs_audio_path, file_hash):
     # バッチジョブ名（一意）
     batch_job_name = f"whisper-{job_id}-{int(time.time())}"
     
+    # Firestoreからジョブデータを取得して必要なパラメータをすべて環境変数に含める
+    job_ref = db.collection(WHISPER_JOBS_COLLECTION).document(job_id)
+    job_data = job_ref.get().to_dict()
+    
+    # 必須パラメータの検証
+    if not job_data:
+        raise Exception(f"ジョブデータが見つかりません: {job_id}")
+    
     # ジョブ定義の作成
     job = Job()
     job.name = batch_job_name
@@ -63,7 +73,7 @@ def create_batch_job(job_id, user_id, user_email, gcs_audio_path, file_hash):
     container = TaskSpec.Runnable.Container()
     container.image_uri = BATCH_IMAGE_URL
     
-    # 環境変数設定
+    # 環境変数設定 - 必要なすべてのパラメータを含める
     container.environment = {
         "JOB_ID": job_id,
         "USER_ID": user_id,
@@ -75,6 +85,13 @@ def create_batch_job(job_id, user_id, user_email, gcs_audio_path, file_hash):
         "PUBSUB_TOPIC": PUBSUB_TOPIC,
         "GCP_PROJECT_ID": GCP_PROJECT_ID,
         "GCP_REGION": GCP_REGION,
+        # Firestoreからの追加パラメータ
+        "NUM_SPEAKERS": str(job_data.get("num_speakers", "")),
+        "MIN_SPEAKERS": str(job_data.get("min_speakers", "1")),
+        "MAX_SPEAKERS": str(job_data.get("max_speakers", "6")),
+        "LANGUAGE": job_data.get("language", "ja"),
+        "INITIAL_PROMPT": job_data.get("initial_prompt", ""),
+        # 他に必要なパラメータがあれば追加
     }
     
     # コマンド設定
@@ -113,7 +130,7 @@ def create_batch_job(job_id, user_id, user_email, gcs_audio_path, file_hash):
     
     # ロケーション設定
     location_policy = AllocationPolicy.LocationPolicy()
-    location_policy.allowed_locations = [f"regions/{LOCATION}"]
+    location_policy.allowed_locations = [f"regions/{GCP_REGION}"]
     job.allocation_policy.location = location_policy
     
     # ロギング設定
@@ -155,7 +172,7 @@ def update_job_metadata(job_id, user_id, file_hash, updates):
     """Firestoreとメタデータファイルの両方を更新"""
     try:
         # Firestoreを更新
-        job_ref = db.collection("whisper_jobs").document(job_id)
+        job_ref = db.collection(WHISPER_JOBS_COLLECTION).document(job_id)
         job_ref.update(updates)
         
         # GCSのメタデータファイルも更新（デバッグ用）
@@ -200,7 +217,7 @@ def process_next_job():
     """キューから次のジョブを取得して処理する"""
     try:
         # 処理中のジョブをカウント
-        processing_count = db.collection("whisper_jobs").where("status", "==", "processing").count().get()[0][0]
+        processing_count = db.collection(WHISPER_JOBS_COLLECTION).where("status", "==", "processing").count().get()[0][0]
         
         # 処理中のジョブが多すぎる場合は待機
         if processing_count >= 5:  # 同時処理数の上限
@@ -208,7 +225,7 @@ def process_next_job():
             return False
         
         # 最も古いqueuedジョブを取得
-        queued_jobs = db.collection("whisper_jobs").where("status", "==", "queued").order_by("created_at").limit(1).stream()
+        queued_jobs = db.collection(WHISPER_JOBS_COLLECTION).where("status", "==", "queued").order_by("created_at").limit(1).stream()
         
         job = next(queued_jobs, None)
         if not job:
@@ -319,7 +336,7 @@ def whisper_queue_http(request):
             if not job_id or not status:
                 return {"status": "error", "message": "job_idとstatusは必須です"}, 400
             
-            job_ref = db.collection("whisper_jobs").document(job_id)
+            job_ref = db.collection(WHISPER_JOBS_COLLECTION).document(job_id)
             job_data = job_ref.get().to_dict()
             
             if not job_data:

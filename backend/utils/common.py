@@ -110,6 +110,8 @@ PUBSUB_TOPIC = os.getenv("PUBSUB_TOPIC")
 EMAIL_NOTIFICATION = bool(os.getenv("EMAIL_NOTIFICATION"))
 BATCH_IMAGE_URL = os.getenv("BATCH_IMAGE_URL")
 
+# ===== Firestore コレクション設定 =====
+WHISPER_JOBS_COLLECTION = os.getenv("WHISPER_JOBS_COLLECTION")
 
 # 環境変数DEBUGの値を取得し、デバッグモードの設定を行う
 # デフォルトは空文字列

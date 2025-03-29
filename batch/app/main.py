@@ -9,6 +9,17 @@ from google.cloud import storage
 from google.cloud import pubsub_v1
 import json
 import datetime
+from dotenv import load_dotenv
+
+# 環境変数ファイルが存在する場合のみ読み込む
+config_path = 'config/.env'
+config_develop_path = 'config_develop/.env.develop'
+
+load_dotenv(config_path)
+
+if os.path.exists(config_develop_path):
+    load_dotenv(config_develop_path)
+
 
 def is_gcs_path(path):
     """GCSパスかどうかを判定する"""
@@ -37,7 +48,7 @@ def check_gpu_availability():
 def send_completion_notification(job_id, user_id, user_email, file_hash, success, error_message=None):
     """処理完了通知をPub/Subに送信する"""
     try:
-        project_id = os.environ.get("PROJECT_ID")
+        project_id = os.environ.get("GCP_PROJECT_ID")
         pubsub_topic = os.environ.get("PUBSUB_TOPIC")
         if not pubsub_topic or not project_id:
             print("PROJECT_IDまたはPUBSUB_TOPICが設定されていないため、通知を送信できません")
@@ -50,12 +61,10 @@ def send_completion_notification(job_id, user_id, user_email, file_hash, success
         message_data = {
             "job_id": job_id,
             "user_id": user_id,
-            "user_email": user_email,
-            "file_hash": file_hash,
             "event_type": "batch_complete",
             "success": success
         }
-        
+        # エラーメッセージがある場合は追加
         if error_message:
             message_data["error_message"] = error_message
             
@@ -78,48 +87,38 @@ def main():
     user_email = os.environ.get("USER_EMAIL")
     gcs_audio_path = os.environ.get("GCS_AUDIO_PATH")
     file_hash = os.environ.get("FILE_HASH")
+    bucket_name = os.environ.get("GCS_BUCKET_NAME")
     
-    if not job_id or not user_id or not gcs_audio_path or not file_hash:
-        raise ValueError("必要な環境変数(JOB_ID, USER_ID, GCS_AUDIO_PATH, FILE_HASH)が設定されていません")
+    # 追加のパラメータを環境変数から取得
+    num_speakers = os.environ.get("NUM_SPEAKERS")
+    min_speakers = os.environ.get("MIN_SPEAKERS", "1")
+    max_speakers = os.environ.get("MAX_SPEAKERS", "6")
+    language = os.environ.get("LANGUAGE", "ja")
+    initial_prompt = os.environ.get("INITIAL_PROMPT", "")
     
-    # Firestore初期化
-    db = firestore.Client()
-    job_ref = db.collection("whisper_jobs").document(job_id)
+    if not job_id or not user_id or not gcs_audio_path or not file_hash or not bucket_name:
+        raise ValueError("必要な環境変数が設定されていません")
     
     # 処理開始時間
     total_start_time = time.time()
     
-    # 処理状態を更新
+    # 処理開始通知
+    send_progress_notification(job_id, user_id, user_email, file_hash, "processing", 5)
+    print(f"処理開始: ジョブID={job_id}, ユーザーID={user_id}, hash={file_hash}")
+    
     try:
-        job_data = job_ref.get().to_dict()
-        if not job_data:
-            raise ValueError(f"ジョブデータが見つかりません: {job_id}")
-        
-        # バケット名を取得
-        bucket_name = os.environ.get("GCS_BUCKET_NAME")
-        if not bucket_name and gcs_audio_path.startswith("gs://"):
-            bucket_name = gcs_audio_path.split("/")[2]
-        
-        # 処理開始を記録
-        job_ref.update({
-            "status": "processing",
-            "progress": 5,
-            "updated_at": firestore.SERVER_TIMESTAMP
-        })
-        print(f"処理開始: ジョブID={job_id}, ユーザーID={user_id}, hash={file_hash}")
-        
         # GPUが利用可能かチェック
         check_gpu_availability()
-        job_ref.update({"progress": 10})
+        send_progress_notification(job_id, user_id, user_email, file_hash, "processing", 10)
         
+        # 以下、元の処理フロー（Firestoreへの直接更新を除去）
         # 入出力ファイルのパスを準備
-        # 新しいパス構造を使用
         base_dir = f"whisper/{user_id}/{file_hash}"
         temp_wav_path = f"temp_{file_hash}.wav"
         transcription_json = f"temp_{file_hash}_transcription.json"
         diarization_json = f"temp_{file_hash}_diarization.json"
         
-        # 出力先のGCSパス（新構造）
+        # 出力先のGCSパス
         output_gcs_path = f"gs://{bucket_name}/{base_dir}/transcription.json"
         
         try:
@@ -132,10 +131,9 @@ def main():
                 temp_wav_path
             ]
             subprocess.run(convert_cmd, check=True)
-            step1_end_time = time.time()
-            step1_duration = step1_end_time - step1_start_time
+            step1_duration = time.time() - step1_start_time
             print(f"Step 1 completed in {step1_duration:.2f} seconds")
-            job_ref.update({"progress": 30})
+            send_progress_notification(job_id, user_id, user_email, file_hash, "processing", 30)
             
             # ステップ2: 文字起こし
             print("\n=== Step 2: Running transcription using GPU ===")
@@ -145,18 +143,23 @@ def main():
                 temp_wav_path,
                 transcription_json
             ]
+            # 言語とプロンプトが指定されていれば追加
+            if language:
+                transcribe_cmd.extend(["--language", language])
+            if initial_prompt:
+                transcribe_cmd.extend(["--initial-prompt", initial_prompt])
+                
             subprocess.run(transcribe_cmd, check=True)
-            step2_end_time = time.time()
-            step2_duration = step2_end_time - step2_start_time
+            step2_duration = time.time() - step2_start_time
             print(f"Step 2 completed in {step2_duration:.2f} seconds")
-            job_ref.update({"progress": 60})
+            send_progress_notification(job_id, user_id, user_email, file_hash, "processing", 60)
             
             # HF_AUTH_TOKENを環境変数から取得
             hf_auth_token = os.environ.get("HF_AUTH_TOKEN")
             if not hf_auth_token:
                 raise ValueError("HF_AUTH_TOKEN環境変数が設定されていません")
             
-            # ステップ3: 話者分離（常にGPUを使用）
+            # ステップ3: 話者分離
             print("\n=== Step 3: Running speaker diarization on GPU ===")
             step3_start_time = time.time()
             diarize_cmd = [
@@ -166,19 +169,17 @@ def main():
                 hf_auth_token
             ]
             
-            # 話者数の指定（オプション）
-            num_speakers = job_data.get("num_speakers")
-            if num_speakers:
-                diarize_cmd.extend(["--num-speakers", str(num_speakers)])
+            # 話者数の指定（環境変数から取得）
+            if num_speakers and num_speakers.strip():
+                diarize_cmd.extend(["--num-speakers", num_speakers])
             else:
-                # デフォルトのmin/max話者数
-                diarize_cmd.extend(["--min-speakers", "1", "--max-speakers", "6"])
+                # デフォルトまたは環境変数のmin/max話者数
+                diarize_cmd.extend(["--min-speakers", min_speakers, "--max-speakers", max_speakers])
             
             subprocess.run(diarize_cmd, check=True)
-            step3_end_time = time.time()
-            step3_duration = step3_end_time - step3_start_time
+            step3_duration = time.time() - step3_start_time
             print(f"Step 3 completed in {step3_duration:.2f} seconds")
-            job_ref.update({"progress": 90})
+            send_progress_notification(job_id, user_id, user_email, file_hash, "processing", 90)
             
             # ステップ4: 結果の結合
             print("\n=== Step 4: Combining results ===")
@@ -190,45 +191,11 @@ def main():
                 output_gcs_path
             ]
             subprocess.run(combine_cmd, check=True)
-            step4_end_time = time.time()
-            step4_duration = step4_end_time - step4_start_time
+            step4_duration = time.time() - step4_start_time
             print(f"Step 4 completed in {step4_duration:.2f} seconds")
             
             # 全体処理時間
             total_duration = time.time() - total_start_time
-            
-            # 処理終了時間を記録
-            process_ended_at = datetime.datetime.now()
-            
-            # 処理成功を記録
-            job_ref.update({
-                "status": "completed",
-                "progress": 100,
-                "result_path": output_gcs_path,
-                "processing_time": total_duration,
-                "process_ended_at": process_ended_at,
-                "updated_at": firestore.SERVER_TIMESTAMP
-            })
-            
-            # GCSメタデータの更新（デバッグ用）
-            try:
-                storage_client = storage.Client()
-                bucket = storage_client.bucket(bucket_name)
-                meta_path = f"{base_dir}/metadata.json"
-                blob = bucket.blob(meta_path)
-                
-                if blob.exists():
-                    metadata = json.loads(blob.download_as_text())
-                    metadata.update({
-                        "status": "completed",
-                        "progress": 100,
-                        "result_path": output_gcs_path,
-                        "processing_time": total_duration,
-                        "process_ended_at": process_ended_at.isoformat()
-                    })
-                    blob.upload_from_string(json.dumps(metadata), content_type="application/json")
-            except Exception as gcs_error:
-                print(f"GCSメタデータ更新エラー（無視）: {gcs_error}")
             
             # 各ステップの処理時間サマリー
             print("\n=== Processing Time Summary ===")
@@ -241,41 +208,17 @@ def main():
             print(f"\nFinal results saved to {output_gcs_path}")
             
             # 処理完了通知を送信
-            send_completion_notification(job_id, user_id, user_email, file_hash, True)
+            send_completion_notification(job_id, user_id, user_email, file_hash, True, 
+                                        processing_time=total_duration, 
+                                        result_path=output_gcs_path)
             
         except Exception as process_error:
             # 処理中のエラーを記録
             error_message = str(process_error)
-            process_ended_at = datetime.datetime.now()
-            
-            job_ref.update({
-                "status": "failed",
-                "error_message": error_message,
-                "process_ended_at": process_ended_at,
-                "updated_at": firestore.SERVER_TIMESTAMP
-            })
             print(f"処理エラー: {error_message}")
             
-            # GCSメタデータの更新（デバッグ用）
-            try:
-                storage_client = storage.Client()
-                bucket = storage_client.bucket(bucket_name)
-                meta_path = f"{base_dir}/metadata.json"
-                blob = bucket.blob(meta_path)
-                
-                if blob.exists():
-                    metadata = json.loads(blob.download_as_text())
-                    metadata.update({
-                        "status": "failed",
-                        "error_message": error_message,
-                        "process_ended_at": process_ended_at.isoformat()
-                    })
-                    blob.upload_from_string(json.dumps(metadata), content_type="application/json")
-            except Exception as gcs_error:
-                print(f"GCSメタデータ更新エラー（無視）: {gcs_error}")
-            
             # エラー通知を送信
-            send_completion_notification(job_id, user_id, user_email, file_hash, False, error_message)
+            send_completion_notification(job_id, user_id, user_email, file_hash, False, error_message=error_message)
             raise process_error
             
         finally:
@@ -293,44 +236,48 @@ def main():
     except Exception as e:
         # 全体的なエラーを記録
         error_message = str(e)
-        try:
-            process_ended_at = datetime.datetime.now()
-            job_ref.update({
-                "status": "failed",
-                "error_message": error_message,
-                "process_ended_at": process_ended_at,
-                "updated_at": firestore.SERVER_TIMESTAMP
-            })
-            
-            # GCSメタデータの更新（デバッグ用）
-            try:
-                bucket_name = os.environ.get("GCS_BUCKET_NAME")
-                if bucket_name:
-                    storage_client = storage.Client()
-                    bucket = storage_client.bucket(bucket_name)
-                    base_dir = f"whisper/{user_id}/{file_hash}"
-                    meta_path = f"{base_dir}/metadata.json"
-                    blob = bucket.blob(meta_path)
-                    
-                    if blob.exists():
-                        metadata = json.loads(blob.download_as_text())
-                        metadata.update({
-                            "status": "failed",
-                            "error_message": error_message,
-                            "process_ended_at": process_ended_at.isoformat()
-                        })
-                        blob.upload_from_string(json.dumps(metadata), content_type="application/json")
-            except Exception as gcs_error:
-                print(f"GCSメタデータ更新エラー（無視）: {gcs_error}")
-            
-            # エラー通知を送信
-            send_completion_notification(job_id, user_id, user_email, file_hash, False, error_message)
-            
-        except Exception as update_error:
-            print(f"Firestore更新エラー: {str(update_error)}")
-        
         print(f"処理エラー: {error_message}")
+        
+        # エラー通知を送信
+        send_completion_notification(job_id, user_id, user_email, file_hash, False, error_message=error_message)
         raise e
+
+# 進捗通知を送信する関数
+def send_progress_notification(job_id, user_id, user_email, file_hash, status, progress):
+    """処理進捗通知をPub/Subに送信する"""
+    try:
+        project_id = os.environ.get("GCP_PROJECT_ID")
+        pubsub_topic = os.environ.get("PUBSUB_TOPIC")
+        if not pubsub_topic or not project_id:
+            print("PROJECT_IDまたはPUBSUB_TOPICが設定されていないため、通知を送信できません")
+            return False
+            
+        publisher = pubsub_v1.PublisherClient()
+        topic_path = publisher.topic_path(project_id, pubsub_topic)
+        
+        # メッセージデータの準備
+        message_data = {
+            "job_id": job_id,
+            "user_id": user_id,
+            "user_email": user_email,
+            "file_hash": file_hash,
+            "event_type": "progress_update",
+            "status": status,
+            "progress": progress,
+            "timestamp": datetime.datetime.now().isoformat()
+        }
+            
+        # メッセージをPub/Subに送信
+        message_bytes = json.dumps(message_data).encode("utf-8")
+        future = publisher.publish(topic_path, data=message_bytes)
+        message_id = future.result()
+        
+        print(f"進捗通知を送信しました: {progress}%, message_id: {message_id}")
+        return True
+        
+    except Exception as e:
+        print(f"進捗通知の送信エラー: {str(e)}")
+        return False
 
 if __name__ == "__main__":
     main()
