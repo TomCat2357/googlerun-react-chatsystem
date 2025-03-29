@@ -29,6 +29,7 @@ const WhisperPage: React.FC = () => {
   const [errorMessage, setErrorMessage] = useState<string>("");
   const [jobs, setJobs] = useState<any[]>([]);
   const [selectedJob, setSelectedJob] = useState<string | null>(null);
+  const [selectedHash, setSelectedHash] = useState<string | null>(null);
   const [jobData, setJobData] = useState<any>(null);
   const [view, setView] = useState<"upload" | "jobs">("upload");
   const [filterStatus, setFilterStatus] = useState<string>("all");
@@ -132,6 +133,10 @@ const WhisperPage: React.FC = () => {
 
       const responseData = await response.json();
       
+      // レスポンスからjob_idとfile_hashを取得
+      const jobId = responseData.job_id;
+      const fileHash = responseData.file_hash;
+      
       // アップロード成功のメッセージを表示
       alert(`音声ファイルがアップロードされました。順番に処理が開始されます。`);
       
@@ -155,12 +160,13 @@ const WhisperPage: React.FC = () => {
   };
 
   // ジョブ詳細を取得
-  const fetchJobDetails = async (jobId: string) => {
+  const fetchJobDetails = async (jobId: string, fileHash: string) => {
     try {
       setErrorMessage("");
 
       const requestId = generateRequestId();
-      const response = await fetch(`${API_BASE_URL}/backend/whisper/jobs/${jobId}`, {
+      // ハッシュ値をパラメータとして使用
+      const response = await fetch(`${API_BASE_URL}/backend/whisper/jobs/${fileHash}`, {
         method: "GET",
         headers: {
           "Content-Type": "application/json",
@@ -176,6 +182,7 @@ const WhisperPage: React.FC = () => {
       const data = await response.json();
       setJobData(data);
       setSelectedJob(jobId);
+      setSelectedHash(fileHash);
     } catch (error) {
       console.error("ジョブ詳細取得エラー:", error);
       setErrorMessage(error instanceof Error ? error.message : String(error));
@@ -184,13 +191,14 @@ const WhisperPage: React.FC = () => {
 
   // 編集内容を保存
   const saveEditedTranscript = async (editedSegments: Segment[]) => {
-    if (!selectedJob) return;
+    if (!selectedJob || !selectedHash) return;
     
     try {
       setErrorMessage("");
       const requestId = generateRequestId();
       
-      const response = await fetch(`${API_BASE_URL}/backend/whisper/jobs/${selectedJob}/edit`, {
+      // ハッシュ値ベースのエンドポイントに変更
+      const response = await fetch(`${API_BASE_URL}/backend/whisper/jobs/${selectedHash}/edit`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -221,7 +229,7 @@ const WhisperPage: React.FC = () => {
   };
 
   // ジョブのキャンセル
-  const cancelJob = async (jobId: string) => {
+  const cancelJob = async (jobId: string, fileHash: string) => {
     if (!confirm("このジョブをキャンセルしますか？")) {
       return;
     }
@@ -230,7 +238,8 @@ const WhisperPage: React.FC = () => {
       setErrorMessage("");
       const requestId = generateRequestId();
       
-      const response = await fetch(`${API_BASE_URL}/backend/whisper/jobs/${jobId}/cancel`, {
+      // ハッシュ値ベースのエンドポイントに変更
+      const response = await fetch(`${API_BASE_URL}/backend/whisper/jobs/${fileHash}/cancel`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -323,7 +332,10 @@ const WhisperPage: React.FC = () => {
             // ジョブ詳細・再生画面
             <div>
               <button
-                onClick={() => setSelectedJob(null)}
+                onClick={() => {
+                  setSelectedJob(null);
+                  setSelectedHash(null);
+                }}
                 className="bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded mb-4"
               >
                 ← 一覧に戻る
@@ -340,9 +352,9 @@ const WhisperPage: React.FC = () => {
             // ジョブ一覧
             <WhisperJobList
               jobs={jobs}
-              onJobSelect={fetchJobDetails}
+              onJobSelect={(jobId, fileHash) => fetchJobDetails(jobId, fileHash)}
               onRefresh={fetchJobs}
-              onDelete={cancelJob}
+              onDelete={(jobId, fileHash) => cancelJob(jobId, fileHash)}
               filterStatus={filterStatus}
               onFilterChange={setFilterStatus}
               sortOrder={sortOrder}

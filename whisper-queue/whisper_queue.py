@@ -12,15 +12,21 @@ from google.protobuf.duration_pb2 import Duration
 from concurrent.futures import TimeoutError
 import flask
 import functions_framework
+from dotenv import load_dotenv
+load_dotenv('config/.env')
+develop_config_path = 'config_develop/.env.develop'
+if os.path.exists(develop_config_path):
+    load_dotenv(develop_config_path)
+
 
 # 環境変数
-PROJECT_ID = os.environ.get("GCP_PROJECT_ID", "your-project-id")
-LOCATION = os.environ.get("GCP_REGION", "us-central1")
-PUBSUB_TOPIC = os.environ.get("PUBSUB_TOPIC", "")
-PUBSUB_SUBSCRIPTION = os.environ.get("PUBSUB_SUBSCRIPTION", "")
-GCS_BUCKET_NAME = os.environ.get("GCS_BUCKET_NAME", "")
-BATCH_IMAGE_URL = os.environ.get("BATCH_IMAGE_URL", "")
-HF_AUTH_TOKEN = os.environ.get("HF_AUTH_TOKEN", "")
+PROJECT_ID = os.environ.get("GCP_PROJECT_ID")
+LOCATION = os.environ.get("GCP_REGION")
+PUBSUB_TOPIC = os.environ.get("PUBSUB_TOPIC")
+PUBSUB_SUBSCRIPTION = os.environ.get("PUBSUB_SUBSCRIPTION")
+GCS_BUCKET_NAME = os.environ.get("GCS_BUCKET_NAME")
+BATCH_IMAGE_URL = os.environ.get("BATCH_IMAGE_URL")
+HF_AUTH_TOKEN = os.environ.get("HF_AUTH_TOKEN")
 EMAIL_NOTIFICATION = os.environ.get("EMAIL_NOTIFICATION", "false").lower() == "true"
 
 # ログ設定
@@ -36,9 +42,9 @@ db = firestore.Client()
 # ストレージクライアント
 storage_client = storage.Client()
 
-def create_batch_job(job_id, user_id, user_email, gcs_audio_path):
+def create_batch_job(job_id, user_id, user_email, gcs_audio_path, file_hash):
     """Batchジョブを作成して起動する"""
-    logger.info(f"バッチジョブの作成: {job_id}")
+    logger.info(f"バッチジョブの作成: {job_id}, hash: {file_hash}")
     
     # Batch APIクライアント初期化
     batch_client = batch_v1.BatchServiceClient()
@@ -63,7 +69,11 @@ def create_batch_job(job_id, user_id, user_email, gcs_audio_path):
         "USER_ID": user_id,
         "USER_EMAIL": user_email,
         "GCS_AUDIO_PATH": gcs_audio_path,
-        "HF_AUTH_TOKEN": HF_AUTH_TOKEN
+        "FILE_HASH": file_hash,
+        "HF_AUTH_TOKEN": HF_AUTH_TOKEN,
+        "GCS_BUCKET_NAME": GCS_BUCKET_NAME,
+        "PUBSUB_TOPIC": PUBSUB_TOPIC,
+        "PROJECT_ID": PROJECT_ID
     }
     
     # コマンド設定
@@ -117,42 +127,59 @@ def create_batch_job(job_id, user_id, user_email, gcs_audio_path):
     
     # ジョブを作成
     created_job = batch_client.create_job(create_request)
+
+    # created_jobの情報をログに表示
+    logger.info(f"バッチジョブの詳細: {created_job.name}")
+    logger.info(f"ジョブステータス: {created_job.status.state}")
+    logger.info(f"ジョブUUID: {created_job.uid}")
+
+    # 処理開始時間を記録
+    timestamp = datetime.now()
     
-    # FirestoreとGCSのメタデータを更新
-    update_job_metadata(job_id, user_id, {
+    # Firestoreのメタデータを更新
+    update_job_metadata(job_id, user_id, file_hash, {
         "batch_job_name": batch_job_name,
+        "batch_job_full_name": created_job.name,
+        "batch_job_uid": created_job.uid,
         "status": "processing",
         "progress": 10,
+        "process_started_at": timestamp,
         "updated_at": firestore.SERVER_TIMESTAMP
     })
     
     logger.info(f"バッチジョブが作成されました: {batch_job_name}")
     return batch_job_name
 
-def update_job_metadata(job_id, user_id, updates):
-    """FirestoreとGCSのジョブメタデータを更新"""
+def update_job_metadata(job_id, user_id, file_hash, updates):
+    """Firestoreとメタデータファイルの両方を更新"""
     try:
         # Firestoreを更新
         job_ref = db.collection("whisper_jobs").document(job_id)
         job_ref.update(updates)
         
-        # GCSメタデータも更新
-        bucket = storage_client.bucket(GCS_BUCKET_NAME)
-        metadata_path = f"whisper/{user_id}/{job_id}/metadata.json"
-        metadata_blob = bucket.blob(metadata_path)
+        # GCSのメタデータファイルも更新（デバッグ用）
+        try:
+            storage_client = storage.Client()
+            bucket = storage_client.bucket(GCS_BUCKET_NAME)
+            
+            # メタデータファイルのパス
+            meta_path = f"whisper/{user_id}/{file_hash}/metadata.json"
+            
+            # 現在のメタデータを取得して更新
+            blob = bucket.blob(meta_path)
+            if blob.exists():
+                metadata = json.loads(blob.download_as_text())
+                metadata.update(updates)
+                
+                # SERVER_TIMESTAMPはJSON化できないので除外
+                json_metadata = {k: v for k, v in metadata.items() if k != "updated_at"}
+                
+                # 更新されたメタデータを保存
+                blob.upload_from_string(json.dumps(json_metadata), content_type="application/json")
+                logger.info(f"GCSメタデータ更新: {meta_path}")
+        except Exception as gcs_error:
+            logger.warning(f"GCSメタデータ更新エラー（無視します）: {gcs_error}")
         
-        if metadata_blob.exists():
-            job_data = json.loads(metadata_blob.download_as_string())
-            job_data.update(updates)
-            
-            # ServerTimestampを処理
-            if "updated_at" in updates and updates["updated_at"] == firestore.SERVER_TIMESTAMP:
-                job_data["updated_at"] = int(time.time())
-            
-            metadata_blob.upload_from_string(
-                json.dumps(job_data, ensure_ascii=False),
-                content_type="application/json"
-            )
     except Exception as e:
         logger.error(f"メタデータ更新エラー: {e}")
 
@@ -193,39 +220,44 @@ def process_next_job():
         user_id = job_data.get("user_id")
         user_email = job_data.get("user_email")
         gcs_audio_path = job_data.get("gcs_audio_path")
+        file_hash = job_data.get("file_hash")
         
         # バッチジョブを作成して起動
-        batch_job_name = create_batch_job(job_id, user_id, user_email, gcs_audio_path)
+        batch_job_name = create_batch_job(job_id, user_id, user_email, gcs_audio_path, file_hash)
         
-        logger.info(f"ジョブを処理中に変更: {job_id}, バッチジョブ: {batch_job_name}")
+        logger.info(f"ジョブを処理中に変更: {job_id}, hash: {file_hash}, バッチジョブ: {batch_job_name}")
         return True
         
     except Exception as e:
         logger.error(f"次のジョブ処理エラー: {e}")
         return False
 
-def handle_batch_completion(job_id, user_id, user_email, success, error_message=None):
+def handle_batch_completion(job_id, user_id, user_email, file_hash, success, error_message=None):
     """バッチジョブの完了または失敗を処理"""
     try:
         status = "completed" if success else "failed"
+        
+        # 処理終了時間を記録
+        timestamp = datetime.now()
         
         # ジョブステータスを更新
         updates = {
             "status": status,
             "progress": 100 if success else 0,
+            "process_ended_at": timestamp,
             "updated_at": firestore.SERVER_TIMESTAMP
         }
         
         if error_message:
             updates["error_message"] = error_message
             
-        update_job_metadata(job_id, user_id, updates)
+        update_job_metadata(job_id, user_id, file_hash, updates)
         
         # メール通知
         if EMAIL_NOTIFICATION and user_email:
             send_email_notification(user_email, job_id, status)
             
-        logger.info(f"バッチ処理{status}: {job_id}")
+        logger.info(f"バッチ処理{status}: {job_id}, hash: {file_hash}")
         
         # 次のジョブの処理を試みる
         process_next_job()
@@ -239,13 +271,14 @@ def process_pubsub_message(message_data):
         job_id = message_data.get("job_id")
         user_id = message_data.get("user_id")
         user_email = message_data.get("user_email")
+        file_hash = message_data.get("file_hash")
         event_type = message_data.get("event_type", "")
         
         if not job_id or not user_id:
             logger.error("必須フィールドがありません: job_id、user_id")
             return
         
-        logger.info(f"メッセージ処理: {event_type}, ジョブID: {job_id}")
+        logger.info(f"メッセージ処理: {event_type}, ジョブID: {job_id}, hash: {file_hash}")
         
         if event_type == "new_job" or event_type == "start_job":
             # 新規ジョブまたは開始リクエスト - 次のジョブ処理を試みる
@@ -255,11 +288,11 @@ def process_pubsub_message(message_data):
             # バッチ処理完了
             success = message_data.get("success", False)
             error_message = message_data.get("error_message")
-            handle_batch_completion(job_id, user_id, user_email, success, error_message)
+            handle_batch_completion(job_id, user_id, user_email, file_hash, success, error_message)
             
         elif event_type == "cancel_job":
             # キャンセル処理 - 特に何もしない（Firestoreはすでに更新済み）
-            logger.info(f"ジョブキャンセル: {job_id}")
+            logger.info(f"ジョブキャンセル: {job_id}, hash: {file_hash}")
             
         else:
             logger.warning(f"不明なイベントタイプ: {event_type}")
@@ -292,9 +325,10 @@ def whisper_queue_http(request):
                 return {"status": "error", "message": f"ジョブが見つかりません: {job_id}"}, 404
             
             user_id = job_data.get("user_id")
+            file_hash = job_data.get("file_hash")
             
             # ステータス更新
-            update_job_metadata(job_id, user_id, {
+            update_job_metadata(job_id, user_id, file_hash, {
                 "status": status,
                 "updated_at": firestore.SERVER_TIMESTAMP
             })

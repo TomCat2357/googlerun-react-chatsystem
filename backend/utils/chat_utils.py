@@ -6,8 +6,8 @@ from typing import List, Dict, Any, Generator, Optional
 from utils.common import (
     logger, 
     MODELS, 
-    VERTEX_PROJECT, 
-    VERTEX_LOCATION
+    GCP_PROJECT_ID, 
+    GCP_REGION
 )
 
 
@@ -15,8 +15,8 @@ from utils.common import (
 def init_vertex_ai():
     try:
         vertexai.init(
-            project=VERTEX_PROJECT,
-            location=VERTEX_LOCATION
+            project=GCP_PROJECT_ID,
+            location=GCP_REGION
         )
         logger.debug("VertexAI初期化完了")
     except Exception as e:

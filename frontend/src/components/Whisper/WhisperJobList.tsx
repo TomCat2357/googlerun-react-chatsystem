@@ -9,13 +9,14 @@ interface Job {
   progress?: number;
   error_message?: string;
   tags?: string[];
+  file_hash: string; // ファイルハッシュを追加
 }
 
 interface WhisperJobListProps {
   jobs: Job[];
-  onJobSelect: (jobId: string) => void;
+  onJobSelect: (jobId: string, fileHash: string) => void; // ファイルハッシュも渡すように変更
   onRefresh: () => void;
-  onDelete?: (jobId: string) => void;
+  onDelete?: (jobId: string, fileHash: string) => void; // ファイルハッシュも渡すように変更
   filterStatus: string;
   onFilterChange: (status: string) => void;
   sortOrder: string;
@@ -126,6 +127,9 @@ const WhisperJobList: React.FC<WhisperJobListProps> = ({
                         ))}
                       </div>
                     )}
+                    <div className="text-xs text-gray-400 mt-1">
+                      Hash: {job.file_hash ? job.file_hash.substring(0, 8) + '...' : 'N/A'}
+                    </div>
                   </td>
                   <td className="px-4 py-2">
                     {new Date(job.created_at).toLocaleString()}
@@ -169,7 +173,7 @@ const WhisperJobList: React.FC<WhisperJobListProps> = ({
                   </td>
                   <td className="px-4 py-2 flex gap-2">
                     <button
-                      onClick={() => onJobSelect(job.id)}
+                      onClick={() => onJobSelect(job.id, job.file_hash)}
                       className="px-3 py-1 rounded bg-blue-500 hover:bg-blue-600"
                     >
                       {job.status === "completed" ? "再生・編集" : "詳細"}
@@ -177,7 +181,7 @@ const WhisperJobList: React.FC<WhisperJobListProps> = ({
                     
                     {onDelete && job.status !== "processing" && (
                       <button
-                        onClick={() => onDelete(job.id)}
+                        onClick={() => onDelete(job.id, job.file_hash)}
                         className="px-3 py-1 rounded bg-red-600 hover:bg-red-700 text-white"
                       >
                         {job.status === "queued" ? "キャンセル" : "削除"}

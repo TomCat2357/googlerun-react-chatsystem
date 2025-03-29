@@ -5,7 +5,7 @@ from typing import Dict, Any, Optional, Tuple
 from google.cloud import secretmanager
 from utils.common import (
     logger,
-    VERTEX_PROJECT,
+    GCP_PROJECT_ID,
     GOOGLE_MAPS_API_KEY_PATH,
     SECRET_MANAGER_ID_FOR_GOOGLE_MAPS_API_KEY,
 )
@@ -373,7 +373,7 @@ def access_secret(secret_id, version_id="latest"):
         logger.debug(f"Secret Managerから{secret_id}を取得しています")
 
         client = secretmanager.SecretManagerServiceClient()
-        name = f"projects/{VERTEX_PROJECT}/secrets/{secret_id}/versions/{version_id}"
+        name = f"projects/{GCP_PROJECT_ID}/secrets/{secret_id}/versions/{version_id}"
         response = client.access_secret_version(request={"name": name})
         return response.payload.data.decode("UTF-8")
     except Exception as e:

@@ -34,21 +34,24 @@ def check_gpu_availability():
     gpu_count = torch.cuda.device_count()
     print(f"GPUが検出されました: {gpu_name} (合計{gpu_count}台)")
 
-def send_completion_notification(job_id, user_id, user_email, success, error_message=None):
+def send_completion_notification(job_id, user_id, user_email, file_hash, success, error_message=None):
     """処理完了通知をPub/Subに送信する"""
     try:
+        project_id = os.environ.get("PROJECT_ID")
         pubsub_topic = os.environ.get("PUBSUB_TOPIC")
-        if not pubsub_topic:
-            print("PUBSUB_TOPICが設定されていないため、通知を送信できません")
+        if not pubsub_topic or not project_id:
+            print("PROJECT_IDまたはPUBSUB_TOPICが設定されていないため、通知を送信できません")
             return False
             
         publisher = pubsub_v1.PublisherClient()
+        topic_path = publisher.topic_path(project_id, pubsub_topic)
         
         # メッセージデータの準備
         message_data = {
             "job_id": job_id,
             "user_id": user_id,
             "user_email": user_email,
+            "file_hash": file_hash,
             "event_type": "batch_complete",
             "success": success
         }
@@ -58,7 +61,7 @@ def send_completion_notification(job_id, user_id, user_email, success, error_mes
             
         # メッセージをPub/Subに送信
         message_bytes = json.dumps(message_data).encode("utf-8")
-        future = publisher.publish(pubsub_topic, data=message_bytes)
+        future = publisher.publish(topic_path, data=message_bytes)
         message_id = future.result()
         
         print(f"処理完了通知を送信しました: {message_id}")
@@ -74,9 +77,10 @@ def main():
     user_id = os.environ.get("USER_ID")
     user_email = os.environ.get("USER_EMAIL")
     gcs_audio_path = os.environ.get("GCS_AUDIO_PATH")
+    file_hash = os.environ.get("FILE_HASH")
     
-    if not job_id or not user_id or not gcs_audio_path:
-        raise ValueError("必要な環境変数(JOB_ID, USER_ID, GCS_AUDIO_PATH)が設定されていません")
+    if not job_id or not user_id or not gcs_audio_path or not file_hash:
+        raise ValueError("必要な環境変数(JOB_ID, USER_ID, GCS_AUDIO_PATH, FILE_HASH)が設定されていません")
     
     # Firestore初期化
     db = firestore.Client()
@@ -92,7 +96,9 @@ def main():
             raise ValueError(f"ジョブデータが見つかりません: {job_id}")
         
         # バケット名を取得
-        bucket_name = gcs_audio_path.split("/")[2] if gcs_audio_path.startswith("gs://") else ""
+        bucket_name = os.environ.get("GCS_BUCKET_NAME")
+        if not bucket_name and gcs_audio_path.startswith("gs://"):
+            bucket_name = gcs_audio_path.split("/")[2]
         
         # 処理開始を記録
         job_ref.update({
@@ -100,20 +106,21 @@ def main():
             "progress": 5,
             "updated_at": firestore.SERVER_TIMESTAMP
         })
-        print(f"処理開始: ジョブID={job_id}, ユーザーID={user_id}")
+        print(f"処理開始: ジョブID={job_id}, ユーザーID={user_id}, hash={file_hash}")
         
         # GPUが利用可能かチェック
         check_gpu_availability()
         job_ref.update({"progress": 10})
         
         # 入出力ファイルのパスを準備
-        base_name = Path(gcs_audio_path).stem
-        temp_wav_path = f"temp_{base_name}.wav"
-        transcription_json = f"temp_{base_name}_transcription.json"
-        diarization_json = f"temp_{base_name}_diarization.json"
+        # 新しいパス構造を使用
+        base_dir = f"whisper/{user_id}/{file_hash}"
+        temp_wav_path = f"temp_{file_hash}.wav"
+        transcription_json = f"temp_{file_hash}_transcription.json"
+        diarization_json = f"temp_{file_hash}_diarization.json"
         
-        # 出力先のGCSパス
-        output_gcs_path = f"gs://{bucket_name}/whisper/{user_id}/{job_id}/transcription.json"
+        # 出力先のGCSパス（新構造）
+        output_gcs_path = f"gs://{bucket_name}/{base_dir}/transcription.json"
         
         try:
             # ステップ1: 音声変換
@@ -190,14 +197,38 @@ def main():
             # 全体処理時間
             total_duration = time.time() - total_start_time
             
+            # 処理終了時間を記録
+            process_ended_at = datetime.datetime.now()
+            
             # 処理成功を記録
             job_ref.update({
                 "status": "completed",
                 "progress": 100,
                 "result_path": output_gcs_path,
                 "processing_time": total_duration,
+                "process_ended_at": process_ended_at,
                 "updated_at": firestore.SERVER_TIMESTAMP
             })
+            
+            # GCSメタデータの更新（デバッグ用）
+            try:
+                storage_client = storage.Client()
+                bucket = storage_client.bucket(bucket_name)
+                meta_path = f"{base_dir}/metadata.json"
+                blob = bucket.blob(meta_path)
+                
+                if blob.exists():
+                    metadata = json.loads(blob.download_as_text())
+                    metadata.update({
+                        "status": "completed",
+                        "progress": 100,
+                        "result_path": output_gcs_path,
+                        "processing_time": total_duration,
+                        "process_ended_at": process_ended_at.isoformat()
+                    })
+                    blob.upload_from_string(json.dumps(metadata), content_type="application/json")
+            except Exception as gcs_error:
+                print(f"GCSメタデータ更新エラー（無視）: {gcs_error}")
             
             # 各ステップの処理時間サマリー
             print("\n=== Processing Time Summary ===")
@@ -210,20 +241,41 @@ def main():
             print(f"\nFinal results saved to {output_gcs_path}")
             
             # 処理完了通知を送信
-            send_completion_notification(job_id, user_id, user_email, True)
+            send_completion_notification(job_id, user_id, user_email, file_hash, True)
             
         except Exception as process_error:
             # 処理中のエラーを記録
             error_message = str(process_error)
+            process_ended_at = datetime.datetime.now()
+            
             job_ref.update({
                 "status": "failed",
                 "error_message": error_message,
+                "process_ended_at": process_ended_at,
                 "updated_at": firestore.SERVER_TIMESTAMP
             })
             print(f"処理エラー: {error_message}")
             
+            # GCSメタデータの更新（デバッグ用）
+            try:
+                storage_client = storage.Client()
+                bucket = storage_client.bucket(bucket_name)
+                meta_path = f"{base_dir}/metadata.json"
+                blob = bucket.blob(meta_path)
+                
+                if blob.exists():
+                    metadata = json.loads(blob.download_as_text())
+                    metadata.update({
+                        "status": "failed",
+                        "error_message": error_message,
+                        "process_ended_at": process_ended_at.isoformat()
+                    })
+                    blob.upload_from_string(json.dumps(metadata), content_type="application/json")
+            except Exception as gcs_error:
+                print(f"GCSメタデータ更新エラー（無視）: {gcs_error}")
+            
             # エラー通知を送信
-            send_completion_notification(job_id, user_id, user_email, False, error_message)
+            send_completion_notification(job_id, user_id, user_email, file_hash, False, error_message)
             raise process_error
             
         finally:
@@ -242,14 +294,37 @@ def main():
         # 全体的なエラーを記録
         error_message = str(e)
         try:
+            process_ended_at = datetime.datetime.now()
             job_ref.update({
                 "status": "failed",
                 "error_message": error_message,
+                "process_ended_at": process_ended_at,
                 "updated_at": firestore.SERVER_TIMESTAMP
             })
             
+            # GCSメタデータの更新（デバッグ用）
+            try:
+                bucket_name = os.environ.get("GCS_BUCKET_NAME")
+                if bucket_name:
+                    storage_client = storage.Client()
+                    bucket = storage_client.bucket(bucket_name)
+                    base_dir = f"whisper/{user_id}/{file_hash}"
+                    meta_path = f"{base_dir}/metadata.json"
+                    blob = bucket.blob(meta_path)
+                    
+                    if blob.exists():
+                        metadata = json.loads(blob.download_as_text())
+                        metadata.update({
+                            "status": "failed",
+                            "error_message": error_message,
+                            "process_ended_at": process_ended_at.isoformat()
+                        })
+                        blob.upload_from_string(json.dumps(metadata), content_type="application/json")
+            except Exception as gcs_error:
+                print(f"GCSメタデータ更新エラー（無視）: {gcs_error}")
+            
             # エラー通知を送信
-            send_completion_notification(job_id, user_id, user_email, False, error_message)
+            send_completion_notification(job_id, user_id, user_email, file_hash, False, error_message)
             
         except Exception as update_error:
             print(f"Firestore更新エラー: {str(update_error)}")

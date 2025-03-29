@@ -28,8 +28,8 @@ ORIGINS = [org for org in os.getenv("ORIGINS", "").split(",") if org]
 ALLOWED_IPS = os.getenv("ALLOWED_IPS")
 
 # ===== Google Cloud 設定 =====
-VERTEX_PROJECT = os.getenv("VERTEX_PROJECT")
-VERTEX_LOCATION = os.getenv("VERTEX_LOCATION")
+GCP_PROJECT_ID = os.getenv("GCP_PROJECT_ID")
+GCP_REGION = os.getenv("GCP_REGION")
 # デプロイ時にコンソールで指定する場合もあるため、空白許容どころかいらない？
 # GOOGLE_APPLICATION_CREDENTIALS = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "")
 

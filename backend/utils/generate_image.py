@@ -1,8 +1,8 @@
 # utils/generate_image.py
 from utils.common import (
     logger,
-    VERTEX_PROJECT,
-    VERTEX_LOCATION
+    GCP_PROJECT_ID,
+    GCP_REGION
 )
 
 import vertexai
@@ -23,8 +23,8 @@ def generate_image(
 ):
     # Vertex AI の初期化（認証情報はGOOGLE_APPLICATION_CREDENTIALSで指定されたファイルから取得）
     vertexai.init(
-        project=VERTEX_PROJECT,
-        location=VERTEX_LOCATION,
+        project=GCP_PROJECT_ID,
+        location=GCP_REGION,
     )
 
     # Imagen3 モデルのロード（モデル名は環境に合わせて変更してください）
