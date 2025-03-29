@@ -3,8 +3,8 @@ import base64
 import json
 from typing import Dict, Any, Optional, Tuple
 from google.cloud import secretmanager
+from logger import logger
 from utils.common import (
-    logger,
     GCP_PROJECT_ID,
     GOOGLE_MAPS_API_KEY_PATH,
     SECRET_MANAGER_ID_FOR_GOOGLE_MAPS_API_KEY,

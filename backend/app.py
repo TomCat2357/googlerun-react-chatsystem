@@ -7,12 +7,16 @@ from fastapi import (
     Depends,
     Request,
 )
-from utils.common import (
-    logger,
+
+from utils.logger import (logger,
     wrap_asyncgenerator_logger,
     create_dict_logger,
     sanitize_request_data,
-    log_request,
+    log_request,DEBUG,
+    )
+
+from utils.common import (
+    
     MAX_IMAGES,
     MAX_AUDIO_FILES,
     MAX_TEXT_FILES,
@@ -20,7 +24,6 @@ from utils.common import (
     MAX_IMAGE_SIZE,
     FRONTEND_PATH,
     PORT,
-    DEBUG,
     ORIGINS,
     SSL_CERT_PATH,
     SSL_KEY_PATH,

@@ -1,10 +1,9 @@
 # utils/chat_utils.py
-import logging
 import vertexai
 from vertexai.generative_models import GenerativeModel, GenerationConfig, Part, Content
-from typing import List, Dict, Any, Generator, Optional
+from typing import List, Dict, Any
+from utils.logger import logger
 from utils.common import (
-    logger, 
     MODELS, 
     GCP_PROJECT_ID, 
     GCP_REGION

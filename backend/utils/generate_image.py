@@ -1,9 +1,9 @@
 # utils/generate_image.py
 from utils.common import (
-    logger,
     GCP_PROJECT_ID,
     GCP_REGION
 )
+from logger import logger
 
 import vertexai
 from vertexai.preview.vision_models import ImageGenerationModel

@@ -8,7 +8,8 @@ import csv
 from PIL import Image
 from typing import Dict, List, Any, Optional, Tuple
 import docx2txt
-from utils.common import logger, MAX_LONG_EDGE, MAX_IMAGE_SIZE
+from utils.common import MAX_LONG_EDGE, MAX_IMAGE_SIZE
+from logger import logger
 
 
 def process_uploaded_image(image_data: str) -> str:
