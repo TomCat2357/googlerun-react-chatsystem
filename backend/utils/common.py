@@ -4,8 +4,9 @@ import json
 from typing import Dict, List, Any, Optional
 from dotenv import load_dotenv
 from fastapi import Request, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from firebase_admin import auth
+from google.cloud import firestore
 
 # logger.pyから必要な機能をインポート
 from utils.logger import logger
@@ -171,6 +172,42 @@ class WhisperRequest(BaseModel):
 class WhisperJobRequest(BaseModel):
     segments: List[Dict[str, Any]]
 
+# WhisperJob用のPydanticモデル
+class WhisperJobData(BaseModel):
+    job_id: str
+    user_id: str
+    user_email: str
+    filename: str
+    description: str = ""
+    recording_date: str = ""
+    gcs_audio_path: str
+    file_hash: str
+    status: str  # "queued", "processing", "completed", "failed", "canceled"
+    created_at: Any = None  # FirestoreのSERVER_TIMESTAMPを使用するため
+    updated_at: Any = None  # FirestoreのSERVER_TIMESTAMPを使用するため
+    process_started_at: Optional[Any] = None
+    process_ended_at: Optional[Any] = None
+    tags: List[str] = []
+    error_message: Optional[str] = None
+    
+    class Config:
+        # 追加のフィールドを許可しない
+        extra = "forbid"
+    # 例：特定のフィールドのバリデーション
+    @field_validator('status')
+    @classmethod
+    def validate_status(cls, v):
+        valid_statuses = ["queued", "processing", "completed", "failed", "canceled"]
+        if v not in valid_statuses:
+            raise ValueError(f"無効なステータス: {v}. 有効なステータス: {valid_statuses}")
+        return v
+
+# FirestoreのSERVER_TIMESTAMPをJSONに変換するためのカスタムエンコーダー
+class FirestoreEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if obj == firestore.SERVER_TIMESTAMP:
+            return {"__special__": "SERVER_TIMESTAMP"}
+        return super().default(obj)
 
 # 認証ミドルウェア用の依存関係
 async def get_current_user(request: Request):

@@ -42,14 +42,20 @@ def save_dataframe(df, output_path):
     else:
         save_dataframe_to_local(df, output_path)
 
-def diarize_audio(audio_path, output_json, hf_auth_token, min_speakers=None, max_speakers=None, num_speakers=None):
+def diarize_audio(audio_path, output_json, hf_auth_token, min_speakers=None, max_speakers=None, num_speakers=None, device="cuda"):
     """音声ファイルの話者分け（ダイアリゼーション）を実行してJSONに保存する"""
     start_time = time.time()
     
     try:
-        # GPUの設定
-        device = torch.device("cuda")
-        print("Using GPU for diarization")
+        # デバイスの設定
+        if device == "cuda" and torch.cuda.is_available():
+            torch_device = torch.device("cuda")
+            print("Using GPU for diarization")
+        else:
+            if device == "cuda" and not torch.cuda.is_available():
+                print("Warning: CUDA requested but not available. Falling back to CPU.")
+            torch_device = torch.device("cpu")
+            print("Using CPU for diarization")
         
         print("Initializing pyannote pipeline...")
         pipeline_start_time = time.time()
@@ -59,8 +65,8 @@ def diarize_audio(audio_path, output_json, hf_auth_token, min_speakers=None, max
             use_auth_token=hf_auth_token
         )
         
-        # デバイス設定（常にGPUを使用）
-        pipeline.to(device)
+        # デバイス設定
+        pipeline.to(torch_device)
         pipeline_init_time = time.time() - pipeline_start_time
         print(f"Pipeline initialization completed in {pipeline_init_time:.2f} seconds")
         
@@ -142,11 +148,10 @@ def main():
     parser.add_argument('--min-speakers', type=int, help='最小話者数')
     parser.add_argument('--max-speakers', type=int, help='最大話者数')
     parser.add_argument('--num-speakers', type=int, help='固定話者数（min/maxよりも優先）')
+    parser.add_argument('--device', choices=['cpu', 'cuda'], default='cuda', 
+                       help='使用するデバイス (CPU または CUDA GPU)')
     args = parser.parse_args()
     
-    # GPUが使用可能かチェック
-    if not torch.cuda.is_available():
-        raise Exception("GPUが利用できません。このスクリプトはGPU環境でのみ実行できます。")
     
     diarize_audio(
         args.audio_path, 
@@ -154,7 +159,8 @@ def main():
         args.hf_auth_token,
         min_speakers=args.min_speakers,
         max_speakers=args.max_speakers,
-        num_speakers=args.num_speakers
+        num_speakers=args.num_speakers,
+        device=args.device
     )
 
 if __name__ == "__main__":

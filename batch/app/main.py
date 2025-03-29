@@ -89,6 +89,24 @@ def main():
     file_hash = os.environ.get("FILE_HASH")
     bucket_name = os.environ.get("GCS_BUCKET_NAME")
     
+    # デバイス設定を環境変数から取得（デフォルトはcuda）
+    device = os.environ.get("DEVICE", "cuda").lower()
+    if device not in ["cpu", "cuda"]:
+        print(f"Warning: 無効なデバイス指定 '{device}'。'cuda'にデフォルト設定します。")
+        device = "cuda"
+    
+    # GPUを要求されたが利用できない場合の処理
+    if device == "cuda" and not torch.cuda.is_available():
+        print("警告: GPUが要求されましたが利用できません。CPUにフォールバックします。")
+        device = "cpu"
+    
+    # デバイス情報の表示
+    if device == "cuda":
+        check_gpu_availability()
+        print("GPUを使用して処理を実行します")
+    else:
+        print("CPUを使用して処理を実行します")
+    
     # 追加のパラメータを環境変数から取得
     num_speakers = os.environ.get("NUM_SPEAKERS")
     min_speakers = os.environ.get("MIN_SPEAKERS", "1")
@@ -123,12 +141,13 @@ def main():
         
         try:
             # ステップ1: 音声変換
-            print("=== Step 1: Converting audio to WAV format with GPU acceleration ===")
+            print("=== Step 1: Converting audio to WAV format ===")
             step1_start_time = time.time()
             convert_cmd = [
                 "python3", "convert_audio.py",
                 gcs_audio_path,
-                temp_wav_path
+                temp_wav_path,
+                "--device", device
             ]
             subprocess.run(convert_cmd, check=True)
             step1_duration = time.time() - step1_start_time
@@ -136,12 +155,13 @@ def main():
             send_progress_notification(job_id, user_id, user_email, file_hash, "processing", 30)
             
             # ステップ2: 文字起こし
-            print("\n=== Step 2: Running transcription using GPU ===")
+            print("\n=== Step 2: Running transcription ===")
             step2_start_time = time.time()
             transcribe_cmd = [
                 "python3", "transcribe.py",
                 temp_wav_path,
-                transcription_json
+                transcription_json,
+                "--device", device
             ]
             # 言語とプロンプトが指定されていれば追加
             if language:
@@ -160,13 +180,14 @@ def main():
                 raise ValueError("HF_AUTH_TOKEN環境変数が設定されていません")
             
             # ステップ3: 話者分離
-            print("\n=== Step 3: Running speaker diarization on GPU ===")
+            print("\n=== Step 3: Running speaker diarization ===")
             step3_start_time = time.time()
             diarize_cmd = [
                 "python3", "diarize.py",
                 temp_wav_path,
                 diarization_json,
-                hf_auth_token
+                hf_auth_token,
+                "--device", device
             ]
             
             # 話者数の指定（環境変数から取得）
@@ -280,4 +301,13 @@ def send_progress_notification(job_id, user_id, user_email, file_hash, status, p
         return False
 
 if __name__ == "__main__":
+    # CLIでも呼び出せるように引数解析を追加
+    parser = argparse.ArgumentParser(description='音声文字起こしと話者分離のバッチ処理')
+    parser.add_argument('--device', choices=['cpu', 'cuda'], default='cuda', 
+                       help='使用するデバイス (CPU または CUDA GPU)')
+    args = parser.parse_args()
+    
+    # 環境変数にデバイス情報を設定
+    os.environ["DEVICE"] = args.device
+    
     main()

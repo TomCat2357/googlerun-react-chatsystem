@@ -40,13 +40,13 @@ def save_dataframe(df, output_path):
     else:
         save_dataframe_to_local(df, output_path)
 
-def transcribe_audio(audio_path, output_json):
+def transcribe_audio(audio_path, output_json, device="cuda"):
     """音声ファイルの文字起こしを実行してJSONに保存する"""
     now = time.time()
     
-    print("Initializing Whisper model on GPU...")
-    # Whisperモデルの初期化 - GPUが利用可能な場合はGPUを使用
-    model = WhisperModel("large", device="cuda")
+    print(f"Initializing Whisper model on {device.upper()}...")
+    # Whisperモデルの初期化 - 指定されたデバイスを使用
+    model = WhisperModel("large", device=device)
     
     model_init_time = time.time()
     print(f"Model initialization completed in {model_init_time - now:.2f} seconds")
@@ -85,9 +85,11 @@ def main():
     parser = argparse.ArgumentParser(description='音声ファイルの文字起こしを実行する')
     parser.add_argument('audio_path', help='音声ファイルのパス (WAV形式)')
     parser.add_argument('output_json', help='出力JSONファイルのパス')
+    parser.add_argument('--device', choices=['cpu', 'cuda'], default='cuda', 
+                        help='使用するデバイス (CPU または CUDA GPU)')
     args = parser.parse_args()
     
-    transcribe_audio(args.audio_path, args.output_json)
+    transcribe_audio(args.audio_path, args.output_json, device=args.device)
 
 if __name__ == "__main__":
     main()

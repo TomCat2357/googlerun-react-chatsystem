@@ -51,7 +51,7 @@ def save_to_gcs(local_path, gcs_uri):
     blob.upload_from_filename(local_path)
     print(f"Uploaded {local_path} to {gcs_uri}")
 
-def convert_audio(input_path, output_path):
+def convert_audio(input_path, output_path, use_gpu=True):
     """音声ファイルをWAV形式に変換する"""
     # 入力ファイルを読み込む
     audio_bytes = get_file_bytes(input_path)
@@ -69,14 +69,25 @@ def convert_audio(input_path, output_path):
     if is_gcs_path(output_path):
         local_output = f"temp_output_{os.path.basename(output_path)}"
     
-    # FFmpegを使用して変換（GPUアクセラレーションを使用）
+    # FFmpegを使用して変換
     try:
-        print(f"Converting audio to WAV format using GPU acceleration...")
-        # NVIDIA GPUを利用するためのFFmpegコマンド
-        # nvenc (NVIDIA HWアクセラレーション) は音声変換には直接適用できないため、
-        # 標準的なFFmpegコマンドを使用します
+        device_str = "GPU" if use_gpu else "CPU"
+        print(f"Converting audio to WAV format using {device_str}...")
+        
+        # FFmpegコマンド（GPUアクセラレーションはオプショナル）
+        ffmpeg_cmd = ['ffmpeg', '-i', temp_input, '-ar', '16000', '-ac', '1']
+        
+        # GPUを使用する場合は、利用可能なアクセラレーションオプションを追加
+        # 注: FFmpegで音声処理にGPUを使うオプションには環境依存があります
+        if use_gpu:
+            # NVIDIAのGPU支援エンコードが利用可能な場合の例
+            # 音声変換では直接GPUを使えない場合も多いため、実際の環境に合わせて調整が必要
+            pass
+            
+        ffmpeg_cmd.append(local_output)
+        
         subprocess.run(
-            ['ffmpeg', '-i', temp_input, '-ar', '16000', '-ac', '1', local_output],
+            ffmpeg_cmd,
             check=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE
@@ -102,9 +113,14 @@ def main():
     parser = argparse.ArgumentParser(description='音声ファイルをWAV形式に変換する')
     parser.add_argument('input_path', help='入力音声ファイルのパス (ローカルまたはGCS)')
     parser.add_argument('output_path', help='出力WAVファイルのパス (ローカルまたはGCS)')
+    parser.add_argument('--device', choices=['cpu', 'cuda'], default='cuda', 
+                       help='使用するデバイス (CPU または CUDA GPU)')
     args = parser.parse_args()
     
-    convert_audio(args.input_path, args.output_path)
+    # GPUフラグを設定
+    use_gpu = (args.device == 'cuda')
+    
+    convert_audio(args.input_path, args.output_path, use_gpu=use_gpu)
 
 if __name__ == "__main__":
     main()
