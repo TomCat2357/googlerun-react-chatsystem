@@ -1,6 +1,4 @@
-### backend/app.py ###
-
-# %% app.py
+# app.py with explicit type annotations
 from fastapi import (
     FastAPI,
     HTTPException,
@@ -68,10 +66,8 @@ from common_utils.class_types import (
     ChatRequest,
     SpeechToTextRequest,
     GenerateImageRequest,
-    WhisperRequest,
-    WhisperJobRequest,
-    WhisperJobData,
-    JobMessageData,
+    WhisperUploadRequest,
+    WhisperFirestoreFirestoreData,
 )
 
 from utils.geocoding_service import get_google_maps_api_key, process_optimized_geocode
@@ -80,7 +76,7 @@ from fastapi.responses import JSONResponse, StreamingResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from typing import Dict, Any, List, Optional, Callable
+from typing import Dict, Any, List, Optional, Callable, AsyncGenerator, Tuple, Union, cast
 from firebase_admin import auth, credentials, firestore
 import firebase_admin
 import os, json, asyncio, base64, time, re
@@ -96,7 +92,7 @@ from functools import partial
 from google.cloud import storage, firestore
 
 
-firebase_db = firestore.Client()
+firebase_db: firestore.Client = firestore.Client()
 
 # センシティブ情報は先に登録しておく
 sanitize_request_data = partial(sanitize_request_data, sensitive_keys=SENSITIVE_KEYS)
@@ -111,7 +107,7 @@ except ValueError:
     # 初期化されていない場合のみ初期化
     if os.path.exists(FIREBASE_CLIENT_SECRET_PATH):
         logger.debug(f"Firebase認証情報を読み込み: {FIREBASE_CLIENT_SECRET_PATH}")
-        cred = credentials.Certificate(FIREBASE_CLIENT_SECRET_PATH)
+        cred: credentials.Certificate = credentials.Certificate(FIREBASE_CLIENT_SECRET_PATH)
         firebase_admin.initialize_app(cred)  # 名前を指定しない
     else:
         logger.debug("Firebase認証情報なしで初期化")
@@ -119,7 +115,7 @@ except ValueError:
 
 
 # FastAPIアプリケーションの初期化
-app = FastAPI()
+app: FastAPI = FastAPI()
 
 logger.debug("ORIGINS: %s", ORIGINS)
 
@@ -135,16 +131,16 @@ app.add_middleware(
 
 
 @app.middleware("http")
-async def log_request_middleware(request: Request, call_next):
+async def log_request_middleware(request: Request, call_next: Callable) -> JSONResponse:
     # OPTIONSリクエストの場合はリクエストIDのチェックをスキップ
     # URLパスの取得
-    path = request.url.path
+    path: str = request.url.path
     # OPTIONSリクエスト、静的アセット、viteのアイコンへのリクエストは処理をスキップ
     if request.method == "OPTIONS":
         return await call_next(request)
 
     # リクエストヘッダーからリクエストIDを取得
-    request_id = request.headers.get("X-Request-Id", "")
+    request_id: str = request.headers.get("X-Request-Id", "")
 
     # リクエストIDのバリデーション (Fで始まる12桁の16進数)
     # ルートパス以外のアクセスでリクエストIDが無効な場合はエラーを返す
@@ -177,19 +173,19 @@ async def log_request_middleware(request: Request, call_next):
         return JSONResponse(
             status_code=403, content={"error": "無効なリクエストIDです"}
         )
-    start_time = time.time()
+    start_time: float = time.time()
 
     # リクエストの基本情報を収集してロギング
     # URLパスの取得
     path = request.url.path
     # HTTPメソッドの取得
-    method = request.method
+    method: str = request.method
     # クライアントのIPアドレスを取得（取得できない場合は"unknown"）
-    client_host = request.client.host if request.client else "unknown"
+    client_host: str = request.client.host if request.client else "unknown"
     # リクエストボディの取得とデコード
-    body = await request.body()
+    body: bytes = await request.body()
     # ボディデータを指定された最大長に制限してデコード
-    decoded_data = body.decode("utf-8")
+    decoded_data: str = body.decode("utf-8")
 
     # リクエスト受信時の詳細情報をログに記録
     # - リクエストID、パス、メソッド、クライアントIP
@@ -211,10 +207,10 @@ async def log_request_middleware(request: Request, call_next):
     )
 
     # 次の処理へ
-    response = await call_next(request)
+    response: JSONResponse = await call_next(request)
 
     # 処理時間の計算
-    process_time = time.time() - start_time
+    process_time: float = time.time() - start_time
 
     # レスポンス情報のロギング
     logger.debug("リクエスト処理終了")
@@ -239,23 +235,23 @@ async def log_request_middleware(request: Request, call_next):
 async def geocoding_endpoint(
     request: Request,
     geocoding_request: GeocodeRequest,
-    current_user: Dict = Depends(get_current_user),
-):
+    current_user: Dict[str, Any] = Depends(get_current_user),
+) -> StreamingResponse:
     """
     ジオコーディングのための最適化されたRESTfulエンドポイント
     クライアントからキャッシュ情報を受け取り、
     最小限のAPI呼び出しで結果と画像を取得する
     """
     # リクエストの情報を取得
-    request_info = await log_request(request, current_user, GEOCODING_LOG_MAX_LENGTH)
+    request_info: Dict[str, Any] = await log_request(request, current_user, GEOCODING_LOG_MAX_LENGTH)
     logger.debug("リクエスト情報: %s", request_info)
 
-    mode = geocoding_request.mode
+    mode: str = geocoding_request.mode
     lines = geocoding_request.lines
     options = geocoding_request.options
 
     # 上限件数のチェック
-    max_batch_size = (
+    max_batch_size: int = (
         GEOCODING_WITH_IMAGE_MAX_BATCH_SIZE
         if options.get("showSatellite") or options.get("showStreetView")
         else GEOCODING_NO_IMAGE_MAX_BATCH_SIZE
@@ -267,13 +263,13 @@ async def geocoding_endpoint(
             detail=f"入力された件数は{len(lines)}件ですが、1回の送信で取得可能な上限は{max_batch_size}件です。",
         )
 
-    google_maps_api_key = get_google_maps_api_key()
-    timestamp = int(time.time() * 1000)
+    google_maps_api_key: str = get_google_maps_api_key()
+    timestamp: int = int(time.time() * 1000)
 
     # クエリの重複を排除し、元のインデックスを保持
-    unique_queries = {}
+    unique_queries: Dict[str, Dict[str, Any]] = {}
     for idx, line_data in enumerate(lines):
-        query = line_data.query
+        query: str = line_data.query
         if query not in unique_queries:
             # 最初に出現したクエリの情報をコピー
             unique_queries[query] = {"data": line_data, "indices": [idx]}
@@ -292,17 +288,17 @@ async def geocoding_endpoint(
         },
         max_length=GEOCODING_LOG_MAX_LENGTH,
     )
-    async def generate_results():
+    async def generate_results() -> AsyncGenerator[str, None]:
         # 並行処理用のタスクリスト
-        tasks = []
+        tasks: List[asyncio.Task] = []
 
         # 重複排除したクエリごとにタスクを作成
         for query, query_info in unique_queries.items():
             line_data = query_info["data"]
-            original_indices = query_info["indices"]
+            original_indices: List[int] = query_info["indices"]
 
             # 処理タスクを作成
-            task = process_optimized_geocode(
+            task: asyncio.Task = process_optimized_geocode(
                 original_indices=original_indices,
                 query=query,
                 mode=mode,
@@ -318,24 +314,24 @@ async def geocoding_endpoint(
             tasks.append(task)
 
         # 並行実行（ただし、レート制限を考慮して一度に実行するタスク数を制限）
-        chunk_size = GEOCODING_BATCH_SIZE
-        total_chunks = (len(tasks) + chunk_size - 1) // chunk_size
-        processed_chunks = 0
+        chunk_size: int = GEOCODING_BATCH_SIZE
+        total_chunks: int = (len(tasks) + chunk_size - 1) // chunk_size
+        processed_chunks: int = 0
 
         for i in range(0, len(tasks), chunk_size):
-            chunk = tasks[i : i + chunk_size]
-            chunk_results = await asyncio.gather(*chunk)
+            chunk: List[asyncio.Task] = tasks[i : i + chunk_size]
+            chunk_results: List[List[str]] = await asyncio.gather(*chunk)
             processed_chunks += 1
 
             # 進捗計算
-            progress_base = int((processed_chunks / total_chunks) * 100)
+            progress_base: int = int((processed_chunks / total_chunks) * 100)
 
             # 結果を順番に返す
             for result_chunks in chunk_results:
                 for result_chunk in result_chunks:
                     # 進捗情報を埋め込み
                     try:
-                        chunk_data = json.loads(result_chunk.rstrip())
+                        chunk_data: Dict[str, Any] = json.loads(result_chunk.rstrip())
                         if (
                             "payload" in chunk_data
                             and "progress" in chunk_data["payload"]
@@ -363,15 +359,14 @@ async def geocoding_endpoint(
 
 
 @app.get("/backend/config")
-async def get_config(request: Request, current_user: Dict = Depends(get_current_user)):
+async def get_config(request: Request, current_user: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, Any]:
     try:
-
-        request_info = await log_request(
+        request_info: Dict[str, Any] = await log_request(
             request, current_user, GEOCODING_LOG_MAX_LENGTH
         )
         logger.debug("リクエスト情報: %s", request_info)
 
-        config_values = {
+        config_values: Dict[str, Any] = {
             "MAX_IMAGES": MAX_IMAGES,
             "MAX_AUDIO_FILES": MAX_AUDIO_FILES,
             "MAX_TEXT_FILES": MAX_TEXT_FILES,
@@ -406,15 +401,15 @@ async def get_config(request: Request, current_user: Dict = Depends(get_current_
 
 
 @app.get("/backend/verify-auth")
-async def verify_auth(request: Request, current_user: Dict = Depends(get_current_user)):
+async def verify_auth(request: Request, current_user: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, Any]:
     try:
         logger.debug("認証検証開始")
         logger.debug("トークンの復号化成功。ユーザー: %s", current_user.get("email"))
-        request_info = await log_request(
+        request_info: Dict[str, Any] = await log_request(
             request, current_user, VERIFY_AUTH_LOG_MAX_LENGTH
         )
 
-        response_data = {
+        response_data: Dict[str, Any] = {
             "status": "success",
             "user": {
                 "email": current_user.get("email"),
@@ -441,15 +436,15 @@ async def verify_auth(request: Request, current_user: Dict = Depends(get_current
 async def chat(
     request: Request,
     chat_request: ChatRequest,
-    current_user: Dict = Depends(get_current_user),
-):
+    current_user: Dict[str, Any] = Depends(get_current_user),
+) -> StreamingResponse:
     logger.debug("チャットリクエストを処理中")
     try:
-        request_info = await log_request(request, current_user, CHAT_LOG_MAX_LENGTH)
+        request_info: Dict[str, Any] = await log_request(request, current_user, CHAT_LOG_MAX_LENGTH)
         logger.debug("リクエスト情報: %s", request_info)
 
-        messages = chat_request.messages
-        model = chat_request.model
+        messages: List[Dict[str, Any]] = chat_request.messages
+        model: str = chat_request.model
         logger.debug(f"モデル: {model}")
 
         if model is None:
@@ -457,19 +452,19 @@ async def chat(
                 status_code=400, detail="モデル情報が提供されていません"
             )
 
-        model_api_key = get_api_key_for_model(model)
+        model_api_key: str = get_api_key_for_model(model)
 
         # メッセージ変換処理のログ出力を追加
-        transformed_messages = []
+        transformed_messages: List[Dict[str, Any]] = []
         for msg in messages:
             # ユーザーメッセージに添付ファイルがある場合の処理
             if msg.get("role") == "user":
                 # ファイルデータの処理とログ出力
                 if "files" in msg and msg["files"]:
-                    file_types = []
+                    file_types: List[str] = []
                     for file in msg["files"]:
-                        mime_type = file.get("mimeType", "")
-                        name = file.get("name", "")
+                        mime_type: str = file.get("mimeType", "")
+                        name: str = file.get("name", "")
                         file_types.append(f"{name} ({mime_type})")
                     logger.debug(f"添付ファイル: {', '.join(file_types)}")
 
@@ -482,17 +477,17 @@ async def chat(
 
         # プロンプト内容の概要をログに出力
         for i, msg in enumerate(transformed_messages):
-            role = msg.get("role", "unknown")
-            content = msg.get("content", "")
+            role: str = msg.get("role", "unknown")
+            content: Union[str, List[Dict[str, Any]]] = msg.get("content", "")
 
             if isinstance(content, str):
-                content_preview = content[:50] + "..." if len(content) > 50 else content
+                content_preview: str = content[:50] + "..." if len(content) > 50 else content
                 logger.debug(f"メッセージ[{i}]: role={role}, content={content_preview}")
             elif isinstance(content, list):
-                parts_info = []
+                parts_info: List[str] = []
                 for part in content:
                     if part.get("type") == "text":
-                        text = (
+                        text: str = (
                             part.get("text", "")[:20] + "..."
                             if len(part.get("text", "")) > 20
                             else part.get("text", "")
@@ -511,7 +506,7 @@ async def chat(
             },
             max_length=CHAT_LOG_MAX_LENGTH,
         )
-        async def generate_stream():
+        async def generate_stream() -> AsyncGenerator[str, None]:
             for chunk in common_message_function(
                 model=model,
                 stream=True,
@@ -537,15 +532,15 @@ async def chat(
 async def speech2text(
     request: Request,
     speech_request: SpeechToTextRequest,
-    current_user: Dict = Depends(get_current_user),
-):
+    current_user: Dict[str, Any] = Depends(get_current_user),
+) -> Dict[str, Any]:
     logger.debug("音声認識処理開始")
     try:
-        request_info = await log_request(
+        request_info: Dict[str, Any] = await log_request(
             request, current_user, VERIFY_AUTH_LOG_MAX_LENGTH
         )
 
-        audio_data = speech_request.audio_data
+        audio_data: str = speech_request.audio_data
 
         if not audio_data:
             logger.error("音声データが見つかりません")
@@ -558,7 +553,7 @@ async def speech2text(
             _, audio_data = audio_data.split(",", 1)
 
         try:
-            audio_bytes = base64.b64decode(audio_data)
+            audio_bytes: bytes = base64.b64decode(audio_data)
             logger.debug(f"受信した音声サイズ: {len(audio_bytes) / 1024:.2f} KB")
         except Exception as e:
             logger.error(f"音声データのBase64デコードエラー: {str(e)}")
@@ -580,15 +575,15 @@ async def speech2text(
             logger.error(f"音声認識エラー: {str(e)}", exc_info=True)
             raise HTTPException(status_code=500, detail=f"音声認識エラー: {str(e)}")
 
-        full_transcript = ""
-        timed_transcription = []
+        full_transcript: str = ""
+        timed_transcription: List[Dict[str, str]] = []
 
-        def format_time(time_obj):
-            seconds = time_obj.total_seconds()
-            hrs = int(seconds // 3600)
-            mins = int((seconds % 3600) // 60)
-            secs = int(seconds % 60)
-            msecs = int(seconds * 1000) % 1000
+        def format_time(time_obj: datetime.timedelta) -> str:
+            seconds: float = time_obj.total_seconds()
+            hrs: int = int(seconds // 3600)
+            mins: int = int((seconds % 3600) // 60)
+            secs: int = int(seconds % 60)
+            msecs: int = int(seconds * 1000) % 1000
             return f"{hrs:02d}:{mins:02d}:{secs:02d}.{msecs:03d}"
 
         for response in responses:
@@ -597,8 +592,8 @@ async def speech2text(
                 full_transcript += alternative.transcript + "\n"
                 if alternative.words:
                     for w in alternative.words:
-                        start_time_str = format_time(w.start_offset)
-                        end_time_str = format_time(w.end_offset)
+                        start_time_str: str = format_time(w.start_offset)
+                        end_time_str: str = format_time(w.end_offset)
                         timed_transcription.append(
                             {
                                 "start_time": start_time_str,
@@ -619,7 +614,7 @@ async def speech2text(
             f"文字起こし結果: {len(full_transcript)} 文字, {len(timed_transcription)} セグメント"
         )
 
-        response_data = {
+        response_data: Dict[str, Any] = {
             "transcription": full_transcript.strip(),
             "timed_transcription": timed_transcription,
         }
@@ -644,24 +639,24 @@ async def speech2text(
 async def generate_image_endpoint(
     request: Request,
     image_request: GenerateImageRequest,
-    current_user: Dict = Depends(get_current_user),
-):
-    request_info = await log_request(
+    current_user: Dict[str, Any] = Depends(get_current_user),
+) -> Dict[str, Any]:
+    request_info: Dict[str, Any] = await log_request(
         request, current_user, GENERATE_IMAGE_LOG_MAX_LENGTH
     )
 
-    prompt = image_request.prompt
-    model_name = image_request.model_name
-    negative_prompt = image_request.negative_prompt
-    number_of_images = image_request.number_of_images
-    seed = image_request.seed
-    aspect_ratio = image_request.aspect_ratio
-    language = image_request.language
-    add_watermark = image_request.add_watermark
-    safety_filter_level = image_request.safety_filter_level
-    person_generation = image_request.person_generation
+    prompt: str = image_request.prompt
+    model_name: str = image_request.model_name
+    negative_prompt: Optional[str] = image_request.negative_prompt
+    number_of_images: Optional[int] = image_request.number_of_images
+    seed: Optional[int] = image_request.seed
+    aspect_ratio: Optional[str] = image_request.aspect_ratio
+    language: Optional[str] = image_request.language
+    add_watermark: Optional[bool] = image_request.add_watermark
+    safety_filter_level: Optional[str] = image_request.safety_filter_level
+    person_generation: Optional[str] = image_request.person_generation
 
-    kwargs = dict(
+    kwargs: Dict[str, Any] = dict(
         prompt=prompt,
         model_name=model_name,
         negative_prompt=negative_prompt,
@@ -676,7 +671,7 @@ async def generate_image_endpoint(
     logger.debug(f"generate_image 関数の引数: {kwargs}")
 
     # 必須パラメータのチェック
-    none_parameters = [
+    none_parameters: List[str] = [
         key for key, value in kwargs.items() if value is None and key != "seed"
     ]
     if none_parameters:
@@ -687,16 +682,16 @@ async def generate_image_endpoint(
     try:
         image_list = generate_image(**kwargs)
         if not image_list:
-            error_message = "画像生成に失敗しました。プロンプトにコンテンツポリシーに違反する内容（人物表現など）が含まれている可能性があります。別の内容を試してください。"
+            error_message: str = "画像生成に失敗しました。プロンプトにコンテンツポリシーに違反する内容（人物表現など）が含まれている可能性があります。別の内容を試してください。"
             logger.warning(error_message)
             raise HTTPException(status_code=500, detail=error_message)
 
-        encode_images = []
+        encode_images: List[str] = []
         for img_obj in image_list:
-            img_base64 = img_obj._as_base64_string()
+            img_base64: str = img_obj._as_base64_string()
             encode_images.append(img_base64)
 
-        response_data = {"images": encode_images}
+        response_data: Dict[str, List[str]] = {"images": encode_images}
         return create_dict_logger(
             response_data,
             meta_info={
@@ -709,19 +704,19 @@ async def generate_image_endpoint(
     except HTTPException as he:
         raise he
     except Exception as e:
-        error_message = str(e)
+        error_message: str = str(e)
         logger.error(f"画像生成エラー: {error_message}", exc_info=True)
         raise HTTPException(status_code=500, detail=error_message)
 
 
 @app.post("/backend/logout")
-async def logout(request: Request):
+async def logout(request: Request) -> Dict[str, str]:
     try:
-        request_info = await log_request(request, None, LOGOUT_LOG_MAX_LENGTH)
+        request_info: Dict[str, Any] = await log_request(request, None, LOGOUT_LOG_MAX_LENGTH)
 
         logger.debug("ログアウト処理開始")
 
-        response_data = {"status": "success", "message": "ログアウトに成功しました"}
+        response_data: Dict[str, str] = {"status": "success", "message": "ログアウトに成功しました"}
         return create_dict_logger(
             response_data,
             meta_info={
@@ -739,21 +734,23 @@ async def logout(request: Request):
 # 音声アップロード処理関数の変更部分
 @app.post("/backend/whisper")
 async def upload_audio(
-    request: Request, current_user: Dict = Depends(get_current_user)
-):
+    request: Request, 
+    whisperUploadRequest : WhisperUploadRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user)
+) -> Dict[str, Any]:
 
     try:
         # リクエストデータの取得
-        data = await request.json()
-        audio_data = data.get("audio_data")
-        filename = data.get("filename")
-        description = data.get("description", "")
-        recording_date = data.get("recording_date", "")
-        tags = data.get("tags", [])
+        data: Dict[str, Any] = await request.json()
+        audio_data: str = data.get("audio_data")
+        filename: str = data.get("filename")
+        description: str = data.get("description", "")
+        recording_date: str = data.get("recording_date", "")
+        tags: List[str] = data.get("tags", [])
 
         # 認証情報の取得
-        user_id = current_user["uid"]
-        user_email = current_user.get("email", "")
+        user_id: str = current_user["uid"]
+        user_email: str = current_user.get("email", "")
 
         # Base64データの包括的なバリデーションと事前処理
         try:
@@ -785,13 +782,13 @@ async def upload_audio(
                 )
 
             # 3. MIMEタイプのチェック
-            mime_parts = audio_data.split(";")[0].split(":")
+            mime_parts: List[str] = audio_data.split(";")[0].split(":")
             if len(mime_parts) < 2:
                 return JSONResponse(
                     status_code=400, content={"detail": "無効なMIMEタイプ形式"}
                 )
 
-            mime_type = mime_parts[1]
+            mime_type: str = mime_parts[1]
             if not mime_type.startswith("audio/"):
                 return JSONResponse(
                     status_code=400,
@@ -807,17 +804,17 @@ async def upload_audio(
 
             # 5. データ処理の準備
             try:
-                audio_content = base64.b64decode(audio_data.split(",")[1])
+                audio_content: bytes = base64.b64decode(audio_data.split(",")[1])
             except Exception:
                 return JSONResponse(
                     status_code=400, content={"detail": "Base64デコードに失敗しました"}
                 )
 
             # ファイルのハッシュ値を計算
-            file_hash = hashlib.md5(audio_content).hexdigest()
+            file_hash: str = hashlib.md5(audio_content).hexdigest()
 
             # MIMEタイプから拡張子を取得
-            mime_mapping = {
+            mime_mapping: Dict[str, str] = {
                 "audio/wav": "wav",
                 "audio/mp3": "mp3",
                 "audio/mpeg": "mp3",
@@ -827,7 +824,7 @@ async def upload_audio(
                 "audio/m4a": "m4a",
                 "audio/x-m4a": "m4a",
             }
-            extension = mime_mapping.get(mime_type)
+            extension: Optional[str] = mime_mapping.get(mime_type)
             if not extension:
                 return JSONResponse(
                     status_code=400,
@@ -844,25 +841,25 @@ async def upload_audio(
         # ここから先は検証済みのデータを使った処理を続行
 
         # GCSのパス設定（新構造）
-        storage_client = storage.Client()
+        storage_client: storage.Client = storage.Client()
         bucket = storage_client.bucket(GCS_BUCKET_NAME)
 
         # 新しいパス構造: whisper/{user_id}/{file_hash}/origin.{ext}
-        base_dir = f"whisper/{user_id}/{file_hash}"
-        gcs_audio_path = f"{base_dir}/origin.{extension}"
-        gcs_meta_path = f"{base_dir}/metadata.json"
+        base_dir: str = f"whisper/{user_id}/{file_hash}"
+        gcs_audio_path: str = f"{base_dir}/origin.{extension}"
+        gcs_meta_path: str = f"{base_dir}/metadata.json"
 
         # 音声ファイルのアップロード
         blob = bucket.blob(gcs_audio_path)
         blob.upload_from_string(audio_content, content_type=mime_type)
 
         # Firestoreにジョブ情報を記録
-        db = firestore.Client()
-        job_id = str(uuid.uuid4())
+        db: firestore.Client = firestore.Client()
+        job_id: str = str(uuid.uuid4())
         timestamp = firestore.SERVER_TIMESTAMP
 
         # 新しいメタデータ構造
-        whisper_job = WhisperJobData(
+        whisper_job: WhisperJobData = WhisperJobData(
             job_id=job_id,
             user_id=user_id,
             user_email=user_email,
@@ -895,10 +892,10 @@ async def upload_audio(
         )
 
         # Pub/Subに通知
-        publisher = pubsub_v1.PublisherClient()
-        topic_path = publisher.topic_path(GCP_PROJECT_ID, PUBSUB_TOPIC)
+        publisher: pubsub_v1.PublisherClient = pubsub_v1.PublisherClient()
+        topic_path: str = publisher.topic_path(GCP_PROJECT_ID, PUBSUB_TOPIC)
 
-        message_data = JobMessageData(
+        message_data: JobMessageData = JobMessageData(
             job_id=job_id,
             user_id=user_id,
             user_email=user_email,
@@ -908,7 +905,7 @@ async def upload_audio(
             timestamp=datetime.datetime.now().isoformat(),
         )
 
-        message_bytes = json.dumps(message_data).encode("utf-8")
+        message_bytes: bytes = json.dumps(message_data).encode("utf-8")
         publish_future = publisher.publish(topic_path, data=message_bytes)
         publish_future.result()
 
@@ -921,254 +918,7 @@ async def upload_audio(
         )
 
 
-# ジョブ一覧取得エンドポイント
-@app.get("/backend/whisper/jobs")
-async def list_jobs(request: Request, current_user: Dict = Depends(get_current_user)):
-    try:
-        # 認証処理
-        user_id = current_user["uid"]
 
-        # ユーザーのジョブ一覧を取得
-        db = firestore.Client()
-        jobs_query = (
-            db.collection(WHISPER_JOBS_COLLECTION)
-            .where("user_id", "==", user_id)
-            .order_by("created_at", direction=firestore.Query.DESCENDING)
-        )
-        jobs = jobs_query.stream()
-
-        job_list = []
-        for job in jobs:
-            job_data = job.to_dict()
-            job_list.append(
-                {
-                    "id": job.id,
-                    "filename": job_data.get("filename"),
-                    "description": job_data.get("description", ""),
-                    "created_at": job_data.get("created_at"),
-                    "updated_at": job_data.get("updated_at"),
-                    "status": job_data.get("status"),
-                    "progress": job_data.get("progress", 0),
-                    "error_message": job_data.get("error_message"),
-                    "tags": job_data.get("tags", []),
-                    "file_hash": job_data.get("file_hash"),
-                }
-            )
-
-        return {"jobs": job_list}
-
-    except Exception as e:
-        logger.exception("ジョブ一覧取得エラー")
-        return JSONResponse(status_code=500, content={"detail": f"エラー: {str(e)}"})
-
-
-# ジョブ情報取得エンドポイント（hashベースに変更）
-@app.get("/backend/whisper/jobs/{hash}")
-async def get_job_details(
-    request: Request, hash: str, current_user: Dict = Depends(get_current_user)
-):
-    try:
-        # 認証処理
-        user_id = current_user["uid"]
-
-        # Firestoreからハッシュ値に基づくジョブを検索
-        db = firestore.Client()
-        jobs = (
-            db.collection(WHISPER_JOBS_COLLECTION)
-            .where("file_hash", "==", hash)
-            .where("user_id", "==", user_id)
-            .limit(1)
-            .get()
-        )
-
-        job = next(jobs, None)
-        if not job:
-            return JSONResponse(
-                status_code=404, content={"detail": "ジョブが見つかりません"}
-            )
-
-        job_data = job.to_dict()
-        job_id = job.id
-
-        # 完了しているジョブの場合、文字起こし結果を取得
-        if job_data.get("status") == "completed":
-            storage_client = storage.Client()
-            bucket = storage_client.bucket(GCS_BUCKET_NAME)
-
-            # 新しいパス構造に基づく結果ファイルパス
-            result_path = f"whisper/{user_id}/{hash}/transcription.json"
-            blob = bucket.blob(result_path)
-
-            if blob.exists():
-                content = blob.download_as_text()
-                segments = json.loads(content)
-
-                # ストリーミング用の署名付きURLを生成
-                audio_blob = bucket.blob(
-                    f"whisper/{user_id}/{hash}/origin.{job_data.get('filename', '').split('.')[-1]}"
-                )
-                audio_url = audio_blob.generate_signed_url(
-                    version="v4",
-                    expiration=datetime.timedelta(minutes=30),
-                    method="GET",
-                )
-
-                return {
-                    "id": job_id,
-                    "filename": job_data.get("filename"),
-                    "description": job_data.get("description"),
-                    "recording_date": job_data.get("recording_date"),
-                    "status": job_data.get("status"),
-                    "gcs_audio_url": audio_url,
-                    "segments": segments,
-                    "file_hash": hash,
-                }
-
-        # 完了していない場合は基本情報のみ返す
-        return {
-            "id": job_id,
-            "filename": job_data.get("filename"),
-            "description": job_data.get("description"),
-            "status": job_data.get("status"),
-            "progress": job_data.get("progress", 0),
-            "error_message": job_data.get("error_message"),
-            "file_hash": hash,
-        }
-
-    except Exception as e:
-        logger.exception("ジョブ詳細取得エラー")
-        return JSONResponse(status_code=500, content={"detail": f"エラー: {str(e)}"})
-
-
-@app.post("/backend/whisper/jobs/{job_id}/cancel")
-async def cancel_whisper_job(
-    request: Request,
-    job_id: str,
-    current_user: Dict = Depends(get_current_user),
-):
-    """キュー内のジョブをキャンセルする（処理前のみ可能）"""
-    request_info = await log_request(request, current_user, CHAT_LOG_MAX_LENGTH)
-    logger.debug(f"Whisperジョブキャンセルリクエスト ({job_id}): %s", request_info)
-
-    try:
-        user_id = current_user.get("uid")
-
-        # Firestoreからジョブデータを取得
-        db = firestore.Client()
-        job_ref = db.collection(WHISPER_JOBS_COLLECTION).document(job_id)
-        job_doc = job_ref.get()
-
-        if not job_doc.exists:
-            raise HTTPException(
-                status_code=404, detail=f"ジョブが見つかりません: {job_id}"
-            )
-
-        job_data = job_doc.to_dict()
-
-        # 権限チェック
-        if job_data.get("user_id") != user_id:
-            raise HTTPException(
-                status_code=403, detail="このジョブにアクセスする権限がありません"
-            )
-
-        # 状態チェック - pendingまたはqueuedのみキャンセル可能
-        if job_data.get("status") not in ["pending", "queued"]:
-            raise HTTPException(
-                status_code=400,
-                detail=f"このジョブは既に処理中または完了しているためキャンセルできません。現在のステータス: {job_data.get('status')}",
-            )
-
-        # Firestoreのジョブステータスを更新
-        job_ref.update({"status": "canceled", "updated_at": firestore.SERVER_TIMESTAMP})
-
-        # キャンセル通知をPub/Subに送信（オプション）
-        if PUBSUB_TOPIC and not PUBSUB_TOPIC.startswith("projects/your-project"):
-            try:
-                publisher = pubsub_v1.PublisherClient()
-                topic_path = PUBSUB_TOPIC
-
-                message_data = {
-                    "job_id": job_id,
-                    "user_id": user_id,
-                    "event_type": "cancel_job",
-                }
-
-                message_bytes = json.dumps(message_data).encode("utf-8")
-                publish_future = publisher.publish(topic_path, data=message_bytes)
-                publish_future.result()
-
-                logger.debug(f"キャンセル通知をPub/Subに送信: {job_id}")
-            except Exception as e:
-                logger.warning(f"キャンセル通知の送信エラー（無視）: {str(e)}")
-
-        return {
-            "status": "success",
-            "message": "ジョブがキャンセルされました",
-            "job_id": job_id,
-        }
-
-    except HTTPException as he:
-        raise he
-    except Exception as e:
-        logger.error(f"Whisperジョブキャンセルエラー: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/backend/whisper/jobs/queue")
-async def get_whisper_queue(
-    request: Request,
-    current_user: Dict = Depends(get_current_user),
-):
-    """キュー内のジョブ一覧を取得する（管理者用）"""
-    request_info = await log_request(request, current_user, CHAT_LOG_MAX_LENGTH)
-    logger.debug("Whisperキュー一覧取得: %s", request_info)
-
-    try:
-        user_id = current_user.get("uid")
-        user_email = current_user.get("email")
-
-        # 管理者権限チェック（メールドメインや特定のユーザーIDでチェックするなど）
-        # 例: 特定のドメインを持つメールアドレスのみ管理者とする
-        admin_domains = os.environ.get("ADMIN_EMAIL_DOMAINS", "yourdomain.com").split(
-            ","
-        )
-        is_admin = any(user_email.endswith(f"@{domain}") for domain in admin_domains)
-
-        if not is_admin:
-            raise HTTPException(status_code=403, detail="管理者権限がありません")
-
-        # Firestoreからキュー内のジョブを取得
-        db = firestore.Client()
-        jobs_query = db.collection(WHISPER_JOBS_COLLECTION).where(
-            "status", "in", ["pending", "queued", "processing"]
-        )
-        jobs_docs = jobs_query.stream()
-
-        jobs_list = []
-        for doc in jobs_docs:
-            job_data = doc.to_dict()
-            jobs_list.append(
-                {
-                    "id": doc.id,
-                    "user_id": job_data.get("user_id"),
-                    "user_email": job_data.get("user_email"),
-                    "filename": job_data.get("filename"),
-                    "status": job_data.get("status"),
-                    "created_at": job_data.get("created_at"),
-                    "updated_at": job_data.get("updated_at"),
-                }
-            )
-
-        # 作成日時でソート（新しい順）
-        jobs_list.sort(key=lambda x: x.get("created_at", 0), reverse=True)
-
-        return {"status": "success", "jobs": jobs_list}
-
-    except HTTPException as he:
-        raise he
-    except Exception as e:
-        logger.error(f"Whisperキュー取得エラー: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 # 静的ファイル配信設定
@@ -1181,9 +931,9 @@ app.mount(
 
 
 @app.get("/vite.svg")
-async def vite_svg():
+async def vite_svg() -> FileResponse:
     logger.debug("vite.svg リクエスト")
-    svg_path = os.path.join(FRONTEND_PATH, "vite.svg")
+    svg_path: str = os.path.join(FRONTEND_PATH, "vite.svg")
     if os.path.isfile(svg_path):
         return FileResponse(svg_path, media_type="image/svg+xml")
 
@@ -1198,25 +948,25 @@ async def vite_svg():
 
 
 @app.get("/")
-async def index():
+async def index() -> FileResponse:
     logger.debug("インデックスページリクエスト: %s", FRONTEND_PATH)
     return FileResponse(os.path.join(FRONTEND_PATH, "index.html"))
 
 
 @app.get("/{path:path}")
-async def static_file(path: str):
+async def static_file(path: str) -> FileResponse:
     logger.debug(f"パスリクエスト: /{path}")
     return FileResponse(os.path.join(FRONTEND_PATH, "index.html"))
 
 
 # 以下テスト
-def create_document(collection_name, document_id, data):
+def create_document(collection_name: str, document_id: str, data: Dict[str, Any]) -> str:
     doc_ref = firebase_db.collection(collection_name).document(document_id)
     doc_ref.set(data)
     return document_id
 
 
-def get_document(collection_name, document_id):
+def get_document(collection_name: str, document_id: str) -> Optional[Dict[str, Any]]:
     doc_ref = firebase_db.collection(collection_name).document(document_id)
     doc = doc_ref.get()
     if doc.exists:
@@ -1230,7 +980,7 @@ if __name__ == "__main__":
     from hypercorn.config import Config
 
     # Hypercornの設定
-    config = Config()
+    config: Config = Config()
     config.bind = [f"0.0.0.0:{PORT}"]
     # config.loglevel = "info" if not DEBUG else "debug"
     # config.accesslog = "-"
@@ -1273,6 +1023,3 @@ if __name__ == "__main__":
     import asyncio
 
     asyncio.run(hypercorn.asyncio.serve(app, config))
-
-
-### End of file: backend/app.py ###

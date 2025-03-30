@@ -7,13 +7,7 @@ import WhisperUploader from "./WhisperUploader";
 import WhisperJobList from "./WhisperJobList";
 import WhisperTranscriptPlayer from "./WhisperTranscriptPlayer";
 import WhisperMetadataEditor from "./WhisperMetadataEditor";
-
-interface Segment {
-  start: number;
-  end: number;
-  text: string;
-  speaker: string;
-}
+import { WhisperUploadRequest, WhisperSegment } from "../../types/apiTypes";
 
 const WhisperPage: React.FC = () => {
   const token = useToken();
@@ -108,7 +102,7 @@ const WhisperPage: React.FC = () => {
       setErrorMessage("");
 
       const requestId = generateRequestId();
-      const requestData = {
+      const requestData: WhisperUploadRequest = {
         audio_data: audioData,
         filename: audioInfo.fileName,
         description: description,
@@ -190,7 +184,7 @@ const WhisperPage: React.FC = () => {
   };
 
   // 編集内容を保存
-  const saveEditedTranscript = async (editedSegments: Segment[]) => {
+  const saveEditedTranscript = async (editedSegments: WhisperSegment[]) => {
     if (!selectedJob || !selectedHash) return;
     
     try {

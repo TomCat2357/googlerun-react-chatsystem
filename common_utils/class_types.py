@@ -39,8 +39,8 @@ class GenerateImageRequest(BaseModel):
     person_generation: Optional[str] = None
 
 
-# WhisperのAPI用モデルクラス
-class WhisperRequest(BaseModel):
+# WhisperのuploadのAPI用モデルクラス
+class WhisperUploadRequest(BaseModel):
     audio_data: str
     filename: str
     description: Optional[str] = ""
@@ -48,11 +48,8 @@ class WhisperRequest(BaseModel):
     tags: Optional[List[str]] = []  # タグのリスト
 
 
-class WhisperJobRequest(BaseModel):
-    segments: List[Dict[str, Any]]
-
-# WhisperJob用のPydanticモデル
-class WhisperJobData(BaseModel):
+# Whisperでのfirebase保存データの型
+class WhisperFirestoreFirestoreData(BaseModel):
     job_id: str
     user_id: str
     user_email: str
@@ -82,7 +79,8 @@ class WhisperJobData(BaseModel):
             raise ValueError(f"無効なステータス: {v}. 有効なステータス: {valid_statuses}")
         return v
 
-class JobMessageData(BaseModel):
+# whisper関係のpub/subメッセージの型
+class WhisperPubSubMessageData(BaseModel):
     job_id: str
     user_id: str
     user_email: str

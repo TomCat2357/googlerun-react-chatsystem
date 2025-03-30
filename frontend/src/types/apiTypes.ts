@@ -40,3 +40,20 @@ export interface Config {
   MODELS: string;
   [key: string]: any;
 }
+
+// WhisperのAPIリクエスト用の型
+export interface WhisperUploadRequest {
+  audio_data: string;
+  filename: string;
+  description?: string;
+  recording_date?: string;
+  tags?: string[];
+}
+
+// Whisperのセグメント型
+export interface WhisperSegment {
+  start: number;
+  end: number;
+  text: string;
+  speaker: string;
+}

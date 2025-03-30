@@ -12,7 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN python3.10 -m pip install --upgrade pip
 
 # 必要なパッケージをインストール
-COPY config/requirements.txt config/requirements.txt
+COPY ./whisper_batch/app/config/requirements.txt config/requirements.txt
 RUN pip install --no-cache-dir -r config/requirements.txt
 
 ARG MODE=production
@@ -23,9 +23,10 @@ RUN echo "Using Config_MODE: $MODE"
 
 
 # アプリケーションファイルのコピー
-COPY ./app/*.py /app
-COPY ./app/config /app/config
-COPY ./app/config_${MODE} ./backend/config_${MODE}
+COPY ./whisper_batch/app/*.py /app
+COPY ./whisper_batch/app/config /app/config
+COPY ./whisper_batch/app/config_${MODE} ./app/config_${MODE}
+COPY ./common_utils /common_utils
 
 
 # 必要に応じて実行権限を付与（オプション）
