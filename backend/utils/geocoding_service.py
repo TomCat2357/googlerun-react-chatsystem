@@ -1,16 +1,24 @@
 # utils/geocoding_service.py
+import os
 import base64
 import json
 from typing import Dict, Any, Optional, Tuple
 from google.cloud import secretmanager
 from common_utils.logger import logger
-from utils.common import (
-    GCP_PROJECT_ID,
-    GOOGLE_MAPS_API_KEY_PATH,
-    SECRET_MANAGER_ID_FOR_GOOGLE_MAPS_API_KEY,
-)
 from utils.maps import get_coordinates, get_address, get_static_map, get_street_view
-import os
+from dotenv import load_dotenv
+
+# .envファイルを読み込み
+load_dotenv("./config/.env")
+develop_env_path = "./config_develop/.env.develop"
+# 開発環境の場合はdevelop_env_pathに対応する.envファイルがある
+if os.path.exists(develop_env_path):
+    load_dotenv(develop_env_path)
+
+# 環境変数から直接取得
+GCP_PROJECT_ID = os.environ["GCP_PROJECT_ID"]
+GOOGLE_MAPS_API_KEY_PATH = os.environ.get("GOOGLE_MAPS_API_KEY_PATH", "")
+SECRET_MANAGER_ID_FOR_GOOGLE_MAPS_API_KEY = os.environ.get("SECRET_MANAGER_ID_FOR_GOOGLE_MAPS_API_KEY", "")
 
 
 async def process_single_geocode(

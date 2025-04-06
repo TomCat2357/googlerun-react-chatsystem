@@ -1,8 +1,19 @@
 # utils/speech2text.py
+import os
 from google.cloud.speech_v2 import SpeechClient
 from google.cloud.speech_v2.types import cloud_speech as cloud_speech_types
-from utils.common import GCP_PROJECT_ID
 from common_utils.logger import logger
+from dotenv import load_dotenv
+
+# .envファイルを読み込み
+load_dotenv("./config/.env")
+develop_env_path = "./config_develop/.env.develop"
+# 開発環境の場合はdevelop_env_pathに対応する.envファイルがある
+if os.path.exists(develop_env_path):
+    load_dotenv(develop_env_path)
+
+# 環境変数から直接取得
+GCP_PROJECT_ID = os.environ["GCP_PROJECT_ID"]
 
 
 def transcribe_streaming_v2(

@@ -1,3 +1,4 @@
+#%%
 # 修正後のapp.py全文
 
 from utils.geocoding_service import get_google_maps_api_key, process_optimized_geocode

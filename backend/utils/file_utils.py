@@ -1,14 +1,25 @@
 # utils/file_utils.py
+import os
 import base64
 import io
-import os
 import tempfile
 import csv
 from PIL import Image
 from typing import Dict, List, Any, Optional, Tuple
 import docx2txt
-from utils.common import MAX_LONG_EDGE, MAX_IMAGE_SIZE
 from common_utils.logger import logger
+from dotenv import load_dotenv
+
+# .envファイルを読み込み
+load_dotenv("./config/.env")
+develop_env_path = "./config_develop/.env.develop"
+# 開発環境の場合はdevelop_env_pathに対応する.envファイルがある
+if os.path.exists(develop_env_path):
+    load_dotenv(develop_env_path)
+
+# 環境変数から直接取得
+MAX_LONG_EDGE = int(os.environ["MAX_LONG_EDGE"])
+MAX_IMAGE_SIZE = int(os.environ["MAX_IMAGE_SIZE"])
 
 
 def process_uploaded_image(image_data: str) -> str:

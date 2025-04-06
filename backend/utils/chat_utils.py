@@ -1,9 +1,22 @@
 # utils/chat_utils.py
+import os
 import vertexai
 from vertexai.generative_models import GenerativeModel, GenerationConfig, Part, Content
 from typing import List, Dict, Any
 from common_utils.logger import logger
-from utils.common import MODELS, GCP_PROJECT_ID, GCP_REGION
+from dotenv import load_dotenv
+
+# .envファイルを読み込み
+load_dotenv("./config/.env")
+develop_env_path = "./config_develop/.env.develop"
+# 開発環境の場合はdevelop_env_pathに対応する.envファイルがある
+if os.path.exists(develop_env_path):
+    load_dotenv(develop_env_path)
+
+# 環境変数から直接取得
+GCP_PROJECT_ID = os.environ["GCP_PROJECT_ID"]
+GCP_REGION = os.environ["GCP_REGION"]
+MODELS = os.environ["MODELS"]
 
 
 # VertexAIの初期化
