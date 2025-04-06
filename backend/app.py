@@ -1,10 +1,35 @@
-# app.py with explicit type annotations
+# 修正後のapp.py全文
+
+from utils.geocoding_service import get_google_maps_api_key, process_optimized_geocode
+
+from fastapi.responses import JSONResponse, StreamingResponse, FileResponse
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from typing import Dict, Any, List, Optional, Callable, AsyncGenerator, Tuple, Union, cast
+from firebase_admin import auth, credentials, firestore
+import firebase_admin
+from pydub import AudioSegment
+import os, json, asyncio, base64, time, re, io, datetime, hashlib, math
+from google.cloud import storage, pubsub_v1
+from utils.chat_utils import common_message_function
+from utils.speech2text import transcribe_streaming_v2
+from utils.generate_image import generate_image
+from functools import partial
+from google.cloud import storage, firestore
 from fastapi import (
     FastAPI,
     HTTPException,
     Depends,
     Request,
 )
+from dotenv import load_dotenv
+
+# .envファイルを読み込み
+load_dotenv("./config/.env")
+develop_env_path = "./config_develop/.env.develop"
+# 開発環境の場合はdevelop_env_pathに対応する.envファイルがある
+if os.path.exists(develop_env_path):
+    load_dotenv(develop_env_path)
 
 from common_utils.logger import (
     logger,
@@ -15,81 +40,144 @@ from common_utils.logger import (
     DEBUG,
 )
 
-from utils.common import (
-    MAX_IMAGES,
-    MAX_AUDIO_FILES,
-    MAX_TEXT_FILES,
-    MAX_LONG_EDGE,
-    MAX_IMAGE_SIZE,
-    FRONTEND_PATH,
-    PORT,
-    ORIGINS,
-    SSL_CERT_PATH,
-    SSL_KEY_PATH,
-    MODELS,
-    FIREBASE_CLIENT_SECRET_PATH,
-    GOOGLE_MAPS_API_CACHE_TTL,
-    GEOCODING_NO_IMAGE_MAX_BATCH_SIZE,
-    GEOCODING_WITH_IMAGE_MAX_BATCH_SIZE,
-    GEOCODING_BATCH_SIZE,
-    SPEECH_MAX_SECONDS,
-    IMAGEN_MODELS,
-    IMAGEN_NUMBER_OF_IMAGES,
-    IMAGEN_ASPECT_RATIOS,
-    IMAGEN_LANGUAGES,
-    IMAGEN_ADD_WATERMARK,
-    IMAGEN_SAFETY_FILTER_LEVELS,
-    IMAGEN_PERSON_GENERATIONS,
-    CONFIG_LOG_MAX_LENGTH,
-    VERIFY_AUTH_LOG_MAX_LENGTH,
-    SPEECH2TEXT_LOG_MAX_LENGTH,
-    GENERATE_IMAGE_LOG_MAX_LENGTH,
-    LOGOUT_LOG_MAX_LENGTH,
-    CHAT_LOG_MAX_LENGTH,
-    GEOCODING_LOG_MAX_LENGTH,
-    MIDDLE_WARE_LOG_MAX_LENGTH,
-    UNNEED_REQUEST_ID_PATH,
-    UNNEED_REQUEST_ID_PATH_STARTSWITH,
-    UNNEED_REQUEST_ID_PATH_ENDSWITH,
-    SENSITIVE_KEYS,
-    GCS_BUCKET_NAME,
-    PUBSUB_TOPIC,
-    GCP_PROJECT_ID,
-    GCP_REGION,
-    WHISPER_JOBS_COLLECTION,
-    get_api_key_for_model,
-    get_current_user,
-    FirestoreEncoder,
-)
 from common_utils.class_types import (
     GeocodeRequest,
     ChatRequest,
     SpeechToTextRequest,
     GenerateImageRequest,
     WhisperUploadRequest,
-    WhisperFirestoreFirestoreData,
+    WhisperFirestoreData,
+    WhisperPubSubMessageData
 )
 
-from utils.geocoding_service import get_google_maps_api_key, process_optimized_geocode
+# ===== アプリケーション設定 =====
+PORT = int(os.environ.get("PORT", "8080"))
+FRONTEND_PATH = os.environ["FRONTEND_PATH"]
 
-from fastapi.responses import JSONResponse, StreamingResponse, FileResponse
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
-from typing import Dict, Any, List, Optional, Callable, AsyncGenerator, Tuple, Union, cast
-from firebase_admin import auth, credentials, firestore
-import firebase_admin
-import os, json, asyncio, base64, time, re
-import uuid
-import datetime
-import hashlib
-from google.cloud import storage, pubsub_v1
+# CORS設定
+ORIGINS = [org for org in os.environ.get("ORIGINS", "").split(",") if org]
 
-from utils.chat_utils import common_message_function
-from utils.speech2text import transcribe_streaming_v2
-from utils.generate_image import generate_image
-from functools import partial
-from google.cloud import storage, firestore
+# IPアクセス制限
+ALLOWED_IPS = os.environ.get("ALLOWED_IPS")
+
+# ===== Google Cloud 設定 =====
+GCP_PROJECT_ID = os.environ["GCP_PROJECT_ID"]
+GCP_REGION = os.environ["GCP_REGION"]
+
+# ===== Firebase設定 =====
+FIREBASE_CLIENT_SECRET_PATH = os.environ.get("FIREBASE_CLIENT_SECRET_PATH", "")
+
+# ===== SSL/TLS設定 =====
+# Cloud RunではSSL証明書を使用しないため、空白許容
+SSL_CERT_PATH = os.environ.get("SSL_CERT_PATH", "")
+SSL_KEY_PATH = os.environ.get("SSL_KEY_PATH", "")
+
+# ===== API制限設定 =====
+# シークレットサービスから取得する場合があるため、空白許容
+GOOGLE_MAPS_API_KEY_PATH = os.environ.get("GOOGLE_MAPS_API_KEY_PATH", "")
+GOOGLE_MAPS_API_CACHE_TTL = int(os.environ["GOOGLE_MAPS_API_CACHE_TTL"])
+GEOCODING_NO_IMAGE_MAX_BATCH_SIZE = int(os.environ["GEOCODING_NO_IMAGE_MAX_BATCH_SIZE"])
+GEOCODING_WITH_IMAGE_MAX_BATCH_SIZE = int(os.environ["GEOCODING_WITH_IMAGE_MAX_BATCH_SIZE"])
+# 並行処理のバッチサイズ（追加）
+GEOCODING_BATCH_SIZE = int(os.environ.get("GEOCODING_BATCH_SIZE", "5"))
+
+# ===== Secret Manager設定 ===== 環境変数から取得する場合があるので空白許容
+SECRET_MANAGER_ID_FOR_GOOGLE_MAPS_API_KEY = os.environ.get("SECRET_MANAGER_ID_FOR_GOOGLE_MAPS_API_KEY", "")
+
+# ===== データ制限設定 =====
+MAX_IMAGES = int(os.environ["MAX_IMAGES"])
+MAX_LONG_EDGE = int(os.environ["MAX_LONG_EDGE"])
+MAX_IMAGE_SIZE = int(os.environ["MAX_IMAGE_SIZE"])
+MAX_AUDIO_FILES = int(os.environ["MAX_AUDIO_FILES"])
+MAX_TEXT_FILES = int(os.environ["MAX_TEXT_FILES"])
+SPEECH_MAX_SECONDS = int(os.environ["SPEECH_MAX_SECONDS"])
+
+# ===== モデル設定 =====
+MODELS = os.environ["MODELS"]
+
+# Imagen設定
+IMAGEN_MODELS = os.environ["IMAGEN_MODELS"]
+IMAGEN_NUMBER_OF_IMAGES = os.environ["IMAGEN_NUMBER_OF_IMAGES"]
+IMAGEN_ASPECT_RATIOS = os.environ["IMAGEN_ASPECT_RATIOS"]
+IMAGEN_LANGUAGES = os.environ["IMAGEN_LANGUAGES"]
+IMAGEN_ADD_WATERMARK = os.environ["IMAGEN_ADD_WATERMARK"]
+IMAGEN_SAFETY_FILTER_LEVELS = os.environ["IMAGEN_SAFETY_FILTER_LEVELS"]
+IMAGEN_PERSON_GENERATIONS = os.environ["IMAGEN_PERSON_GENERATIONS"]
+
+# 非同期ジェネレーター用ログ最大値
+GEOCODING_LOG_MAX_LENGTH = int(os.environ["GEOCODING_LOG_MAX_LENGTH"])
+CHAT_LOG_MAX_LENGTH = int(os.environ["CHAT_LOG_MAX_LENGTH"])
+
+# 辞書ロガー用最大値
+CONFIG_LOG_MAX_LENGTH = int(os.environ["CONFIG_LOG_MAX_LENGTH"])
+VERIFY_AUTH_LOG_MAX_LENGTH = int(os.environ["VERIFY_AUTH_LOG_MAX_LENGTH"])
+SPEECH2TEXT_LOG_MAX_LENGTH = int(os.environ["SPEECH2TEXT_LOG_MAX_LENGTH"])
+GENERATE_IMAGE_LOG_MAX_LENGTH = int(os.environ["GENERATE_IMAGE_LOG_MAX_LENGTH"])
+LOGOUT_LOG_MAX_LENGTH = int(os.environ["LOGOUT_LOG_MAX_LENGTH"])
+MIDDLE_WARE_LOG_MAX_LENGTH = int(os.environ["MIDDLE_WARE_LOG_MAX_LENGTH"])
+GENERAL_LOG_MAX_LENGTH = int(os.environ["GENERAL_LOG_MAX_LENGTH"])
+
+# request_idを必要としないパス。重要性が低いので未設定許容
+UNNEED_REQUEST_ID_PATH = os.environ.get("UNNEED_REQUEST_ID_PATH", "").split(",")
+UNNEED_REQUEST_ID_PATH_STARTSWITH = os.environ.get("UNNEED_REQUEST_ID_PATH_STARTSWITH", "").split(",")
+UNNEED_REQUEST_ID_PATH_ENDSWITH = os.environ.get("UNNEED_REQUEST_ID_PATH_ENDSWITH", "").split(",")
+
+# ログでマスクするセンシティブ情報。設定しなければエラーがでる
+SENSITIVE_KEYS = os.environ["SENSITIVE_KEYS"].split(",")
+
+# GCS関連の設定
+GCS_BUCKET_NAME = os.environ["GCS_BUCKET_NAME"]
+PUBSUB_TOPIC = os.environ["PUBSUB_TOPIC"]
+BATCH_IMAGE_URL = os.environ["BATCH_IMAGE_URL"]
+EMAIL_NOTIFICATION = bool(os.environ.get("EMAIL_NOTIFICATION", False))
+
+# ===== Firestore コレクション設定 =====
+WHISPER_JOBS_COLLECTION = os.environ["WHISPER_JOBS_COLLECTION"]
+WHISPER_MAX_SECONDS = int(os.environ["WHISPER_MAX_SECONDS"])
+
+# FirestoreのSERVER_TIMESTAMPをJSONに変換するためのカスタムエンコーダー
+class FirestoreEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if obj == firestore.SERVER_TIMESTAMP:
+            return {"__special__": "SERVER_TIMESTAMP"}
+        return super().default(obj)
+
+# モデル名からAPIキーを取得する関数
+def get_api_key_for_model(model: str) -> Optional[str]:
+    """モデル名からAPIキーを取得する"""
+    source = model.split("/")[0] if "/" in model else model
+    return json.loads(os.environ.get("MODEL_API_KEYS", "{}")).get(source, "")
+
+# 認証ミドルウェア用の依存関係
+async def get_current_user(request: Request):
+    """
+    Extracts and verifies the current user's authentication token from the request headers.
+
+    Validates the Authorization header, verifies the Firebase ID token, and returns the decoded token.
+    Raises an HTTPException with a 401 status code if authentication fails.
+
+    Args:
+        request (Request): The incoming HTTP request containing authentication headers.
+
+    Returns:
+        dict: The decoded Firebase ID token for the authenticated user.
+
+    Raises:
+        HTTPException: If no token is present or token verification fails.
+    """
+    auth_header = request.headers.get("Authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
+        logger.warning("トークンが見つかりません")
+        raise HTTPException(status_code=401, detail="認証が必要です")
+
+    token = auth_header.split("Bearer ")[1]
+    try:
+        decoded_token = auth.verify_id_token(token, clock_skew_seconds=60)
+        logger.info("認証成功")
+        return decoded_token
+    except Exception as e:
+        logger.error("認証エラー: %s", str(e), exc_info=True)
+        raise HTTPException(status_code=401, detail=str(e))
 
 
 firebase_db: firestore.Client = firestore.Client()
@@ -384,6 +472,7 @@ async def get_config(request: Request, current_user: Dict[str, Any] = Depends(ge
             "IMAGEN_ADD_WATERMARK": IMAGEN_ADD_WATERMARK,
             "IMAGEN_SAFETY_FILTER_LEVELS": IMAGEN_SAFETY_FILTER_LEVELS,
             "IMAGEN_PERSON_GENERATIONS": IMAGEN_PERSON_GENERATIONS,
+            "WHISPER_MAX_SECONDS" : WHISPER_MAX_SECONDS,
         }
         logger.debug("Config取得成功")
         return create_dict_logger(
@@ -735,187 +824,179 @@ async def logout(request: Request) -> Dict[str, str]:
 @app.post("/backend/whisper")
 async def upload_audio(
     request: Request, 
-    whisperUploadRequest : WhisperUploadRequest,
+    whisper_request: WhisperUploadRequest,
     current_user: Dict[str, Any] = Depends(get_current_user)
 ) -> Dict[str, Any]:
 
     try:
-        # リクエストデータの取得
-        data: Dict[str, Any] = await request.json()
-        audio_data: str = data.get("audio_data")
-        filename: str = data.get("filename")
-        description: str = data.get("description", "")
-        recording_date: str = data.get("recording_date", "")
-        tags: List[str] = data.get("tags", [])
+        request_info: Dict[str, Any] = await log_request(
+        request, current_user, GENERAL_LOG_MAX_LENGTH
+        )
+
 
         # 認証情報の取得
         user_id: str = current_user["uid"]
         user_email: str = current_user.get("email", "")
+        
+        # middle_wareでフィルタリングされているので無いとは思うが念のためrequest_infoにX-Request-Idが設定されていることを確認する
+        if "X-Request-Id" not in request_info:
+            return JSONResponse(status_code=500, content={"detail": "X-Request-Idがリクエスト情報に含まれていません"})
 
-        # Base64データの包括的なバリデーションと事前処理
+        # Base64データのバリデーション
+        if not whisper_request.audio_data:
+            return JSONResponse(status_code=400, content={"detail": "音声データが提供されていません"})
+
+        if not whisper_request.audio_data.startswith("data:"):
+            return JSONResponse(status_code=400, content={"detail": "無効な音声データ形式です"})
+
+        # MIMEタイプの取得
+        mime_parts: List[str] = whisper_request.audio_data.split(";")[0].split(":")
+        if len(mime_parts) < 2:
+            return JSONResponse(status_code=400, content={"detail": "無効なMIMEタイプ形式"})
+
+        mime_type: str = mime_parts[1]
+        if not mime_type.startswith("audio/"):
+            return JSONResponse(status_code=400, content={"detail": f"無効な音声フォーマット: {mime_type}"})
+
+        # Base64データのデコード
         try:
-            # 1. 基本チェック - データの存在と形式
-            if not audio_data:
-                return JSONResponse(
-                    status_code=400,
-                    content={"detail": "音声データが提供されていません"},
-                )
+            audio_content: bytes = base64.b64decode(whisper_request.audio_data.split(",")[1])
+        except Exception:
+            return JSONResponse(status_code=400, content={"detail": "Base64デコードに失敗しました"})
 
-            if not audio_data.startswith("data:"):
-                return JSONResponse(
-                    status_code=400, content={"detail": "無効な音声データ形式です"}
-                )
+        # ファイルのハッシュ値を計算
+        file_hash: str = hashlib.md5(audio_content).hexdigest()
 
-            # 2. フォーマット構造のチェック
-            if "," not in audio_data:
-                return JSONResponse(
-                    status_code=400,
-                    content={"detail": "無効なデータURI形式（区切り文字がありません）"},
-                )
-
-            if ";" not in audio_data:
-                return JSONResponse(
-                    status_code=400,
-                    content={
-                        "detail": "無効なデータURI形式（パラメータ区切りがありません）"
-                    },
-                )
-
-            # 3. MIMEタイプのチェック
-            mime_parts: List[str] = audio_data.split(";")[0].split(":")
-            if len(mime_parts) < 2:
-                return JSONResponse(
-                    status_code=400, content={"detail": "無効なMIMEタイプ形式"}
-                )
-
-            mime_type: str = mime_parts[1]
-            if not mime_type.startswith("audio/"):
-                return JSONResponse(
-                    status_code=400,
-                    content={"detail": f"無効な音声フォーマット: {mime_type}"},
-                )
-
-            # 4. Base64エンコーディングのチェック
-            if not audio_data.split(",")[0].endswith("base64"):
-                return JSONResponse(
-                    status_code=400,
-                    content={"detail": "Base64でエンコードされていないデータです"},
-                )
-
-            # 5. データ処理の準備
-            try:
-                audio_content: bytes = base64.b64decode(audio_data.split(",")[1])
-            except Exception:
-                return JSONResponse(
-                    status_code=400, content={"detail": "Base64デコードに失敗しました"}
-                )
-
-            # ファイルのハッシュ値を計算
-            file_hash: str = hashlib.md5(audio_content).hexdigest()
-
-            # MIMEタイプから拡張子を取得
-            mime_mapping: Dict[str, str] = {
-                "audio/wav": "wav",
-                "audio/mp3": "mp3",
-                "audio/mpeg": "mp3",
-                "audio/ogg": "ogg",
-                "audio/webm": "webm",
-                "audio/aac": "aac",
-                "audio/m4a": "m4a",
-                "audio/x-m4a": "m4a",
-            }
-            extension: Optional[str] = mime_mapping.get(mime_type)
-            if not extension:
-                return JSONResponse(
-                    status_code=400,
-                    content={
-                        "detail": f"サポートされていない音声フォーマット: {mime_type}"
-                    },
-                )
-
+        # MIMEタイプから拡張子を取得
+        mime_mapping: Dict[str, str] = {
+            "audio/wav": ".wav",
+            "audio/mp3": ".mp3",
+            "audio/mpeg": ".mp3",
+            "audio/ogg": ".ogg",
+            "audio/webm": ".webm",
+            "audio/aac": ".aac",
+            "audio/m4a": ".m4a",
+            "audio/x-m4a": ".m4a",
+        }
+        audio_file_extension: Optional[str] = mime_mapping.get(mime_type)
+        if not audio_file_extension:
+            return JSONResponse(status_code=400, content={"detail": f"サポートされていない音声フォーマット: {mime_type}"})
+        # 音声ファイルのサイズを取得 (バイト単位)
+        audio_size: int = len(audio_content)
+        
+        try:
+            # メモリ上でファイルを処理
+            audio_file = io.BytesIO(audio_content)
+            
+            # MIMEタイプに応じて適切な形式でロード
+            if mime_type in ["audio/mp3", "audio/mpeg"]:
+                audio = AudioSegment.from_mp3(audio_file)
+            elif mime_type == "audio/wav":
+                audio = AudioSegment.from_wav(audio_file)
+            elif mime_type == "audio/ogg":
+                audio = AudioSegment.from_ogg(audio_file)
+            elif mime_type in ["audio/m4a", "audio/x-m4a"]:
+                audio = AudioSegment.from_file(audio_file, format="m4a")
+            elif mime_type == "audio/aac":
+                audio = AudioSegment.from_file(audio_file, format="aac")
+            elif mime_type == "audio/webm":
+                audio = AudioSegment.from_file(audio_file, format="webm")
+            else:
+                # 未知の形式の場合はデフォルトで処理
+                audio = AudioSegment.from_file(audio_file)
+            
+            # 長さをミリ秒単位で取得
+            audio_duration = int(math.ceil(len(audio) / 1000))
+            logger.debug(f"音声長さ: {audio_duration} 秒")
+            
         except Exception as e:
-            return JSONResponse(
-                status_code=500, content={"detail": f"音声データ処理エラー: {str(e)}"}
-            )
-
-        # ここから先は検証済みのデータを使った処理を続行
-
-        # GCSのパス設定（新構造）
+            logger.error("音声長さの取得に失敗しました: %s", str(e))
+            return JSONResponse(status_code=400, content={"detail": "音声長さの取得に失敗しました"})
+        
+        # GCSのパス設定
         storage_client: storage.Client = storage.Client()
         bucket = storage_client.bucket(GCS_BUCKET_NAME)
-
-        # 新しいパス構造: whisper/{user_id}/{file_hash}/origin.{ext}
         base_dir: str = f"whisper/{user_id}/{file_hash}"
-        gcs_audio_path: str = f"{base_dir}/origin.{extension}"
-        gcs_meta_path: str = f"{base_dir}/metadata.json"
-
+        
+        
         # 音声ファイルのアップロード
-        blob = bucket.blob(gcs_audio_path)
+        blob = bucket.blob(f"{base_dir}/origin{audio_file_extension}")
         blob.upload_from_string(audio_content, content_type=mime_type)
 
         # Firestoreにジョブ情報を記録
+        # Firestoreにジョブ情報を記録
         db: firestore.Client = firestore.Client()
-        job_id: str = str(uuid.uuid4())
+        # リクエストIDをそのままjob_idに使う。一意なので問題なし
+        job_id: str = request_info['X-Request-Id']
         timestamp = firestore.SERVER_TIMESTAMP
 
-        # 新しいメタデータ構造
-        whisper_job: WhisperJobData = WhisperJobData(
+        # 音声ファイルパスと文字起こしファイルパスを設定
+        audio_file_path = f"{base_dir}/origin{audio_file_extension}"
+        transcription_file_path = ""
+
+        # ジョブデータの作成
+        whisper_job: WhisperFirestoreData = WhisperFirestoreData(
             job_id=job_id,
             user_id=user_id,
             user_email=user_email,
-            filename=filename,
-            description=description or "",
-            recording_date=recording_date or "",
-            gcs_audio_path=f"gs://{GCS_BUCKET_NAME}/{gcs_audio_path}",
+            filename=whisper_request.filename,
+            description=whisper_request.description,
+            recording_date=whisper_request.recording_date,
+            gcs_bucket_name=GCS_BUCKET_NAME,
+            audio_file_path=audio_file_path,
+            transcription_file_path=transcription_file_path,
+            audio_duration=audio_duration,
+            audio_size=audio_size,
             file_hash=file_hash,
+            language=whisper_request.language or "ja",
+            initial_prompt=whisper_request.initial_prompt or "",
             status="queued",
             created_at=timestamp,
             updated_at=timestamp,
             process_started_at=None,
             process_ended_at=None,
-            tags=tags,
+            tags=whisper_request.tags,
             error_message=None,
+            # 話者数パラメータを追加
+            num_speakers=whisper_request.num_speakers,
+            min_speakers=whisper_request.min_speakers or 1,
+            max_speakers=whisper_request.max_speakers or 1,
         )
 
         # Firestoreに保存
-        db.collection(WHISPER_JOBS_COLLECTION).document(file_hash).set(
-            whisper_job.model_dump()
-        )
-
-        # GCSにメタデータも保存（デバッグ用）
-        meta_blob = bucket.blob(gcs_meta_path)
-        # SERVER_TIMESTAMPはJSON化できないのでNoneに一時変更
-        json_job_data = whisper_job.model_dump()
-        meta_blob.upload_from_string(
-            json.dumps(json_job_data, cls=FirestoreEncoder),
-            content_type="application/json",
-        )
+        db.collection(WHISPER_JOBS_COLLECTION).document(job_id).set(whisper_job.model_dump())
 
         # Pub/Subに通知
         publisher: pubsub_v1.PublisherClient = pubsub_v1.PublisherClient()
         topic_path: str = publisher.topic_path(GCP_PROJECT_ID, PUBSUB_TOPIC)
 
-        message_data: JobMessageData = JobMessageData(
+        # ISO 8601形式の現在時刻を生成
+        current_time = datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+        message_data : WhisperPubSubMessageData= WhisperPubSubMessageData(
             job_id=job_id,
-            user_id=user_id,
-            user_email=user_email,
-            file_hash=file_hash,
             event_type="new_job",
-            status="queued",
-            timestamp=datetime.datetime.now().isoformat(),
+            timestamp=current_time
         )
 
         message_bytes: bytes = json.dumps(message_data).encode("utf-8")
-        publish_future = publisher.publish(topic_path, data=message_bytes)
+        publish_future: pubsub_v1.publisher.futures.Future = publisher.publish(topic_path, data=message_bytes)
         publish_future.result()
-
-        return {"status": "success", "job_id": job_id, "file_hash": file_hash}
+        
+        response_data = {"status": "success", "job_id": job_id, "file_hash": file_hash}
+        return create_dict_logger(
+            response_data,
+            meta_info={
+                k: request_info[k]
+                for k in ("X-Request-Id", "path", "email")
+                if k in request_info
+            },
+            max_length=GENERAL_LOG_MAX_LENGTH,
+        )
 
     except Exception as e:
         logger.exception("音声アップロードエラー")
-        return JSONResponse(
-            status_code=500, content={"detail": f"アップロードエラー: {str(e)}"}
-        )
+        return JSONResponse(status_code=500, content={"detail": f"アップロードエラー: {str(e)}"})
 
 
 

@@ -110,9 +110,9 @@ def main() -> None:    # 環境変数から情報を取得
     job_id: str | None = os.environ.get("JOB_ID")
     user_id: str | None = os.environ.get("USER_ID")
     user_email: str | None = os.environ.get("USER_EMAIL")
-    gcs_audio_path: str | None = os.environ.get("GCS_AUDIO_PATH")
+    audio_path: str | None = os.environ.get("AUDIO_PATH")
     file_hash: str | None = os.environ.get("FILE_HASH")
-    bucket_name: str | None = os.environ.get("GCS_BUCKET_NAME")
+
     
     # デバイス設定を環境変数から取得（デフォルトはcuda）
     device: str = os.environ.get("DEVICE", "cuda").lower()
