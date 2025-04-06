@@ -1,4 +1,5 @@
-# utils/speech2text.py
+# サービス: speech_service.py - 音声認識関連のビジネスロジック
+
 import os
 from google.cloud.speech_v2 import SpeechClient
 from google.cloud.speech_v2.types import cloud_speech as cloud_speech_types
@@ -14,7 +15,6 @@ if os.path.exists(develop_env_path):
 
 # 環境変数から直接取得
 GCP_PROJECT_ID = os.environ["GCP_PROJECT_ID"]
-
 
 def transcribe_streaming_v2(
     audio_content: bytes, language_codes: list = ["ja-JP"]

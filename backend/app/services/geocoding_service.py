@@ -1,11 +1,13 @@
-# utils/geocoding_service.py
+# サービス: geocoding_service.py - ジオコーディング関連のビジネスロジック
+
 import os
 import base64
 import json
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, Optional, Tuple, List
+import asyncio
 from google.cloud import secretmanager
 from common_utils.logger import logger
-from utils.maps import get_coordinates, get_address, get_static_map, get_street_view
+from app.utils.maps import get_coordinates, get_address, get_static_map, get_street_view
 from dotenv import load_dotenv
 
 # .envファイルを読み込み
@@ -20,6 +22,49 @@ GCP_PROJECT_ID = os.environ["GCP_PROJECT_ID"]
 GOOGLE_MAPS_API_KEY_PATH = os.environ.get("GOOGLE_MAPS_API_KEY_PATH", "")
 SECRET_MANAGER_ID_FOR_GOOGLE_MAPS_API_KEY = os.environ.get("SECRET_MANAGER_ID_FOR_GOOGLE_MAPS_API_KEY", "")
 
+# Secret Managerからシークレットを取得するための関数
+def access_secret(secret_id, version_id="latest"):
+    """
+    Secret Managerからシークレットを取得する関数
+    グーグルに問い合わせるときのnameは以下の構造になっている。
+    projects/{PROJECT_ID}/secrets/{secret_id}/versions/{version_id}
+    シークレットマネージャーで作成した場合は、
+    projects/{PROJECT_ID}/secrets/{secret_id}
+    が得られるが、PROJECT_IDは数値であるが、文字列の方のIDでもOK
+    versions情報も下記コードのとおりで支障ない。
+    """
+    try:
+        logger.debug(f"Secret Managerから{secret_id}を取得しています")
+
+        client = secretmanager.SecretManagerServiceClient()
+        name = f"projects/{GCP_PROJECT_ID}/secrets/{secret_id}/versions/{version_id}"
+        response = client.access_secret_version(request={"name": name})
+        return response.payload.data.decode("UTF-8")
+    except Exception as e:
+        logger.error(
+            f"Secret Managerからのシークレット取得に失敗: {str(e)}", exc_info=True
+        )
+        return None
+
+# Google Maps APIキーを取得するための関数
+def get_google_maps_api_key():
+    """
+    環境変数からGoogle Maps APIキーを取得し、なければSecret Managerから取得する
+    """
+    if GOOGLE_MAPS_API_KEY_PATH and os.path.exists(GOOGLE_MAPS_API_KEY_PATH):
+        with open(GOOGLE_MAPS_API_KEY_PATH, "rt") as f:
+            logger.debug(
+                "環境変数にGoogle Maps APIキーが設定されているため、ファイルから取得します"
+            )
+            api_key = f.read()
+    else:
+        logger.debug(
+            "環境変数にGoogle Maps APIキーが設定されていないため、Secret Managerから取得します"
+        )
+        api_key = access_secret(SECRET_MANAGER_ID_FOR_GOOGLE_MAPS_API_KEY)
+        if not api_key:
+            raise Exception("Google Maps APIキーが見つかりません")
+    return api_key
 
 async def process_single_geocode(
     api_key: str, mode: str, query: str, timestamp: int
@@ -162,7 +207,6 @@ async def process_single_geocode(
                     "mode": "latlng",
                 }
 
-
 async def process_map_images(
     api_key: str,
     latitude: float,
@@ -216,7 +260,6 @@ async def process_map_images(
             logger.error(f"ストリートビュー画像取得エラー: {str(e)}")
 
     return satellite_image, street_view_image
-
 
 # 最適化されたジオコード処理関数
 async def process_optimized_geocode(
@@ -364,54 +407,6 @@ async def process_optimized_geocode(
                 )
 
     return chunks
-
-
-# Secret Managerからシークレットを取得するための関数
-def access_secret(secret_id, version_id="latest"):
-    """
-    Secret Managerからシークレットを取得する関数
-    グーグルに問い合わせるときのnameは以下の構造になっている。
-    projects/{PROJECT_ID}/secrets/{secret_id}/versions/{version_id}
-    シークレットマネージャーで作成した場合は、
-    projects/{PROJECT_ID}/secrets/{secret_id}
-    が得られるが、PROJECT_IDは数値であるが、文字列の方のIDでもOK
-    versions情報も下記コードのとおりで支障ない。
-    """
-    try:
-        logger.debug(f"Secret Managerから{secret_id}を取得しています")
-
-        client = secretmanager.SecretManagerServiceClient()
-        name = f"projects/{GCP_PROJECT_ID}/secrets/{secret_id}/versions/{version_id}"
-        response = client.access_secret_version(request={"name": name})
-        return response.payload.data.decode("UTF-8")
-    except Exception as e:
-        logger.error(
-            f"Secret Managerからのシークレット取得に失敗: {str(e)}", exc_info=True
-        )
-        return None
-
-
-# Google Maps APIキーを取得するための関数
-def get_google_maps_api_key():
-    """
-    環境変数からGoogle Maps APIキーを取得し、なければSecret Managerから取得する
-    """
-
-    if GOOGLE_MAPS_API_KEY_PATH and os.path.exists(GOOGLE_MAPS_API_KEY_PATH):
-        with open(GOOGLE_MAPS_API_KEY_PATH, "rt") as f:
-            logger.debug(
-                "環境変数にGoogle Maps APIキーが設定されているため、ファイルから取得します"
-            )
-            api_key = f.read()
-    else:
-        logger.debug(
-            "環境変数にGoogle Maps APIキーが設定されていないため、Secret Managerから取得します"
-        )
-        api_key = access_secret(SECRET_MANAGER_ID_FOR_GOOGLE_MAPS_API_KEY)
-        if not api_key:
-            raise Exception("Google Maps APIキーが見つかりません")
-    return api_key
-
 
 # 緯度経度からキャッシュキーを生成（追加）
 def get_latlng_cache_key(lat, lng):

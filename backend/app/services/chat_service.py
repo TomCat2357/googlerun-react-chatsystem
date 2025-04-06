@@ -1,4 +1,5 @@
-# utils/chat_utils.py
+# サービス: chat_service.py - チャット関連のビジネスロジック
+
 import os
 import vertexai
 from vertexai.generative_models import GenerativeModel, GenerationConfig, Part, Content
@@ -18,6 +19,11 @@ GCP_PROJECT_ID = os.environ["GCP_PROJECT_ID"]
 GCP_REGION = os.environ["GCP_REGION"]
 MODELS = os.environ["MODELS"]
 
+# モデル名からAPIキーを取得する関数
+def get_api_key_for_model(model: str) -> str:
+    """モデル名からAPIキーを取得する"""
+    source = model.split("/")[0] if "/" in model else model
+    return json.loads(os.environ.get("MODEL_API_KEYS", "{}")).get(source, "")
 
 # VertexAIの初期化
 def init_vertex_ai():
@@ -28,13 +34,11 @@ def init_vertex_ai():
         logger.error(f"VertexAI初期化エラー: {str(e)}", exc_info=True)
         raise
 
-
 # 初期化を1回だけ行う
 try:
     init_vertex_ai()
 except Exception as e:
     logger.error(f"VertexAI初期化時のエラー: {str(e)}")
-
 
 def prepare_messages_for_vertex(messages: List[Dict[str, Any]]) -> List[Content]:
     """
@@ -141,7 +145,6 @@ def prepare_messages_for_vertex(messages: List[Dict[str, Any]]) -> List[Content]
 
     return content_list
 
-
 def common_message_function(
     *, model: str, messages: List[Dict[str, Any]], stream: bool = False, **kwargs
 ):
@@ -187,7 +190,6 @@ def common_message_function(
         )
 
         if stream:
-
             def chat_stream():
                 response_stream = gen_model.generate_content(
                     content_list, generation_config=generation_config, stream=True

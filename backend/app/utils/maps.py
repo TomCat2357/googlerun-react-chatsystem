@@ -1,4 +1,5 @@
-# utils/maps.py
+# app/utils/maps.py - 地図関連ユーティリティ
+
 import requests
 from common_utils.logger import logger
 

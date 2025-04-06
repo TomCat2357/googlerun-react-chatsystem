@@ -1,4 +1,5 @@
-# utils/file_utils.py
+# app/utils/file_utils.py - ファイル処理ユーティリティ
+
 import os
 import base64
 import io
@@ -20,7 +21,6 @@ if os.path.exists(develop_env_path):
 # 環境変数から直接取得
 MAX_LONG_EDGE = int(os.environ["MAX_LONG_EDGE"])
 MAX_IMAGE_SIZE = int(os.environ["MAX_IMAGE_SIZE"])
-
 
 def process_uploaded_image(image_data: str) -> str:
     """
@@ -76,7 +76,6 @@ def process_uploaded_image(image_data: str) -> str:
         logger.error("画像処理エラー: %s", str(e), exc_info=True)
         return image_data
 
-
 def process_audio_file(audio_data: Dict[str, str]) -> Dict[str, str]:
     """
     音声ファイルを処理する
@@ -111,7 +110,6 @@ def process_audio_file(audio_data: Dict[str, str]) -> Dict[str, str]:
             "data": "",
             "mime_type": "audio/mpeg",
         }
-
 
 def process_text_file(text_file: Dict[str, str]) -> Dict[str, str]:
     """
@@ -151,7 +149,6 @@ def process_text_file(text_file: Dict[str, str]) -> Dict[str, str]:
             "preview": "[Text file processing error]",
         }
 
-
 def parse_csv_preview(content: str, max_rows: int = 5) -> str:
     """
     CSVの内容から簡単なプレビューを生成する
@@ -170,7 +167,6 @@ def parse_csv_preview(content: str, max_rows: int = 5) -> str:
     except Exception as e:
         logger.error("CSV解析エラー: %s", str(e), exc_info=True)
         return "[CSV parsing error]"
-
 
 def process_docx_text(docx_content: str) -> str:
     """
@@ -197,7 +193,6 @@ def process_docx_text(docx_content: str) -> str:
     except Exception as e:
         logger.error("DOCXテキスト抽出エラー: %s", str(e), exc_info=True)
         return "[DOCX text extraction error]"
-
 
 def prepare_message_for_ai(message: Dict[str, Any]) -> Dict[str, Any]:
     """
