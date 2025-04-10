@@ -1,10 +1,10 @@
 FROM python:3.11-slim
 
-WORKDIR /app
+WORKDIR /backend
 
 # 必要なパッケージをインストール
-COPY ./backend/config/requirements.txt ./backend/config/requirements.txt
-RUN pip install --no-cache-dir -r ./backend/config/requirements.txt
+COPY ./requirements.txt ./requirements.txt
+RUN pip install --no-cache-dir -r ./requirements.txt
 
 
 
@@ -24,8 +24,8 @@ RUN echo "Using PORT: $PORT"
 RUN echo "Using CONFIG_MODE: $MODE"
 
 # バックエンドのコードをコピー
-COPY ./backend/config/ ./backend/config/
-COPY ./backend/utils/ ./backend/utils/
+COPY ./config/ ./backend/config/
+COPY ./utils/ ./backend/utils/
 COPY ./backend/app.py ./backend/app.py
 COPY ./backend/config_${MODE} ./backend/config_${MODE}
 

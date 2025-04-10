@@ -71,7 +71,7 @@ logger.debug("ORIGINS: %s", ORIGINS)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ORIGINS,
-    allow_credentials=False,
+    allow_credentials=False,  # ユーザーの指示に従い False のまま維持
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["Content-Type", "Authorization", "X-Request-Id"],
     expose_headers=["Authorization"],
@@ -80,8 +80,8 @@ app.add_middleware(
 # ミドルウェアのインポート
 from app.api.auth import log_request_middleware
 
-# ミドルウェアの登録
-app.add_middleware(log_request_middleware)
+# ミドルウェアの登録（正しい方法：app.middlewareデコレータは使わず、関数を直接使用）
+app.middleware("http")(log_request_middleware)
 
 # ルーターの登録
 app.include_router(geocoding_router, prefix="/backend")

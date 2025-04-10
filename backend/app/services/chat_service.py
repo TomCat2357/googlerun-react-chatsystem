@@ -1,6 +1,7 @@
 # サービス: chat_service.py - チャット関連のビジネスロジック
 
 import os
+import json
 import vertexai
 from vertexai.generative_models import GenerativeModel, GenerationConfig, Part, Content
 from typing import List, Dict, Any
