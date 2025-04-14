@@ -23,9 +23,14 @@ from common_utils.class_types import (
 )
 
 from dotenv import load_dotenv
+from pathlib import Path
 
-load_dotenv("config/.env")
-develop_config_path = "config_develop/.env.develop"
+# スクリプトの場所を基準にする
+BASE_DIR = Path(__file__).resolve().parent.parent
+config_path = os.path.join(BASE_DIR, "config", ".env")
+load_dotenv(config_path)
+
+develop_config_path = os.path.join(BASE_DIR, "config_develop", ".env.develop")
 if os.path.exists(develop_config_path):
     load_dotenv(develop_config_path)
 
@@ -284,8 +289,8 @@ def handle_batch_completion(whisperPubSubMessageData: WhisperPubSubMessageData):
 
         job_data = WhisperFirestoreData(**job_doc.to_dict())
 
-        # イベントタイプによる処理分岐
-        if whisperPubSubMessageData.event_type == "job_completed":
+        # イベントタイプによる処理分岐 - 複数のイベントタイプをサポート
+        if whisperPubSubMessageData.event_type in ("job_completed", "batch_complete"):
             # ジョブが正常に完了した場合
             logger.info(f"ジョブ正常完了: {job_id}")
 
@@ -301,7 +306,7 @@ def handle_batch_completion(whisperPubSubMessageData: WhisperPubSubMessageData):
             if job_data.user_email:
                 send_email_notification(job_data.user_email, job_id, "completed")
 
-        elif whisperPubSubMessageData.event_type == "job_failed":
+        elif whisperPubSubMessageData.event_type in ("job_failed", "batch_failed"):
             # ジョブが失敗した場合
             logger.error(
                 f"ジョブ失敗: {job_id}, エラー: {whisperPubSubMessageData.error_message}"
@@ -339,11 +344,12 @@ def process_subscription_message(
         if whisperPubSubMessageData.event_type == "new_job":
             logger.info(f"新規ジョブ受信: {whisperPubSubMessageData.job_id}")
 
-        elif whisperPubSubMessageData.event_type in ("batch_complete", "batch_failed"):
+        # バッチ処理完了イベント (本番とテスト両方のイベントタイプをサポート)
+        elif whisperPubSubMessageData.event_type in ("batch_complete", "batch_failed", "job_completed", "job_failed"):
             # バッチ処理完了
             handle_batch_completion(whisperPubSubMessageData)
 
-        elif whisperPubSubMessageData.event_type == "cancel_job":
+        elif whisperPubSubMessageData.event_type in ("cancel_job", "job_canceled"):
             # キャンセル処理 - 特に何もしない（Firestoreはすでに更新済み）
             logger.info(f"ジョブキャンセル: {whisperPubSubMessageData.job_id}")
 
