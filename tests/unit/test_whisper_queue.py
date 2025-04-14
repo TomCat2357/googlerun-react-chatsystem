@@ -237,29 +237,35 @@ def test_process_next_job_no_jobs(mock_firestore, mock_batch):
     # 正しいモックオブジェクト階層を指定
     mock_client.create_job.assert_not_called()
 
-
 def test_process_next_job_with_jobs(mock_firestore, mock_batch, monkeypatch, sample_job_data):
     """処理待ちジョブがある場合のテスト"""
     from google.cloud import firestore
     
-    # SERVER_TIMESTAMPのモック
-    monkeypatch.setattr(firestore, "SERVER_TIMESTAMP", "SERVER_TIMESTAMP")
+    # エラーを回避するため、process_next_job内の特定の計算をパッチ
+    original_transaction = firestore.transaction
     
-    # process_next_job()内のselect_jobs_transaction関数をパッチして、エラーの原因を回避
-    mock_transaction_func = MagicMock()
-    mock_transaction_func.return_value = [sample_job_data]  # 処理対象のジョブを返す
-    
-    # select_jobs_transaction関数をモック
-    with patch("whisper_queue.app.main.select_jobs_transaction", mock_transaction_func):
-        # 関数実行（create_batch_jobもモック）
-        with patch("whisper_queue.app.main.create_batch_job") as mock_create_batch:
-            mock_create_batch.return_value = "mock-batch-job"
+    # モック化したトランザクション関数
+    def mock_transaction_wrapper(*args, **kwargs):
+        # エラーを起こさない処理に置き換える
+        @firestore.transactional
+        def mock_txn_func(transaction):
+            # 元のトランザクション関数をバイパス
+            return [sample_job_data]
             
-            # 実際のテスト対象関数を実行
-            process_next_job()
+        return mock_txn_func
     
-            # バッチジョブが作成されたことを確認
-            mock_create_batch.assert_called_once()
+    # トランザクション関数をモック
+    monkeypatch.setattr(firestore, "transaction", mock_transaction_wrapper)
+    
+    # create_batch_jobをモック
+    with patch("whisper_queue.app.main.create_batch_job") as mock_create_batch:
+        mock_create_batch.return_value = "mock-batch-job"
+        
+        # テスト実行
+        process_next_job()
+        
+        # 検証
+        mock_create_batch.assert_called_once_with(sample_job_data)
 
 
 def test_handle_batch_completion_success(mock_firestore, sample_pubsub_msg, monkeypatch):
