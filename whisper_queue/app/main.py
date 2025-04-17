@@ -129,22 +129,18 @@ def create_batch_job(job_data: WhisperFirestoreData) -> str:
     
     task_spec.runnables = [run_as_runnable]
 
-    # リソース設定
+    # リソース設定 - CPUとメモリのみ
     resources: ComputeResource = ComputeResource()
     resources.cpu_milli = 2000  # 2 CPU コア
     resources.memory_mib = 16384  # 16 GB メモリ
-
-    # GPUを追加
     
-    accelerator = ComputeResource.Accelerator(count=1, type_="nvidia-tesla-t4")
-    resources.accelerators = [accelerator]
-    
+    # ComputeResourceにはGPU設定はない
     task_spec.compute_resource = resources
     task_spec.max_retry_count = 2
-    task_spec.max_run_duration = Duration()
-    task_spec.max_run_duration.seconds = max(
-        [300, job_data.audio_duration]
-    )  # 最大実行時間は5分と音声ファイルの時間の大きい方
+    
+    # Durationを正しく設定する - コンストラクタでsecondsパラメータを指定
+    max_duration_seconds = max([300, job_data.audio_duration])
+    task_spec.max_run_duration = Duration(seconds=max_duration_seconds)  # 最大実行時間は5分と音声ファイルの時間の大きい方
 
     # タスクグループの設定
     task_group: batch_v1.types.TaskGroup = batch_v1.types.TaskGroup()
@@ -153,12 +149,33 @@ def create_batch_job(job_data: WhisperFirestoreData) -> str:
 
     # ジョブにタスクグループを設定
     job.task_groups = [task_group]
-    job.allocation_policy = AllocationPolicy()
-
+    
+    # AllocationPolicyを作成してGPUを設定
+    allocation_policy = AllocationPolicy()
+    
     # ロケーション設定
-    location_policy: AllocationPolicy.LocationPolicy = AllocationPolicy.LocationPolicy()
+    location_policy = AllocationPolicy.LocationPolicy()
     location_policy.allowed_locations = [f"regions/{GCP_REGION}"]
-    job.allocation_policy.location = location_policy
+    allocation_policy.location = location_policy
+    
+    # インスタンスポリシーの設定
+    instance_policy = AllocationPolicy.InstancePolicy()
+    instance_policy.machine_type = "n1-standard-4"  # T4 GPUと互換性のあるマシンタイプ
+    
+    # GPU設定
+    accelerator = AllocationPolicy.Accelerator()
+    accelerator.type_ = "nvidia-tesla-t4"
+    accelerator.count = 1
+    instance_policy.accelerators = [accelerator]
+    
+    # インスタンスポリシーをAllocationPolicyに設定
+    instance_policy_or_template = AllocationPolicy.InstancePolicyOrTemplate()
+    instance_policy_or_template.policy = instance_policy
+    instance_policy_or_template.install_gpu_drivers = True
+    allocation_policy.instances = [instance_policy_or_template]
+    
+    # ジョブにAllocationPolicyを設定
+    job.allocation_policy = allocation_policy
 
     # ロギング設定
     job.logs_policy = LogsPolicy()
