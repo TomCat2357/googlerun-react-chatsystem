@@ -13,6 +13,9 @@ from google.cloud.batch_v1.types import (
     ComputeResource,
     AllocationPolicy,
     LogsPolicy,
+    Runnable,
+    Environment,
+    ComputeResource,
 )
 from google.protobuf.duration_pb2 import Duration
 import functions_framework
@@ -46,6 +49,12 @@ EMAIL_NOTIFICATION: bool = (
 )
 # コレクション名の環境変数を追加
 WHISPER_JOBS_COLLECTION: str = os.environ.get("WHISPER_JOBS_COLLECTION")
+
+# スクリプトの場所を基準にして、BASEDIRをつくって、GOOGLE_APPLICATION_CREDENTIALSについても絶対パスにする。
+BASE_DIR = str(Path(__file__).resolve().parent.parent)
+if BASE_DIR not in os.environ['GOOGLE_APPLICATION_CREDENTIALS']:
+    os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = os.path.join(BASE_DIR, os.environ['GOOGLE_APPLICATION_CREDENTIALS'])
+
 # ログ設定
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
@@ -53,6 +62,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Firestoreクライアント
+#print('GOOGLE_APPLICATION_CREDENTIALS',os.environ['GOOGLE_APPLICATION_CREDENTIALS'])
 db: firestore.Client = firestore.Client()
 
 # ストレージクライアント
@@ -76,12 +86,15 @@ def create_batch_job(job_data: WhisperFirestoreData) -> str:
     # タスクスペック設定
     task_spec: TaskSpec = TaskSpec()
 
-    # コンテナ設定
-    container: TaskSpec.Runnable.Container = TaskSpec.Runnable.Container()
+    # コンテナ設定 - APIの構造変更に対応
+    # 修正前: container: TaskSpec.Runnable.Container = TaskSpec.Runnable.Container()
+    # 修正後: 現在のAPIに合わせた構造を使用
+    container = Runnable.Container()  # または batch_v1.types.Runnable.Container()
+    
+    # 以下は元のままでOK
     container.image_uri = BATCH_IMAGE_URL
 
-    # 環境変数設定 - 必要なすべてのパラメータを含める
-    # WhisperBatchParameterオブジェクトを作成
+    # 環境変数設定
     batch_params: WhisperBatchParameter = WhisperBatchParameter(
         JOB_ID=job_data.job_id,
         AUDIO_PATH=f"{job_data.gcs_backet_name}/{job_data.audio_file_path}",
@@ -96,13 +109,24 @@ def create_batch_job(job_data: WhisperFirestoreData) -> str:
         LANGUAGE=job_data.language,
         INITIAL_PROMPT=job_data.initial_prompt,
     )
-    container.environment: dict[str, str] = batch_params.model_dump()
+    #container.environment = batch_params.model_dump()
 
     # コマンド設定
     container.commands = ["python3", "/app/main.py"]
 
-    run_as_runnable: TaskSpec.Runnable = TaskSpec.Runnable()
+    # ランナブル設定 - APIの構造変更に対応
+    # 修正前: run_as_runnable: TaskSpec.Runnable = TaskSpec.Runnable()
+    # 修正後:
+    run_as_runnable = Runnable()  # または batch_v1.types.Runnable()
     run_as_runnable.container = container
+    
+    env = Environment()
+    env_vars = {}
+    for key, value in batch_params.model_dump().items():
+        env_vars[key] = str(value)
+    env.variables = env_vars
+    run_as_runnable.environment = env
+    
     task_spec.runnables = [run_as_runnable]
 
     # リソース設定
@@ -111,11 +135,10 @@ def create_batch_job(job_data: WhisperFirestoreData) -> str:
     resources.memory_mib = 16384  # 16 GB メモリ
 
     # GPUを追加
-    resources.accelerators = [
-        batch_v1.types.AcceleratorConfiguration(count=1,
-                                                type_="nvidia-tesla-t4")
-    ]
-
+    
+    accelerator = ComputeResource.Accelerator(count=1, type_="nvidia-tesla-t4")
+    resources.accelerators = [accelerator]
+    
     task_spec.compute_resource = resources
     task_spec.max_retry_count = 2
     task_spec.max_run_duration = Duration()
