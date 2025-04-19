@@ -37,18 +37,10 @@ develop_config_path = os.path.join(BASE_DIR, "config_develop", ".env.develop")
 if os.path.exists(develop_config_path):
     load_dotenv(develop_config_path)
 
-# 環境変数
-GCP_PROJECT_ID: str = os.environ.get("GCP_PROJECT_ID")
-GCP_REGION: str = os.environ.get("GCP_REGION")
-PUBSUB_TOPIC: str = os.environ.get("PUBSUB_TOPIC")
-GCS_BUCKET_NAME: str = os.environ.get("GCS_BUCKET_NAME")
-BATCH_IMAGE_URL: str = os.environ.get("BATCH_IMAGE_URL")
-HF_AUTH_TOKEN: str = os.environ.get("HF_AUTH_TOKEN")
-EMAIL_NOTIFICATION: bool = (
-    os.environ.get("EMAIL_NOTIFICATION", "false").lower() == "true"
-)
-# コレクション名の環境変数を追加
-WHISPER_JOBS_COLLECTION: str = os.environ.get("WHISPER_JOBS_COLLECTION")
+# 環境変数の直接参照に切り替え
+# 以下の変数は削除し、直接os.environから取得するようにします
+# この部分は削除されますが、コメントとして残しておきます
+
 
 # スクリプトの場所を基準にして、BASEDIRをつくって、GOOGLE_APPLICATION_CREDENTIALSについても絶対パスにする。
 BASE_DIR = str(Path(__file__).resolve().parent.parent)
@@ -92,18 +84,18 @@ def create_batch_job(job_data: WhisperFirestoreData) -> str:
     # 修正後: 現在のAPIに合わせた構造を使用
     container = Runnable.Container()  # または batch_v1.types.Runnable.Container()
     
-    # 以下は元のままでOK
-    container.image_uri = BATCH_IMAGE_URL
+    # 環境変数を直接参照 (KeyErrorを発生させるようos.environ.getではなくos.environ[]を使用)
+    container.image_uri = os.environ["BATCH_IMAGE_URL"]
 
     # 環境変数設定
     batch_params: WhisperBatchParameter = WhisperBatchParameter(
         JOB_ID=job_data.job_id,
         AUDIO_PATH=f"{job_data.gcs_backet_name}/{job_data.audio_file_path}",
         TRANSCRIPTION_PATH=f"{job_data.gcs_backet_name}/{job_data.transcription_file_path}",
-        HF_AUTH_TOKEN=HF_AUTH_TOKEN,
-        PUBSUB_TOPIC=PUBSUB_TOPIC,
-        GCP_PROJECT_ID=GCP_PROJECT_ID,
-        GCP_REGION=GCP_REGION,
+        HF_AUTH_TOKEN=os.environ["HF_AUTH_TOKEN"],
+        PUBSUB_TOPIC=os.environ["PUBSUB_TOPIC"],
+        GCP_PROJECT_ID=os.environ["GCP_PROJECT_ID"],
+        GCP_REGION=os.environ["GCP_REGION"],
         NUM_SPEAKERS="" if not job_data.num_speakers else str(job_data.num_speakers),
         MIN_SPEAKERS=str(job_data.min_speakers),
         MAX_SPEAKERS=str(job_data.max_speakers),
@@ -156,7 +148,7 @@ def create_batch_job(job_data: WhisperFirestoreData) -> str:
     
     # ロケーション設定
     location_policy = AllocationPolicy.LocationPolicy()
-    location_policy.allowed_locations = [f"regions/{GCP_REGION}"]
+    location_policy.allowed_locations = [f"regions/{os.environ['GCP_REGION']}"]
     allocation_policy.location = location_policy
     
     # インスタンスポリシーの設定
@@ -186,7 +178,7 @@ def create_batch_job(job_data: WhisperFirestoreData) -> str:
     create_request: batch_v1.CreateJobRequest = batch_v1.CreateJobRequest()
     create_request.job = job
     create_request.job_id = batch_job_name
-    create_request.parent = f"projects/{GCP_PROJECT_ID}/locations/{GCP_REGION}"
+    create_request.parent = f"projects/{os.environ['GCP_PROJECT_ID']}/locations/{os.environ['GCP_REGION']}"
 
     # ジョブを作成
     created_job = batch_client.create_job(create_request)
@@ -202,7 +194,8 @@ def create_batch_job(job_data: WhisperFirestoreData) -> str:
 
 def send_email_notification(user_email, job_id, status):
     """処理完了/失敗のメール通知を送信"""
-    if not EMAIL_NOTIFICATION or not user_email:
+    email_notification = os.environ['EMAIL_NOTIFICATION'].lower() == "true"
+    if not email_notification or not user_email:
         return
 
     try:
@@ -221,7 +214,7 @@ def process_next_job():
         def select_jobs_transaction(transaction):
             # 処理中のジョブをカウント
             processing_count_snapshot = (
-                db.collection(WHISPER_JOBS_COLLECTION)
+                db.collection(os.environ['WHISPER_JOBS_COLLECTION'])
                 .where("status", "==", "processing")
                 .count()
                 .get(transaction=transaction)
@@ -229,7 +222,7 @@ def process_next_job():
             processing_count = processing_count_snapshot[0][0]
 
             # 同時処理可能数を計算
-            max_processing = int(os.getenv("MAX_PROCESSING_JOBS", 1))
+            max_processing = int(os.environ['MAX_PROCESSING_JOBS'])
             available_slots = max(0, max_processing - processing_count)
 
             if available_slots <= 0:
@@ -242,7 +235,7 @@ def process_next_job():
 
             # 処理可能数だけキューからジョブを取得
             queued_jobs_query = (
-                db.collection(WHISPER_JOBS_COLLECTION)
+                db.collection(os.environ['WHISPER_JOBS_COLLECTION'])
                 .where("status", "==", "queued")
                 .order_by("created_at")
                 .limit(available_slots)
@@ -260,7 +253,7 @@ def process_next_job():
             # 各ジョブのステータスを処理中に更新
             for job_doc in queued_jobs:
                 job_data = WhisperFirestoreData(**job_doc.to_dict())
-                job_ref = db.collection(WHISPER_JOBS_COLLECTION).document(
+                job_ref = db.collection(os.environ['WHISPER_JOBS_COLLECTION']).document(
                     job_data.job_id
                 )
 
@@ -298,7 +291,7 @@ def process_next_job():
                 logger.error(error_message)
 
                 # ジョブステータスをfailedに更新（トランザクション外で処理）
-                job_ref = db.collection(WHISPER_JOBS_COLLECTION).document(
+                job_ref = db.collection(os.environ['WHISPER_JOBS_COLLECTION']).document(
                     job_data.job_id
                 )
                 job_ref.update(
@@ -321,7 +314,7 @@ def handle_batch_completion(whisperPubSubMessageData: WhisperPubSubMessageData):
 
     try:
         # Firestoreからジョブデータを取得
-        job_ref = db.collection(WHISPER_JOBS_COLLECTION).document(job_id)
+        job_ref = db.collection(os.environ['WHISPER_JOBS_COLLECTION']).document(job_id)
         job_doc = job_ref.get()
 
         if not job_doc.exists:
