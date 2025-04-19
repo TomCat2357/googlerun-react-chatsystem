@@ -71,6 +71,7 @@ storage_client: storage.Client = storage.Client()
 
 def create_batch_job(job_data: WhisperFirestoreData) -> str:
     """Batchジョブを作成して起動する"""
+    """単体テストチェック済み_20250419 9:14"""
     logger.info(f"バッチジョブの作成: {job_data.job_id}, hash: {job_data.file_hash}")
 
     # Batch APIクライアント初期化

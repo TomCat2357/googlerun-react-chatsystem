@@ -31,7 +31,7 @@ def mock_job_data():
 # 修正アプローチ: 
 # 1. BatchServiceClientだけモック化
 # 2. create_batch_jobの内部で問題になる部分をモンキーパッチで一時的に修正
-@patch('whisper_queue.app.main.batch_v1.BatchServiceClient')
+@patch('whisper_queue.app.main.batch_v1.BatchServiceClient', autospec=True)
 def test_create_batch_job(mock_batch_client_class, mock_job_data, monkeypatch):
     """create_batch_job関数のテスト - 必要最小限のモック化"""
     # モックの設定
