@@ -226,18 +226,25 @@ def process_next_job():
             logger.info(f"カウント結果の型: {type(processing_count_snapshot)}")
             
             # AggregationResultからの値取得を修正
-            if hasattr(processing_count_snapshot[0], 'value'):
-                # 新しいバージョンのFirestoreの場合
-                processing_count = processing_count_snapshot[0].value
-            else:
-                # 従来の方法（互換性のため）
-                try:
-                    processing_count = processing_count_snapshot[0][0]
-                except (IndexError, TypeError):
-                    logger.warning("カウント結果の取得に失敗しました。デフォルト値0を使用します。")
-                    processing_count = 0
+            try:
+                # 通常、processing_count_snapshotは[[AggregationResult]]の形式
+                agg_result = processing_count_snapshot[0][0]  # 最初のAggregationResultオブジェクトを取得
+                
+                # AggregationResultオブジェクトからint値を抽出
+                if hasattr(agg_result, 'value'):
+                    # 新しいバージョンのFirestoreの場合、valueプロパティがある
+                    processing_count = int(agg_result.value)
+                else:
+                    # 古い形式やその他のケース
+                    processing_count = int(agg_result)
+            except (IndexError, TypeError, ValueError, AttributeError) as e:
+                logger.warning(f"カウント結果の解析に失敗しました: {e}。デフォルト値0を使用します。")
+                processing_count = 0
                     
-            logger.info(f"処理中のジョブ数: {processing_count}")
+            # エラーケースではagg_resultが定義されていない可能性があるため安全に出力
+            if 'agg_result' in locals():
+                logger.info(f"処理中のジョブ数(オブジェクト): {agg_result}")
+            logger.info(f"処理中のジョブ数（整数値）: {processing_count}")
 
             # 同時処理可能数を計算
             max_processing = int(os.environ['MAX_PROCESSING_JOBS'])
