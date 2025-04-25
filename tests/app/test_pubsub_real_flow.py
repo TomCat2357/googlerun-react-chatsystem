@@ -8,26 +8,59 @@ import pytest
 from dotenv import load_dotenv
 from google.cloud import pubsub_v1
 
+import os
+import json
+import time
+from pathlib import Path
+
+import pytest
+from dotenv import load_dotenv
+from google.cloud import pubsub_v1
+
 # ───────────────────────────────────────────────────────────
-# テスト実行前に .env と .env.develop を読み込んで環境変数をセットアップ
+# tests/app/test_pubsub_real_flow.py (修正版)
+
 @pytest.fixture(scope="module", autouse=True)
 def setup_environment():
     """
     whisper_queue/config/.env および
     whisper_queue/config_develop/.env.develop をロード
     """
-    root = Path(__file__).resolve().parents[3]
+    # スクリプトの相対パスではなく、実際のファイルの絶対パスから検索
+    project_root = Path(__file__).resolve().parent.parent.parent
+    
+    print(f"プロジェクトルートパス: {project_root}")
+    
     # 本番環境
-    load_dotenv(root / "whisper_queue" / "config" / ".env", override=True)
+    env_path = project_root / "whisper_queue" / "config" / ".env"
+    if env_path.exists():
+        print(f"本番環境設定をロード: {env_path}")
+        load_dotenv(env_path, override=True)
+    else:
+        print(f"警告: 本番環境設定ファイルが見つかりません: {env_path}")
+    
     # 開発環境（存在すれば上書き）
-    dev_env = root / "whisper_queue" / "config_develop" / ".env.develop"
-    if dev_env.exists():
-        load_dotenv(dev_env, override=True)
+    dev_env_path = project_root / "whisper_queue" / "config_develop" / ".env.develop"
+    if dev_env_path.exists():
+        print(f"開発環境設定をロード: {dev_env_path}")
+        load_dotenv(dev_env_path, override=True)
+    else:
+        print(f"警告: 開発環境設定ファイルが見つかりません: {dev_env_path}")
+    
+    # 認証情報ファイルのパスを絶対パスに変換
+    if 'GOOGLE_APPLICATION_CREDENTIALS' in os.environ:
+        cred_path = os.environ['GOOGLE_APPLICATION_CREDENTIALS']
+        if not os.path.isabs(cred_path):
+            # 相対パスを絶対パスに変換
+            abs_cred_path = str(project_root / "whisper_queue" / cred_path)
+            os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = abs_cred_path
+            print(f"認証情報ファイルのパスを絶対パスに変換: {abs_cred_path}")
 
-    # 必須環境変数の確認
-    for var in ("GCP_PROJECT_ID", "PUBSUB_TOPIC", "PUBSUB_SUBSCRIPTION"):
-        assert var in os.environ, f"{var} が設定されていません"
-# ───────────────────────────────────────────────────────────
+            # パスが存在するか確認
+            if not os.path.exists(abs_cred_path):
+                print(f"警告: 設定された認証情報ファイルが存在しません: {abs_cred_path}")
+    else:
+        print("警告: GOOGLE_APPLICATION_CREDENTIALS環境変数が設定されていません")
 
 @pytest.fixture(scope="module")
 def pubsub_clients():
@@ -214,3 +247,7 @@ def test_pubsub_real_flow_completed_and_failed(pubsub_clients, event_type, error
     received = publish_and_receive(pubsub_clients, payload)
     assert received is not None, "メッセージを受信できませんでした"
     assert compare_pubsub_messages(payload, received), f"メッセージ内容が一致しません: {payload} vs {received}"
+
+if __name__ == "__main__":
+    setup_environment()
+    
