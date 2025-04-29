@@ -141,9 +141,6 @@ class WhisperBatchParameter(BaseModel):
     AUDIO_PATH: str  # GCS_AUDIO_PATHからAUDIO_PATHに変更
     TRANSCRIPTION_PATH: str  # 追加
     HF_AUTH_TOKEN: str
-    #PUBSUB_TOPIC: str
-    #GCP_PROJECT_ID: str
-    #GCP_REGION: str
     # Firestoreからの追加パラメータ
     NUM_SPEAKERS: Optional[str] = ""
     MIN_SPEAKERS: str

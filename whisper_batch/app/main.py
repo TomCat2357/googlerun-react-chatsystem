@@ -51,11 +51,11 @@ def check_gpu_availability() -> None:
 
 
 def send_completion_notification(
-    job_id: str,  # ジョブID
-    success: bool,  # 処理成功フラグ
-    error_message: Optional[str] = None,  # エラーメッセージ（オプション）
+    job_id: str,
+    success: bool,
+    error_message: Optional[str] = None,
 ) -> bool:
-    """処理完了通知をPub/Subに送信する"""
+    """処理完了通知をPub/Subに送信する（型定義に合わない情報は送らない）"""
     try:
         project_id: str = os.environ.get("GCP_PROJECT_ID")
         pubsub_topic: str = os.environ.get("PUBSUB_TOPIC")
@@ -68,7 +68,7 @@ def send_completion_notification(
         publisher: pubsub_v1.PublisherClient = pubsub_v1.PublisherClient()
         topic_path: str = publisher.topic_path(project_id, pubsub_topic)
 
-        # メッセージデータの準備
+        # WhisperPubSubMessageData 型に strictly 準拠
         message_data: WhisperPubSubMessageData = WhisperPubSubMessageData(
             job_id=job_id,
             event_type="job_completed" if success else "job_failed",
@@ -76,15 +76,10 @@ def send_completion_notification(
             timestamp=datetime.datetime.now().isoformat(),
         )
 
-        # 辞書に変換
         message_dict: Dict[str, Any] = message_data.model_dump()
 
-
-        # メッセージをPub/Subに送信
         message_bytes: bytes = json.dumps(message_dict).encode("utf-8")
-        future: pubsub_v1.publisher.futures.Future = publisher.publish(
-            topic_path, data=message_bytes
-        )
+        future = publisher.publish(topic_path, data=message_bytes)
         message_id: str = future.result()
 
         logger.info("処理完了通知を送信しました: %s", message_id)
@@ -94,215 +89,142 @@ def send_completion_notification(
         logger.error("処理完了通知の送信エラー: %s", str(e))
         return False
 
-def main() -> None:  # 環境変数から情報を取得
-    job_id: str | None = os.environ.get("JOB_ID")
-    user_id: str | None = os.environ.get("USER_ID")
-    user_email: str | None = os.environ.get("USER_EMAIL")
-    audio_path: str | None = os.environ.get("AUDIO_PATH")
-    file_hash: str | None = os.environ.get("FILE_HASH")
 
-    # デバイス設定を環境変数から取得（デフォルトはcuda）
-    device: str = os.environ.get("DEVICE", "cuda").lower()
-    if device not in ["cpu", "cuda"]:
-        logger.warning(f"無効なデバイス指定 '{device}'。'cuda'にデフォルト設定します。")
+
+def main() -> None:
+    # ---- 0. 環境変数 ------------------------------------------------------
+    job_id = os.environ["JOB_ID"]
+    audio_path = os.environ["AUDIO_PATH"]  # GCS or local
+    transcription_path = os.environ["TRANSCRIPTION_PATH"]  # GCS への最終出力
+    hf_auth_token = os.environ["HF_AUTH_TOKEN"]
+
+    # 話者数関連
+    num_speakers = os.environ.get("NUM_SPEAKERS", "")
+    min_speakers = os.environ.get("MIN_SPEAKERS", "1")  # ← ★① 修正
+    max_speakers = os.environ.get("MAX_SPEAKERS", "1")
+
+    # Whisper の追加設定
+    language = os.environ.get("LANGUAGE", "ja")
+    initial_prompt = os.environ.get("INITIAL_PROMPT", "")
+
+    # デバイス決定
+    device = os.environ.get("DEVICE", "cuda").lower()
+    if device not in ("cpu", "cuda"):
+        logger.warning(f"無効なデバイス指定: {device} → 'cuda' を使用")
         device = "cuda"
-
-    # GPUを要求されたが利用できない場合の処理
     if device == "cuda" and not torch.cuda.is_available():
-        logger.warning(
-            "GPUが要求されましたが利用できません。CPUにフォールバックします。"
-        )
+        logger.warning("CUDA が無いので CPU にフォールバック")
         device = "cpu"
-
-    # デバイス情報の表示
     if device == "cuda":
         check_gpu_availability()
-        logger.debug("GPUを使用して処理を実行します")
-    else:
-        logger.debug("CPUを使用して処理を実行します")
 
-    # 追加のパラメータを環境変数から取得
-    num_speakers: str | None = os.environ.get("NUM_SPEAKERS")
-    min_speakers: str = os.environ.get("MIN_SPEAKERS", "1")
-    max_speakers: str = os.environ.get("MAX_SPEAKERS", "1")
-    language: str = os.environ.get("LANGUAGE", "ja")
-    initial_prompt: str = os.environ.get("INITIAL_PROMPT", "")
+    # ---- 1. 必須値のバリデーション ---------------------------------------
+    for name, value in [
+        ("JOB_ID", job_id),
+        ("AUDIO_PATH", audio_path),
+        ("HF_AUTH_TOKEN", hf_auth_token),
+        ("TRANSCRIPTION_PATH", transcription_path),
+    ]:
+        if not value:
+            raise ValueError(f"環境変数 {name} が設定されていません")
 
-    if (
-        not job_id
-        or not user_id
-        or not gcs_audio_path
-        or not file_hash
-        or not bucket_name
-    ):
-        raise ValueError("必要な環境変数が設定されていません")
+    # ---- 2. 一時ファイル名の準備 ----------------------------------------
+    temp_wav_path = f"temp_{job_id}.wav"
+    transcription_json = f"temp_{job_id}_transcription.json"
+    diarization_json = f"temp_{job_id}_diarization.json"
+    output_gcs_path = transcription_path  # ← ★③ 修正
 
-    # 処理開始時間
-    total_start_time: float = time.time()
-
-    logger.info(f"処理開始: ジョブID={job_id}, ユーザーID={user_id}, hash={file_hash}")
+    total_start = time.time()
+    logger.info(f"[{job_id}] バッチ処理を開始")
 
     try:
-        # GPUが利用可能かチェック
-        check_gpu_availability()
-
-        # 入出力ファイルのパスを準備
-        base_dir: str = f"whisper/{user_id}/{file_hash}"
-        temp_wav_path: str = f"temp_{file_hash}.wav"
-        transcription_json: str = f"temp_{file_hash}_transcription.json"
-        diarization_json: str = f"temp_{file_hash}_diarization.json"
-
-        # 出力先のGCSパス
-        output_gcs_path: str = f"gs://{bucket_name}/{base_dir}/transcription.json"
-
-        try:
-            # ステップ1: 音声変換
-            logger.info("=== Step 1: Converting audio to WAV format ===")
-            step1_start_time: float = time.time()
-            convert_cmd: list[str] = [
+        # 2-1 音声を 16 kHz/mono WAV へ変換 -------------------------------
+        step1_start = time.time()
+        subprocess.run(
+            [
                 "python3",
                 "convert_audio.py",
-                gcs_audio_path,
+                audio_path,
                 temp_wav_path,
                 "--device",
                 device,
-            ]
-            subprocess.run(convert_cmd, check=True)
-            step1_duration: float = time.time() - step1_start_time
-            logger.info(f"Step 1 completed in {step1_duration:.2f} seconds")
+            ],
+            check=True,
+        )
+        logger.info(f"Step-1 Audio convert: {time.time() - step1_start:.2f}s")
 
-            # ステップ2: 文字起こし
-            logger.info("\n=== Step 2: Running transcription ===")
-            step2_start_time: float = time.time()
-            transcribe_cmd: list[str] = [
+        # 2-2 文字起こし --------------------------------------------------
+        step2_start = time.time()
+        subprocess.run(
+            [
                 "python3",
                 "transcribe.py",
                 temp_wav_path,
                 transcription_json,
                 "--device",
                 device,
+            ],
+            check=True,
+        )
+        logger.info(f"Step-2 Transcribe  : {time.time() - step2_start:.2f}s")
+
+        # 2-3 話者ダイアリゼーション ------------------------------------
+        step3_start = time.time()
+        diarize_cmd = [
+            "python3",
+            "diarize.py",
+            temp_wav_path,
+            diarization_json,
+            hf_auth_token,
+            "--device",
+            device,
+        ]
+        if num_speakers.strip():
+            diarize_cmd += ["--num-speakers", num_speakers]
+        else:
+            diarize_cmd += [
+                "--min-speakers",
+                min_speakers,
+                "--max-speakers",
+                max_speakers,
             ]
-            # 言語とプロンプトが指定されていれば追加
-            if language:
-                transcribe_cmd.extend(["--language", language])
-            if initial_prompt:
-                transcribe_cmd.extend(["--initial-prompt", initial_prompt])
+        subprocess.run(diarize_cmd, check=True)
+        logger.info(f"Step-3 Diarization : {time.time() - step3_start:.2f}s")
 
-            subprocess.run(transcribe_cmd, check=True)
-            step2_duration: float = time.time() - step2_start_time
-            logger.info(f"Step 2 completed in {step2_duration:.2f} seconds")
-
-            # HF_AUTH_TOKENを環境変数から取得
-            hf_auth_token: str | None = os.environ.get("HF_AUTH_TOKEN")
-            if not hf_auth_token:
-                raise ValueError("HF_AUTH_TOKEN環境変数が設定されていません")
-
-            # ステップ3: 話者分離
-            logger.info("\n=== Step 3: Running speaker diarization ===")
-            step3_start_time: float = time.time()
-            diarize_cmd: list[str] = [
-                "python3",
-                "diarize.py",
-                temp_wav_path,
-                diarization_json,
-                hf_auth_token,
-                "--device",
-                device,
-            ]
-
-            # 話者数の指定（環境変数から取得）
-            if num_speakers and num_speakers.strip():
-                diarize_cmd.extend(["--num-speakers", num_speakers])
-            else:
-                # デフォルトまたは環境変数のmin/max話者数
-                diarize_cmd.extend(
-                    ["--min-speakers", min_speakers, "--max-speakers", max_speakers]
-                )
-
-            subprocess.run(diarize_cmd, check=True)
-            step3_duration: float = time.time() - step3_start_time
-            logger.info(f"Step 3 completed in {step3_duration:.2f} seconds")
-
-            # ステップ4: 結果の結合
-            logger.info("\n=== Step 4: Combining results ===")
-            step4_start_time: float = time.time()
-            combine_cmd: list[str] = [
+        # 2-4 文字起こし＋話者情報を結合し GCS へ書き込み ----------------
+        step4_start = time.time()
+        subprocess.run(
+            [
                 "python3",
                 "combine_results.py",
                 transcription_json,
                 diarization_json,
                 output_gcs_path,
-            ]
-            subprocess.run(combine_cmd, check=True)
-            step4_duration: float = time.time() - step4_start_time
-            logger.info(f"Step 4 completed in {step4_duration:.2f} seconds")
-
-            # 全体処理時間
-            total_duration: float = time.time() - total_start_time
-
-            # 各ステップの処理時間サマリー
-            logger.info("\n=== Processing Time Summary ===")
-            logger.info(f"Step 1 (Audio Conversion): {step1_duration:.2f} seconds")
-            logger.info(f"Step 2 (Transcription): {step2_duration:.2f} seconds")
-            logger.info(f"Step 3 (Speaker Diarization): {step3_duration:.2f} seconds")
-            logger.info(f"Step 4 (Combining Results): {step4_duration:.2f} seconds")
-            logger.info(f"Total processing time: {total_duration:.2f} seconds")
-
-            logger.info(f"\nFinal results saved to {output_gcs_path}")
-
-            # 処理完了通知を送信
-            send_completion_notification(
-                job_id,
-                user_id,
-                user_email,
-                file_hash,
-                True,
-                processing_time=total_duration,
-                result_path=output_gcs_path,
-            )
-
-        except Exception as process_error:
-            # 処理中のエラーを記録
-            error_message: str = str(process_error)
-            logger.error(f"処理エラー: {error_message}")
-
-            # エラー通知を送信
-            send_completion_notification(
-                job_id,
-                user_id,
-                user_email,
-                file_hash,
-                False,
-                error_message=error_message,
-            )
-            raise process_error
-
-        finally:
-            # 中間ファイルを削除
-            logger.info("\nCleaning up temporary files...")
-            temp_files: list[str] = [
-                temp_wav_path,
-                transcription_json,
-                diarization_json,
-            ]
-            for file_path in temp_files:
-                try:
-                    if os.path.exists(file_path):
-                        os.remove(file_path)
-                        logger.info(f"Removed: {file_path}")
-                except Exception as e:
-                    logger.error(f"Failed to remove {file_path}: {e}")
-
-    except Exception as e:
-        # 全体的なエラーを記録
-        error_message: str = str(e)
-        logger.error(f"処理エラー: {error_message}")
-
-        # エラー通知を送信
-        send_completion_notification(
-            job_id, user_id, user_email, file_hash, False, error_message=error_message
+            ],
+            check=True,
         )
-        raise e
+        logger.info(f"Step-4 Combine     : {time.time() - step4_start:.2f}s")
+
+        total_time = time.time() - total_start
+        logger.info(f"[{job_id}] 処理完了 ({total_time:.2f}s) → {output_gcs_path}")
+
+        send_completion_notification(
+            job_id, True, processing_time=total_time, result_path=output_gcs_path
+        )
+
+    except Exception as err:
+        logger.error(f"[{job_id}] エラー: {err}")
+        send_completion_notification(job_id, False, error_message=str(err))
+        raise
+
+    finally:
+        for fp in (temp_wav_path, transcription_json, diarization_json):
+            try:
+                if os.path.exists(fp):
+                    os.remove(fp)
+                    logger.debug(f"削除: {fp}")
+            except Exception as e:
+                logger.warning(f"一時ファイル削除失敗 {fp}: {e}")
 
 
 if __name__ == "__main__":
