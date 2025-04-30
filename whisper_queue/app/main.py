@@ -90,8 +90,8 @@ def create_batch_job(job_data: WhisperFirestoreData) -> str:
     # 環境変数設定
     batch_params: WhisperBatchParameter = WhisperBatchParameter(
         JOB_ID=job_data.job_id,
-        AUDIO_PATH=f"{job_data.gcs_backet_name}/{job_data.audio_file_path}",
-        TRANSCRIPTION_PATH=f"{job_data.gcs_backet_name}/{job_data.transcription_file_path}",
+        AUDIO_PATH=f"gs://{job_data.gcs_backet_name}/{job_data.audio_file_path}",
+        TRANSCRIPTION_PATH=f"gs://{job_data.gcs_backet_name}/{job_data.transcription_file_path}",
         HF_AUTH_TOKEN=os.environ["HF_AUTH_TOKEN"],
         NUM_SPEAKERS="" if not job_data.num_speakers else str(job_data.num_speakers),
         MIN_SPEAKERS=str(job_data.min_speakers),
