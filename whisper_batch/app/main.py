@@ -91,8 +91,8 @@ def send_completion_notification(
 def main() -> None:
     # ---- 2-1. 環境変数読み込み ------------------------------------------
     job_id = os.environ["JOB_ID"]
-    audio_path = os.environ["AUDIO_PATH"]  # GCS or local
-    transcription_path = os.environ["TRANSCRIPTION_PATH"]  # 出力先 GCS
+    full_audio_path = os.environ["FULL_AUDIO_PATH"]  # GCS or local
+    full_transcription_path = os.environ["FULL_TRANSCRIPTION_PATH"]  # 出力先 GCS
     hf_auth_token = os.environ["HF_AUTH_TOKEN"]
 
     # Optional
@@ -117,8 +117,8 @@ def main() -> None:
     # ---- 2-3. 必須値チェック --------------------------------------------
     for name, val in [
         ("JOB_ID", job_id),
-        ("AUDIO_PATH", audio_path),
-        ("TRANSCRIPTION_PATH", transcription_path),
+        ("FULL_AUDIO_PATH", full_audio_path),
+        ("FULL_TRANSCRIPTION_PATH", full_transcription_path),
         ("HF_AUTH_TOKEN", hf_auth_token),
     ]:
         if not val:
@@ -140,7 +140,7 @@ def main() -> None:
             [
                 "python3",
                 "convert_audio.py",
-                audio_path,
+                full_audio_path,
                 temp_wav_path,
                 "--device",
                 device,
@@ -194,14 +194,14 @@ def main() -> None:
                 "combine_results.py",
                 transcription_json,
                 diarization_json,
-                transcription_path,
+                full_transcription_path,
             ],
             check=True,
         )
         logger.info("Step-4 combine_results: %.2fs", time.time() - t0)
 
         elapsed = time.time() - total_start
-        logger.info("[%s] 正常終了 (%.2fs) => %s", job_id, elapsed, transcription_path)
+        logger.info("[%s] 正常終了 (%.2fs) => %s", job_id, elapsed, full_transcription_path)
         send_completion_notification(job_id, success=True)
 
     except Exception as exc:  # pylint: disable=broad-except

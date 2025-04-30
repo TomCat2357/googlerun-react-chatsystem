@@ -15,7 +15,6 @@ from google.cloud.batch_v1.types import (
     LogsPolicy,
     Runnable,
     Environment,
-    ComputeResource,
 )
 from google.protobuf.duration_pb2 import Duration
 import functions_framework
@@ -90,8 +89,8 @@ def create_batch_job(job_data: WhisperFirestoreData) -> str:
     # 環境変数設定
     batch_params: WhisperBatchParameter = WhisperBatchParameter(
         JOB_ID=job_data.job_id,
-        AUDIO_PATH=f"gs://{job_data.gcs_backet_name}/{job_data.audio_file_path}",
-        TRANSCRIPTION_PATH=f"gs://{job_data.gcs_backet_name}/{job_data.transcription_file_path}",
+        FULL_AUDIO_PATH=f"gs://{job_data.gcs_bucket_name}/{job_data.audio_file_path}",
+        FULL_TRANSCRIPTION_PATH=f"gs://{job_data.gcs_bucket_name}/{job_data.transcription_file_path}",
         HF_AUTH_TOKEN=os.environ["HF_AUTH_TOKEN"],
         NUM_SPEAKERS="" if not job_data.num_speakers else str(job_data.num_speakers),
         MIN_SPEAKERS=str(job_data.min_speakers),
@@ -386,7 +385,7 @@ def handle_batch_completion(whisperPubSubMessageData: WhisperPubSubMessageData):
 def process_subscription_message(
     whisperPubSubMessageData: WhisperPubSubMessageData,
 ) -> None:
-    """Pub/Subメッセージをsubscriotionして処理する"""
+    """Pub/Subメッセージをsubscriptionして処理する"""
     try:
 
         # オブジェクトのプロパティを使用

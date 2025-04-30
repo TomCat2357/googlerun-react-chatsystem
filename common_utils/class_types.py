@@ -62,7 +62,7 @@ class WhisperFirestoreData(BaseModel):
     filename: str
     description: str = ""
     recording_date: str = ""
-    gcs_backet_name : str
+    gcs_bucket_name : str
     audio_file_path : str
     transcription_file_path : str
     audio_size: int  # 音声ファイルのサイズ (バイト単位)
@@ -138,8 +138,8 @@ class WhisperPubSubMessageData(BaseModel):
 # whisperのバッチ処理用のパラメータの型
 class WhisperBatchParameter(BaseModel):
     JOB_ID: str
-    AUDIO_PATH: str  # GCS_AUDIO_PATHからAUDIO_PATHに変更
-    TRANSCRIPTION_PATH: str  # 追加
+    FULL_AUDIO_PATH: str  # GCS_AUDIO_PATHからAUDIO_PATHに変更
+    FULL_TRANSCRIPTION_PATH: str  # 追加
     HF_AUTH_TOKEN: str
     # Firestoreからの追加パラメータ
     NUM_SPEAKERS: Optional[str] = ""
