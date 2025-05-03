@@ -1,236 +1,216 @@
-import argparse
+#!/usr/bin/env python
+"""
+Whisper Queue Worker
+
+Firestore 上の whisper ジョブを順次処理するキュー仕組み。
+処理中ジョブのタイムアウト監視 → Failed への切替え、
+最古の queued を processing にしてパイプライン実行 → Completed/Failed 更新
+を繰り返し、キューが空になれば終了します。
+"""
+
 import os
-import subprocess
+import sys
 import time
 import datetime
-import json
-from typing import List, Optional, Dict, Any
+import traceback
+import shutil
+from pathlib import Path
 
-import torch
 from dotenv import load_dotenv
-from google.cloud import pubsub_v1
+from google.cloud import firestore, storage
+from common_utils.class_types import WhisperFirestoreData
 
-from common_utils.logger import logger
-from common_utils.class_types import WhisperPubSubMessageData
+# --- モジュール読み込み（各処理は既存実装を使う） ---
+from convert_audio    import main as convert_audio
+from transcribe       import main as transcribe_audio
+from diarize          import main as diarize_audio
+from combine_results  import main as combine_results
 
-# ---------------------------------------------------------------------------
-# 0. 事前設定（.env 読み込み）
-# ---------------------------------------------------------------------------
-CONFIG_PATH = "config/.env"
-CONFIG_DEVELOP_PATH = "config_develop/.env.develop"
+# --- 設定読み込み (.env → override .env.develop) ---
+BASE_DIR = Path(__file__).resolve().parent.parent
+load_dotenv(BASE_DIR / "config" / ".env")
+load_dotenv(BASE_DIR / "config_develop" / ".env.develop", override=True)
 
-load_dotenv(CONFIG_PATH)
-if os.path.exists(CONFIG_DEVELOP_PATH):
-    load_dotenv(CONFIG_DEVELOP_PATH)
+# --- 必須環境変数 ---
+PROJECT_ID        = os.environ["GCP_PROJECT_ID"]
+COLLECTION_NAME   = os.environ["WHISPER_JOBS_COLLECTION"]
+HF_AUTH_TOKEN     = os.environ["HF_AUTH_TOKEN"]
 
+# --- タイムアウト & ポーリング設定 ---
+PROCESS_TIMEOUT_SECONDS  = int(os.environ.get("PROCESS_TIMEOUT_SECONDS", 300))
+AUDIO_TIMEOUT_MULTIPLIER = float(os.environ.get("AUDIO_TIMEOUT_MULTIPLIER", 1.0))
+POLL_INTERVAL_SECONDS    = int(os.environ.get("POLL_INTERVAL_SECONDS", 5))
+LOCAL_TMP_DIR            = os.environ.get("LOCAL_TMP_DIR", "/tmp")
 
-# ---------------------------------------------------------------------------
-# 1. 共通ユーティリティ
-# ---------------------------------------------------------------------------
-def is_gcs_path(path: str) -> bool:
-    """指定パスが GCS（gs://～）か判定"""
-    return path.startswith("gs://")
-
-
-def get_local_path(gcs_path: str) -> str:
-    """GCS パスをローカル一時ファイル名に変換"""
-    if not is_gcs_path(gcs_path):
-        return gcs_path
-    path_without_prefix = gcs_path[5:]  # remove "gs://"
-    bucket_name, *_, filename = path_without_prefix.split("/")
-    return f"/tmp/temp_{bucket_name}_{filename}"
+# --- GCP クライアント初期化 ---
+db             = firestore.Client(project=PROJECT_ID)
+storage_client = storage.Client(project=PROJECT_ID)
 
 
-def check_gpu_availability() -> None:
-    """GPU が使えるかどうかを確認"""
-    if not torch.cuda.is_available():
-        raise RuntimeError(
-            "GPU 環境が検出されませんでした。このスクリプトは GPU 上で動作する想定です。"
-        )
-    gpu_name = torch.cuda.get_device_name(0)
-    gpu_count = torch.cuda.device_count()
-    logger.info(f"GPU: {gpu_name} (total {gpu_count}) を検出しました")
+def _utcnow() -> datetime.datetime:
+    """UTC 現在時刻を timezone aware で返す"""
+    return datetime.datetime.utcnow().replace(tzinfo=datetime.timezone.utc)
 
 
-def send_completion_notification(
-    job_id: str,
-    success: bool,
-    error_message: Optional[str] = None,
-) -> bool:
-    """処理結果を Pub/Sub 経由で通知（WhisperPubSubMessageData 型に準拠）"""
-    try:
-        project_id = os.environ.get("GCP_PROJECT_ID")
-        pubsub_topic = os.environ.get("PUBSUB_TOPIC")
-        if not (project_id and pubsub_topic):
-            logger.warning("GCP_PROJECT_ID または PUBSUB_TOPIC が未設定のため通知をスキップします")
-            return False
-
-        publisher = pubsub_v1.PublisherClient()
-        topic_path = publisher.topic_path(project_id, pubsub_topic)
-
-        msg = WhisperPubSubMessageData(
-            job_id=job_id,
-            event_type="job_completed" if success else "job_failed",
-            error_message=error_message,
-            timestamp=datetime.datetime.now().isoformat(),
-        )
-
-        future = publisher.publish(topic_path, data=json.dumps(msg.model_dump()).encode())
-        message_id = future.result()
-        logger.info("通知を送信しました (message_id=%s)", message_id)
-        return True
-
-    except Exception as exc:  # pylint: disable=broad-except
-        logger.error("通知送信エラー: %s", exc)
-        return False
+def _log(msg: str, level: str = "INFO") -> None:
+    """標準出力 or 標準エラーにタイムスタンプ付きログを出力"""
+    ts = _utcnow().isoformat()
+    out = sys.stderr if level == "ERROR" else sys.stdout
+    print(f"{ts} [{level}] {msg}", file=out)
 
 
-# ---------------------------------------------------------------------------
-# 2. メイン処理
-# ---------------------------------------------------------------------------
-def main() -> None:
-    # ---- 2-1. 環境変数読み込み ------------------------------------------
-    job_id = os.environ["JOB_ID"]
-    full_audio_path = os.environ["FULL_AUDIO_PATH"]  # GCS or local
-    full_transcription_path = os.environ["FULL_TRANSCRIPTION_PATH"]  # 出力先 GCS
-    hf_auth_token = os.environ["HF_AUTH_TOKEN"]
+def _fail_stuck_jobs() -> None:
+    """
+    processing 状態でタイムアウト閾値を超えたジョブを failed に更新
+    閾値 = max(PROCESS_TIMEOUT_SECONDS, audio_duration(ms)×AUDIO_TIMEOUT_MULTIPLIER)
+    """
+    now = _utcnow()
+    q = db.collection(COLLECTION_NAME).where("status", "==", "processing")
+    for doc in q.stream():
+        data = doc.to_dict()
+        started = data.get("process_started_at")
+        if not started:
+            continue
 
-    # Optional
-    language = os.environ.get("LANGUAGE", "ja")
-    initial_prompt = os.environ.get("INITIAL_PROMPT", "")
-    device = os.environ.get("DEVICE", "cuda").lower()
+        # Firestore Timestamp → datetime
+        started_dt = started.to_datetime() if hasattr(started, "to_datetime") else started
+        elapsed = (now - started_dt).total_seconds()
 
-    num_speakers = os.environ.get("NUM_SPEAKERS", "")
-    min_speakers = os.environ.get("MIN_SPEAKERS", "1")
-    max_speakers = os.environ.get("MAX_SPEAKERS", "1")
+        # 動的閾値計算 (秒)
+        audio_ms = data.get("audio_duration", 0)
+        audio_sec = audio_ms / 1000.0 * AUDIO_TIMEOUT_MULTIPLIER
+        cutoff = max(PROCESS_TIMEOUT_SECONDS, audio_sec)
 
-    # ---- 2-2. デバイス確認 ----------------------------------------------
-    if device not in ("cpu", "cuda"):
-        logger.warning("DEVICE=%s は無効です。cuda を使用します", device)
-        device = "cuda"
-    if device == "cuda" and not torch.cuda.is_available():
-        logger.warning("CUDA が利用できません。cpu にフォールバックします")
-        device = "cpu"
-    if device == "cuda":
-        check_gpu_availability()
+        if elapsed > cutoff:
+            _log(f"Timeout → failed: {doc.id} (elapsed {elapsed:.0f}s > {cutoff:.0f}s)", level="ERROR")
+            doc.reference.update({
+                "status": "failed",
+                "error_message": f"Timeout exceeded: waited {elapsed:.0f}s (threshold {cutoff:.0f}s)",
+                "process_ended_at": firestore.SERVER_TIMESTAMP,
+                "updated_at": firestore.SERVER_TIMESTAMP,
+            })
 
-    # ---- 2-3. 必須値チェック --------------------------------------------
-    for name, val in [
-        ("JOB_ID", job_id),
-        ("FULL_AUDIO_PATH", full_audio_path),
-        ("FULL_TRANSCRIPTION_PATH", full_transcription_path),
-        ("HF_AUTH_TOKEN", hf_auth_token),
-    ]:
-        if not val:
-            raise ValueError(f"環境変数 {name} が設定されていません")
 
-    # ---- 2-4. 一時ファイルパス作成 (/tmp を利用し tmpfs に任せる) -------
-    temp_dir = "/tmp"
-    temp_wav_path = os.path.join(temp_dir, f"{job_id}.wav")
-    transcription_json = os.path.join(temp_dir, f"{job_id}_transcription.json")
-    diarization_json = os.path.join(temp_dir, f"{job_id}_diarization.json")
+def _claim_next_job() -> WhisperFirestoreData | None:
+    """
+    トランザクションで最古の queued を processing に切替え、
+    WhisperFirestoreData オブジェクトを返す。なければ None。
+    """
+    @firestore.transactional
+    def txn(tx: firestore.Transaction):
+        q = (db.collection(COLLECTION_NAME)
+               .where("status", "==", "queued")
+               .order_by("created_at")
+               .limit(1))
+        docs = list(q.stream(transaction=tx))
+        if not docs:
+            return None
 
-    total_start = time.time()
-    logger.info("[%s] バッチ処理開始", job_id)
+        doc = docs[0]
+        tx.update(doc.reference, {
+            "status": "processing",
+            "process_started_at": firestore.SERVER_TIMESTAMP,
+            "updated_at": firestore.SERVER_TIMESTAMP,
+        })
+        updated_data = doc.to_dict()
+        updated_data.update({
+            "status": "processing",
+            "process_started_at": datetime.datetime.utcnow(),
+            "updated_at": datetime.datetime.utcnow(),
+        })
+        return WhisperFirestoreData(**updated_data)
+
+    return txn(db.transaction())
+
+
+def _upload_text(bucket_name: str, path: str, text: str) -> None:
+    """文字起こし結果を GCS にアップロード"""
+    blob = storage_client.bucket(bucket_name).blob(path)
+    blob.upload_from_string(text, content_type="text/plain; charset=utf-8")
+
+
+def _process_job(job: WhisperFirestoreData) -> None:
+    """実際の音声変換・文字起こし・話者分離・統合パイプライン実行 & 結果反映"""
+    workdir = Path(LOCAL_TMP_DIR) / job.job_id
+    workdir.mkdir(parents=True, exist_ok=True)
 
     try:
-        # 1) 音声変換
-        t0 = time.time()
-        subprocess.run(
-            [
-                "python3",
-                "convert_audio.py",
-                full_audio_path,
-                temp_wav_path,
-                "--device",
-                device,
-            ],
-            check=True,
+        _log(f"Processing start: {job.job_id}")
+
+        # 1) GCS → ローカルへ音声ダウンロード
+        local_audio = workdir / Path(job.audio_file_path).name
+        storage_client.bucket(job.gcs_bucket_name) \
+                      .blob(job.audio_file_path) \
+                      .download_to_filename(str(local_audio))
+        _log(f"Downloaded audio to {local_audio}")
+
+        # 2) convert_audio
+        wav_path = convert_audio(str(local_audio), workdir=str(workdir))
+
+        # 3) transcribe
+        stt_json = transcribe_audio(
+            str(wav_path),
+            language=job.language,
+            initial_prompt=job.initial_prompt,
+            hf_token=HF_AUTH_TOKEN,
         )
-        logger.info("Step-1 convert_audio  : %.2fs", time.time() - t0)
 
-        # 2) 文字起こし
-        t0 = time.time()
-        transcribe_cmd: List[str] = [
-            "python3",
-            "transcribe.py",
-            temp_wav_path,
-            transcription_json,
-            "--device",
-            device,
-            "--language",
-            language,
-        ]
-        if initial_prompt.strip():
-            transcribe_cmd += ["--initial-prompt", initial_prompt]
-
-        subprocess.run(transcribe_cmd, check=True)
-        logger.info("Step-2 transcribe     : %.2fs", time.time() - t0)
-
-        # 3) ダイアリゼーション
-        t0 = time.time()
-        diarize_cmd: List[str] = [
-            "python3",
-            "diarize.py",
-            temp_wav_path,
-            diarization_json,
-            hf_auth_token,
-            "--device",
-            device,
-        ]
-        if num_speakers.strip():
-            diarize_cmd += ["--num-speakers", num_speakers]
-        else:
-            diarize_cmd += ["--min-speakers", min_speakers, "--max-speakers", max_speakers]
-
-        subprocess.run(diarize_cmd, check=True)
-        logger.info("Step-3 diarize        : %.2fs", time.time() - t0)
-
-        # 4) 結合して GCS へアップロード
-        t0 = time.time()
-        subprocess.run(
-            [
-                "python3",
-                "combine_results.py",
-                transcription_json,
-                diarization_json,
-                full_transcription_path,
-            ],
-            check=True,
+        # 4) diarize
+        diarized = diarize_audio(
+            stt_json,
+            num_speakers=job.num_speakers,
+            min_speakers=job.min_speakers,
+            max_speakers=job.max_speakers,
         )
-        logger.info("Step-4 combine_results: %.2fs", time.time() - t0)
 
-        elapsed = time.time() - total_start
-        logger.info("[%s] 正常終了 (%.2fs) => %s", job_id, elapsed, full_transcription_path)
-        send_completion_notification(job_id, success=True)
+        # 5) combine_results
+        transcript = combine_results(diarized)
 
-    except Exception as exc:  # pylint: disable=broad-except
-        logger.error("[%s] 失敗: %s", job_id, exc)
-        send_completion_notification(job_id, success=False, error_message=str(exc))
-        raise
+        # 成功: GCS & Firestore 更新
+        _upload_text(job.gcs_bucket_name, job.transcription_file_path, transcript)
+        db.collection(COLLECTION_NAME).document(job.job_id).update({
+            "status": "completed",
+            "process_ended_at": firestore.SERVER_TIMESTAMP,
+            "updated_at": firestore.SERVER_TIMESTAMP,
+        })
+        _log(f"Completed: {job.job_id}")
+
+    except Exception as e:
+        tb = traceback.format_exc(limit=2)
+        _log(f"Failed: {job.job_id}\n{e}\n{tb}", level="ERROR")
+        db.collection(COLLECTION_NAME).document(job.job_id).update({
+            "status": "failed",
+            "error_message": tb,
+            "process_ended_at": firestore.SERVER_TIMESTAMP,
+            "updated_at": firestore.SERVER_TIMESTAMP,
+        })
 
     finally:
-        # /tmp は tmpfs だが、容量圧迫を防ぐため念のため削除
-        for fp in (temp_wav_path, transcription_json, diarization_json):
-            try:
-                if os.path.exists(fp):
-                    os.remove(fp)
-                    logger.debug("一時ファイル削除: %s", fp)
-            except Exception as e:  # pylint: disable=broad-except
-                logger.warning("一時ファイル削除失敗 (%s): %s", fp, e)
+        # 作業ディレクトリをクリーンアップ
+        shutil.rmtree(str(workdir), ignore_errors=True)
 
 
-# ---------------------------------------------------------------------------
-# 3. CLI エントリポイント
-# ---------------------------------------------------------------------------
+def main() -> None:
+    _log("Whisper Queue Worker started")
+
+    while True:
+        # ① processing stuck ジョブを failed に
+        _fail_stuck_jobs()
+
+        # ② queued の次ジョブを取得 → なければ終了
+        job = _claim_next_job()
+        if job is None:
+            _log("No queued jobs. Exiting.")
+            break
+
+        # ③ パイプライン実行
+        _process_job(job)
+
+        # 過負荷防止に少し待機
+        time.sleep(POLL_INTERVAL_SECONDS)
+
+    _log("Whisper Queue Worker finished")
+
+
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="音声文字起こし・話者分離バッチ")
-    parser.add_argument(
-        "--device",
-        choices=["cpu", "cuda"],
-        default="cuda",
-        help="使用デバイス (cpu / cuda)",
-    )
-    args = parser.parse_args()
-    os.environ["DEVICE"] = args.device
     main()
