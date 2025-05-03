@@ -63,10 +63,8 @@ class WhisperFirestoreData(BaseModel):
     description: str = ""
     recording_date: str = ""
     gcs_bucket_name : str
-    audio_file_path : str
-    transcription_file_path : str
     audio_size: int  # 音声ファイルのサイズ (バイト単位)
-    audio_duration: int  # 音声ファイルの再生時間 (ミリ秒単位)
+    audio_duration_ms: int  # 音声ファイルの再生時間 (ミリ秒単位)
     file_hash: str
     language: str = "ja"
     initial_prompt: str = ""
