@@ -1,215 +1,269 @@
-#!/usr/bin/env python
 """
-Whisper Queue Worker
+whisper_batch/app/main.py ― Whisper Batch Worker (revised 2025-05-03)
 
-Firestore 上の whisper ジョブを順次処理するキュー仕組み。
-処理中ジョブのタイムアウト監視 → Failed への切替え、
-最古の queued を processing にしてパイプライン実行 → Completed/Failed 更新
-を繰り返し、キューが空になれば終了します。
+Queued → processing → completed/failed のバッチワーカー。
+Firestore のスキーマ差異・環境差異を自己吸収できるよう改修。
 """
 
-import os
-import sys
-import time
+from __future__ import annotations
+
 import datetime
-import traceback
+import json
+import os
 import shutil
+import sys
+import tempfile
+import time
+import traceback
 from pathlib import Path
+from typing import Any, Dict, Optional
 
 from dotenv import load_dotenv
 from google.cloud import firestore, storage
-from common_utils.class_types import WhisperFirestoreData
 
-# --- モジュール読み込み（各処理は既存実装を使う） ---
-from convert_audio    import main as convert_audio
-from transcribe       import main as transcribe_audio
-from diarize          import main as diarize_audio
-from combine_results  import main as combine_results
+# ── 外部ユーティリティ ─────────────────────────────
+from convert_audio import convert_audio
+from transcribe import transcribe_audio
+from diarize import diarize_audio
+from combine_results import combine_results
 
-# --- 設定読み込み (.env → override .env.develop) ---
-BASE_DIR = Path(__file__).resolve().parent.parent
-load_dotenv(BASE_DIR / "config" / ".env")
-load_dotenv(BASE_DIR / "config_develop" / ".env.develop", override=True)
+# ── .env 読み込み ────────────────────────────────
+load_dotenv("config/.env", override=True)
 
-# --- 必須環境変数 ---
-PROJECT_ID        = os.environ["GCP_PROJECT_ID"]
-COLLECTION_NAME   = os.environ["WHISPER_JOBS_COLLECTION"]
-HF_AUTH_TOKEN     = os.environ["HF_AUTH_TOKEN"]
+# ── 環境変数（複数名称をフォールバックで吸収） ──
+COLLECTION: str = (
+    os.getenv("WHISPER_COLLECTION")
+    or os.getenv("WHISPER_JOBS_COLLECTION")
+    or "whisper_jobs"
+)
 
-# --- タイムアウト & ポーリング設定 ---
-PROCESS_TIMEOUT_SECONDS  = int(os.environ.get("PROCESS_TIMEOUT_SECONDS", 300))
-AUDIO_TIMEOUT_MULTIPLIER = float(os.environ.get("AUDIO_TIMEOUT_MULTIPLIER", 1.0))
-POLL_INTERVAL_SECONDS    = int(os.environ.get("POLL_INTERVAL_SECONDS", 5))
-LOCAL_TMP_DIR            = os.environ.get("LOCAL_TMP_DIR", "/tmp")
+PROCESS_TIMEOUT_SECONDS: int = int(os.getenv("PROCESS_TIMEOUT_SECONDS", "300"))
+DURATION_TIMEOUT_FACTOR: float = float(
+    os.getenv("DURATION_TIMEOUT_FACTOR")
+    or os.getenv("AUDIO_TIMEOUT_MULTIPLIER")
+    or "1.5"
+)
 
-# --- GCP クライアント初期化 ---
-db             = firestore.Client(project=PROJECT_ID)
-storage_client = storage.Client(project=PROJECT_ID)
+POLL_INTERVAL_SECONDS: int = int(os.getenv("POLL_INTERVAL_SECONDS", "5"))
 
+# 音声アップロード先バケット（結果も同じバケットに格納）
+GCS_BUCKET_NAME: str = os.getenv("GCS_BUCKET_NAME")
+if not GCS_BUCKET_NAME:
+    sys.stderr.write("[FATAL] GCS_BUCKET_NAME が未設定です。\n")
+    sys.exit(1)
 
+# HuggingFace トークン必須（PyAnnote）
+HF_AUTH_TOKEN: Optional[str] = os.getenv("HF_AUTH_TOKEN")
+if not HF_AUTH_TOKEN:
+    sys.stderr.write(
+        "[FATAL] HF_AUTH_TOKEN が未設定です。話者分離パイプラインが初期化できません。\n"
+    )
+    sys.exit(1)
+
+# デバイス設定
+DEVICE: str = os.getenv("DEVICE", "cuda").lower()
+USE_GPU: bool = DEVICE == "cuda"
+
+# 一時ディレクトリ
+TMP_ROOT: Path = Path(os.getenv("TMP_ROOT") or os.getenv("LOCAL_TMP_DIR", "/tmp"))
+
+# ── 共通ユーティリティ ─────────────────────────────
 def _utcnow() -> datetime.datetime:
-    """UTC 現在時刻を timezone aware で返す"""
-    return datetime.datetime.utcnow().replace(tzinfo=datetime.timezone.utc)
+    return datetime.datetime.now(tz=datetime.timezone.utc)
 
 
 def _log(msg: str, level: str = "INFO") -> None:
-    """標準出力 or 標準エラーにタイムスタンプ付きログを出力"""
-    ts = _utcnow().isoformat()
-    out = sys.stderr if level == "ERROR" else sys.stdout
-    print(f"{ts} [{level}] {msg}", file=out)
+    ts = _utcnow().isoformat(timespec="seconds")
+    out = sys.stderr if level.upper() == "ERROR" else sys.stdout
+    print(f"{ts} [{level}] {msg}", file=out, flush=True)
 
 
-def _fail_stuck_jobs() -> None:
-    """
-    processing 状態でタイムアウト閾値を超えたジョブを failed に更新
-    閾値 = max(PROCESS_TIMEOUT_SECONDS, audio_duration(ms)×AUDIO_TIMEOUT_MULTIPLIER)
-    """
+# ── Firestore タイムアウト判定 ─────────────────────
+def _mark_timeout_jobs(db: firestore.Client) -> None:
+    """processing 状態でタイムアウトしたジョブを failed へ"""
     now = _utcnow()
-    q = db.collection(COLLECTION_NAME).where("status", "==", "processing")
-    for doc in q.stream():
-        data = doc.to_dict()
-        started = data.get("process_started_at")
-        if not started:
+    col = db.collection(COLLECTION)
+    batch = db.batch()
+    updated = False
+
+    for snap in col.where("status", "==", "processing").stream():
+        data = snap.to_dict()
+        started_at: Optional[datetime.datetime] = data.get("process_started_at")
+        if not started_at:
             continue
+        if started_at.tzinfo is None:
+            started_at = started_at.replace(tzinfo=datetime.timezone.utc)
 
-        # Firestore Timestamp → datetime
-        started_dt = started.to_datetime() if hasattr(started, "to_datetime") else started
-        elapsed = (now - started_dt).total_seconds()
+        duration_ms = (
+            data.get("audio_duration_ms")
+            or data.get("audio_duration")
+            or 0
+        )
+        timeout_sec = max(
+            PROCESS_TIMEOUT_SECONDS, int(duration_ms / 1000 * DURATION_TIMEOUT_FACTOR)
+        )
 
-        # 動的閾値計算 (秒)
-        audio_ms = data.get("audio_duration", 0)
-        audio_sec = audio_ms / 1000.0 * AUDIO_TIMEOUT_MULTIPLIER
-        cutoff = max(PROCESS_TIMEOUT_SECONDS, audio_sec)
+        if (now - started_at).total_seconds() > timeout_sec:
+            batch.update(
+                snap.reference,
+                {
+                    "status": "failed",
+                    "error": "timeout",
+                    "updated_at": firestore.SERVER_TIMESTAMP,
+                },
+            )
+            updated = True
 
-        if elapsed > cutoff:
-            _log(f"Timeout → failed: {doc.id} (elapsed {elapsed:.0f}s > {cutoff:.0f}s)", level="ERROR")
-            doc.reference.update({
-                "status": "failed",
-                "error_message": f"Timeout exceeded: waited {elapsed:.0f}s (threshold {cutoff:.0f}s)",
-                "process_ended_at": firestore.SERVER_TIMESTAMP,
-                "updated_at": firestore.SERVER_TIMESTAMP,
-            })
+    if updated:
+        batch.commit()
 
 
-def _claim_next_job() -> WhisperFirestoreData | None:
-    """
-    トランザクションで最古の queued を processing に切替え、
-    WhisperFirestoreData オブジェクトを返す。なければ None。
-    """
+# ── 次ジョブ取得（Transactional） ──────────────────
+def _pick_next_job(db: firestore.Client) -> Optional[Dict[str, Any]]:
     @firestore.transactional
-    def txn(tx: firestore.Transaction):
-        q = (db.collection(COLLECTION_NAME)
-               .where("status", "==", "queued")
-               .order_by("created_at")
-               .limit(1))
-        docs = list(q.stream(transaction=tx))
+    def _txn(tx: firestore.Transaction) -> Optional[Dict[str, Any]]:
+        col = db.collection(COLLECTION)
+        docs = (
+            col.where("status", "==", "queued")
+            .order_by("created_at")
+            .limit(1)
+            .stream(transaction=tx)
+        )
+        docs = list(docs)
         if not docs:
             return None
 
         doc = docs[0]
-        tx.update(doc.reference, {
-            "status": "processing",
-            "process_started_at": firestore.SERVER_TIMESTAMP,
-            "updated_at": firestore.SERVER_TIMESTAMP,
-        })
-        updated_data = doc.to_dict()
-        updated_data.update({
-            "status": "processing",
-            "process_started_at": datetime.datetime.utcnow(),
-            "updated_at": datetime.datetime.utcnow(),
-        })
-        return WhisperFirestoreData(**updated_data)
+        tx.update(
+            doc.reference,
+            {
+                "status": "processing",
+                "process_started_at": firestore.SERVER_TIMESTAMP,
+                "updated_at": firestore.SERVER_TIMESTAMP,
+            },
+        )
+        data = doc.to_dict()
+        data["id"] = doc.id
+        return data
 
-    return txn(db.transaction())
-
-
-def _upload_text(bucket_name: str, path: str, text: str) -> None:
-    """文字起こし結果を GCS にアップロード"""
-    blob = storage_client.bucket(bucket_name).blob(path)
-    blob.upload_from_string(text, content_type="text/plain; charset=utf-8")
+    return _txn(db.transaction())
 
 
-def _process_job(job: WhisperFirestoreData) -> None:
-    """実際の音声変換・文字起こし・話者分離・統合パイプライン実行 & 結果反映"""
-    workdir = Path(LOCAL_TMP_DIR) / job.job_id
-    workdir.mkdir(parents=True, exist_ok=True)
+# ── 個別ジョブ処理 ────────────────────────────────
+def _resolve_audio_uri(job: Dict[str, Any]) -> str:
+    """audio_gcs_uri または (bucket + path) から完全 URI を生成"""
+    if "audio_gcs_uri" in job:
+        return job["audio_gcs_uri"]
+    if "gcs_bucket_name" in job and "audio_file_path" in job:
+        return f"gs://{job['gcs_bucket_name']}/{job['audio_file_path']}"
+    raise KeyError("audio_gcs_uri または gcs_bucket_name+audio_file_path がありません")
+
+
+def _process_job(db: firestore.Client, job: Dict[str, Any]) -> None:
+    job_id = job["id"]
+    try:
+        audio_uri = _resolve_audio_uri(job)
+    except Exception as e:
+        _log(f"JOB {job_id} ✖ Metadata error: {e}", level="ERROR")
+        db.collection(COLLECTION).document(job_id).update(
+            {"status": "failed", "error": str(e), "updated_at": firestore.SERVER_TIMESTAMP}
+        )
+        return
+
+    _log(f"JOB {job_id} ▶ Start  ({audio_uri})")
+
+    tmp_dir = TMP_ROOT / f"job_{job_id}_{int(time.time())}"
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    storage_client = storage.Client()
 
     try:
-        _log(f"Processing start: {job.job_id}")
+        # ── 1. ダウンロード ───────────────────────
+        local_audio = tmp_dir / Path(audio_uri).name
+        bucket_name, blob_path = audio_uri[5:].split("/", 1)
+        storage_client.bucket(bucket_name).blob(blob_path).download_to_filename(
+            local_audio
+        )
+        _log(f"JOB {job_id}  ⤵  Downloaded → {local_audio}")
 
-        # 1) GCS → ローカルへ音声ダウンロード
-        local_audio = workdir / Path(job.audio_file_path).name
-        storage_client.bucket(job.gcs_bucket_name) \
-                      .blob(job.audio_file_path) \
-                      .download_to_filename(str(local_audio))
-        _log(f"Downloaded audio to {local_audio}")
+        # ── 2. フォーマット変換 (16 kHz / mono / wav) ─
+        wav_path = tmp_dir / "audio_16k_mono.wav"
+        convert_audio(str(local_audio), str(wav_path), use_gpu=USE_GPU)
+        _log(f"JOB {job_id}  🎧 Converted → {wav_path}")
 
-        # 2) convert_audio
-        wav_path = convert_audio(str(local_audio), workdir=str(workdir))
+        # ── 3. 文字起こし ───────────────────────
+        transcription_json = tmp_dir / "transcript.json"
+        transcribe_audio(str(wav_path), str(transcription_json), device=DEVICE)
+        _log(f"JOB {job_id}  ✍  Transcribed → {transcription_json}")
 
-        # 3) transcribe
-        stt_json = transcribe_audio(
+        # ── 4. 話者ダイアリゼーション ─────────────
+        diarization_json = tmp_dir / "speaker.json"
+        diarize_audio(
             str(wav_path),
-            language=job.language,
-            initial_prompt=job.initial_prompt,
-            hf_token=HF_AUTH_TOKEN,
+            str(diarization_json),
+            hf_auth_token=HF_AUTH_TOKEN,
+            num_speakers=job.get("num_speakers"),
+            min_speakers=job.get("min_speakers"),
+            max_speakers=job.get("max_speakers"),
+            device=DEVICE,
         )
+        _log(f"JOB {job_id}  👥 Diarized → {diarization_json}")
 
-        # 4) diarize
-        diarized = diarize_audio(
-            stt_json,
-            num_speakers=job.num_speakers,
-            min_speakers=job.min_speakers,
-            max_speakers=job.max_speakers,
+        # ── 5. 結合 ────────────────────────────
+        final_json = tmp_dir / "final.json"
+        combine_results(str(transcription_json), str(diarization_json), str(final_json))
+        _log(f"JOB {job_id}  🔗 Combined → {final_json}")
+
+        # ── 6. アップロード ─────────────────────
+        result_blob_path = f"whisper_results/{job_id}.json"
+        storage_client.bucket(GCS_BUCKET_NAME).blob(result_blob_path).upload_from_filename(
+            final_json
         )
+        result_uri = f"gs://{GCS_BUCKET_NAME}/{result_blob_path}"
+        _log(f"JOB {job_id}  ⬆  Uploaded → {result_uri}")
 
-        # 5) combine_results
-        transcript = combine_results(diarized)
-
-        # 成功: GCS & Firestore 更新
-        _upload_text(job.gcs_bucket_name, job.transcription_file_path, transcript)
-        db.collection(COLLECTION_NAME).document(job.job_id).update({
-            "status": "completed",
-            "process_ended_at": firestore.SERVER_TIMESTAMP,
-            "updated_at": firestore.SERVER_TIMESTAMP,
-        })
-        _log(f"Completed: {job.job_id}")
+        # ── 7. Firestore 更新 ───────────────────
+        db.collection(COLLECTION).document(job_id).update(
+            {
+                "status": "completed",
+                "result_json_uri": result_uri,
+                "completed_at": firestore.SERVER_TIMESTAMP,
+                "updated_at": firestore.SERVER_TIMESTAMP,
+            }
+        )
+        _log(f"JOB {job_id} ✔ Completed")
 
     except Exception as e:
-        tb = traceback.format_exc(limit=2)
-        _log(f"Failed: {job.job_id}\n{e}\n{tb}", level="ERROR")
-        db.collection(COLLECTION_NAME).document(job.job_id).update({
-            "status": "failed",
-            "error_message": tb,
-            "process_ended_at": firestore.SERVER_TIMESTAMP,
-            "updated_at": firestore.SERVER_TIMESTAMP,
-        })
-
+        _log(f"JOB {job_id} ✖ Failed: {e}\n{traceback.format_exc()}", level="ERROR")
+        db.collection(COLLECTION).document(job_id).update(
+            {
+                "status": "failed",
+                "error": str(e),
+                "updated_at": firestore.SERVER_TIMESTAMP,
+            }
+        )
     finally:
-        # 作業ディレクトリをクリーンアップ
-        shutil.rmtree(str(workdir), ignore_errors=True)
+        shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
+# ── メインループ ─────────────────────────────────
 def main() -> None:
-    _log("Whisper Queue Worker started")
+    db = firestore.Client()
 
     while True:
-        # ① processing stuck ジョブを failed に
-        _fail_stuck_jobs()
-
-        # ② queued の次ジョブを取得 → なければ終了
-        job = _claim_next_job()
-        if job is None:
-            _log("No queued jobs. Exiting.")
+        try:
+            _mark_timeout_jobs(db)
+            job = _pick_next_job(db)
+            if job:
+                _process_job(db, job)
+            else:
+                _log("キューが空です。待機…")
+                time.sleep(POLL_INTERVAL_SECONDS)
+        except KeyboardInterrupt:
+            _log("SIGINT 受信。ワーカーを終了します", level="INFO")
             break
-
-        # ③ パイプライン実行
-        _process_job(job)
-
-        # 過負荷防止に少し待機
-        time.sleep(POLL_INTERVAL_SECONDS)
-
-    _log("Whisper Queue Worker finished")
+        except Exception as e:
+            _log(f"Main loop error: {e}\n{traceback.format_exc()}", level="ERROR")
+            time.sleep(POLL_INTERVAL_SECONDS)
 
 
 if __name__ == "__main__":
