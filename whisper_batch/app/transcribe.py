@@ -6,6 +6,41 @@ import os
 import io
 from google.cloud import storage
 import json
+import torch
+import logging
+from common_utils.logger import logger
+
+# グローバルなWhisperモデル - プロセス起動時に1度だけ初期化
+_GLOBAL_WHISPER_MODEL = None
+
+def _get_whisper_model(device="cuda"):
+    """
+    グローバルWhisperモデルを取得または初期化する
+    
+    Args:
+        device (str): 使用するデバイス("cuda"または"cpu")
+        
+    Returns:
+        WhisperModel: 初期化済みのWhisperモデル
+    """
+    global _GLOBAL_WHISPER_MODEL
+    
+    if _GLOBAL_WHISPER_MODEL is None:
+        logger.info(f"初回呼び出し：WhisperモデルをDevice={device}で初期化します")
+        start_time = time.time()
+        
+        # CUDA利用可能かチェック
+        if device == "cuda" and not torch.cuda.is_available():
+            logger.warning("CUDA要求されましたが利用できません。CPUにフォールバックします。")
+            device = "cpu"
+            
+        # モデル初期化
+        _GLOBAL_WHISPER_MODEL = WhisperModel("large", device=device)
+        
+        elapsed = time.time() - start_time
+        logger.info(f"Whisperモデルの初期化完了しました（{elapsed:.2f}秒）")
+    
+    return _GLOBAL_WHISPER_MODEL
 
 def is_gcs_path(path):
     """GCSパスかどうかを判定する"""
@@ -40,18 +75,16 @@ def save_dataframe(df, output_path):
     else:
         save_dataframe_to_local(df, output_path)
 
-def transcribe_audio(audio_path, output_json, device="cuda"):
+def transcribe_audio(audio_path, output_json, device="cuda", job_id=None):
     """音声ファイルの文字起こしを実行してJSONに保存する"""
     now = time.time()
+    log_prefix = f"JOB {job_id} " if job_id else ""
     
-    print(f"Initializing Whisper model on {device.upper()}...")
-    # Whisperモデルの初期化 - 指定されたデバイスを使用
-    model = WhisperModel("large", device=device)
+    # グローバルモデルを取得（初回時は初期化される）
+    model = _get_whisper_model(device)
     
-    model_init_time = time.time()
-    print(f"Model initialization completed in {model_init_time - now:.2f} seconds")
+    logger.info(f"{log_prefix}文字起こし開始: {audio_path}")
     
-    print("Starting transcription...")
     # 文字起こしの実行
     segments, info = model.transcribe(audio_path, beam_size=5)
     
@@ -65,20 +98,19 @@ def transcribe_audio(audio_path, output_json, device="cuda"):
         })
     
     transcription_time = time.time()
-    print(f"Core transcription completed in {transcription_time - model_init_time:.2f} seconds")
+    elapsed = transcription_time - now
+    logger.info(f"{log_prefix}文字起こし処理完了: {elapsed:.2f}秒")
     
     # Pandasデータフレームに変換
     df = pd.DataFrame(data)
     
-    print("Saving results...")
+    logger.info(f"{log_prefix}文字起こし結果を保存: {output_json}")
     # JSONとして保存
     save_dataframe(df, output_json)
     
     save_time = time.time()
-    print(f"Results saving completed in {save_time - transcription_time:.2f} seconds")
-    
     total_time = time.time() - now
-    print(f"Total transcription process completed in {total_time:.2f} seconds")
+    logger.info(f"{log_prefix}文字起こし全工程完了: 合計 {total_time:.2f}秒")
     return df
 
 def main():

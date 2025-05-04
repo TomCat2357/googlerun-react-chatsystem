@@ -82,7 +82,12 @@ def _mark_timeout_jobs(db: firestore.Client) -> None:
             started_at = firestore_data.process_started_at
             if not started_at:
                 continue
-            if started_at.tzinfo is None:
+                
+            # FirestoreのTimestamp型を適切に処理
+            from google.cloud.firestore_v1._helpers import Timestamp
+            if isinstance(started_at, Timestamp):
+                started_at = started_at.to_datetime().replace(tzinfo=datetime.timezone.utc)
+            elif started_at.tzinfo is None:
                 started_at = started_at.replace(tzinfo=datetime.timezone.utc)
             duration_ms = firestore_data.audio_duration_ms or 0
             # タイムアウト時間計算
@@ -147,7 +152,9 @@ def _pick_next_job(db: firestore.Client) -> Optional[Dict[str, Any]]:
         )
         # WhisperFirestoreDataでデータ検証
         try:
-            firestore_data = WhisperFirestoreData(**doc.to_dict())
+            data = doc.to_dict()
+            data["job_id"] = doc.id # ドキュメントIDをjob_idとして追加
+            firestore_data = WhisperFirestoreData(**data)
             # 検証が通ったデータを辞書に戻して返す
             return dict(firestore_data.model_dump())
         except Exception as e:
@@ -208,8 +215,10 @@ def _process_job(db: firestore.Client, job: Dict[str, Any]) -> None:
     ext = Path(filename).suffix.lstrip(".").lower()
     audio_blob = f"{file_hash}_audio.{ext}"
     transcript_blob = f"{file_hash}_transcript.json"
+    final_blob = f"{file_hash}_final.json"  # 結合結果用の別ファイル名
     audio_uri = f"gs://{bucket}/{audio_blob}"
     transcript_uri = f"gs://{bucket}/{transcript_blob}"
+    final_uri = f"gs://{bucket}/{final_blob}"  # 結合結果用のURI
 
     logger.info(f"JOB {job_id} ▶ Start (audio: {audio_uri})")
 
@@ -241,13 +250,13 @@ def _process_job(db: firestore.Client, job: Dict[str, Any]) -> None:
 
         # Whisperモデルによる文字起こし
         transcript_local = tmp_dir / transcript_blob
-        transcribe_audio(str(wav_path), str(transcript_local), device=DEVICE)
+        transcribe_audio(str(wav_path), str(transcript_local), device=DEVICE, job_id=job_id)
         logger.info(f"JOB {job_id} ✍ Transcribed → {transcript_local}")
 
-        # 話者数をチェック
-        num_speakers = job.get("num_speakers")
-        min_speakers = job.get("min_speakers", 1)
-        max_speakers = job.get("max_speakers", 1)
+        # 話者数をチェック（文字列型の可能性があるので整数に変換）
+        num_speakers = int(job.get("num_speakers")) if job.get("num_speakers") is not None else None
+        min_speakers = int(job.get("min_speakers", 1))
+        max_speakers = int(job.get("max_speakers", 1))
 
         # 話者分離またはシンプルな話者情報の生成
         diarization_local = tmp_dir / "speaker.json"
@@ -269,6 +278,7 @@ def _process_job(db: firestore.Client, job: Dict[str, Any]) -> None:
                 min_speakers=min_speakers,
                 max_speakers=max_speakers,
                 device=DEVICE,
+                job_id=job_id
             )
             logger.info(f"JOB {job_id} 👥 Diarized → {diarization_local}")
 
@@ -277,11 +287,17 @@ def _process_job(db: firestore.Client, job: Dict[str, Any]) -> None:
         combine_results(str(transcript_local), str(diarization_local), str(final_local))
         logger.info(f"JOB {job_id} 🔗 Combined → {final_local}")
 
-        # 結合結果をCloud Storageにアップロード
+        # 文字起こし結果をCloud Storageにアップロード
         storage_client.bucket(bucket).blob(transcript_blob).upload_from_filename(
+            transcript_local
+        )
+        logger.info(f"JOB {job_id} ⬆ Uploaded transcription → {transcript_uri}")
+        
+        # 結合結果を別ファイルとしてCloud Storageにアップロード
+        storage_client.bucket(bucket).blob(final_blob).upload_from_filename(
             final_local
         )
-        logger.info(f"JOB {job_id} ⬆ Uploaded → {transcript_uri}")
+        logger.info(f"JOB {job_id} ⬆ Uploaded final result → {final_uri}")
 
         # 処理成功をFirestoreに反映
         db.collection(COLLECTION).document(job_id).update(
@@ -297,14 +313,24 @@ def _process_job(db: firestore.Client, job: Dict[str, Any]) -> None:
         # エラー発生時の処理
         err = str(e)
         logger.error(f"JOB {job_id} ✖ Failed: {err}\n{traceback.format_exc()}")
-        db.collection(COLLECTION).document(job_id).update(
-            {
-                "status": "failed",
-                "error_message": err,
-                "process_ended_at": firestore.SERVER_TIMESTAMP,
-                "updated_at": firestore.SERVER_TIMESTAMP,
-            }
-        )
+        
+        # 更新データを準備
+        update_data = {
+            "status": "failed",
+            "error_message": err,
+            "process_ended_at": firestore.SERVER_TIMESTAMP,
+            "updated_at": firestore.SERVER_TIMESTAMP,
+        }
+        
+        # process_started_atがない場合は追加（タイムアウト判定のため）
+        job_doc = db.collection(COLLECTION).document(job_id).get()
+        if job_doc.exists:
+            job_data = job_doc.to_dict() or {}
+            if not job_data.get("process_started_at"):
+                update_data["process_started_at"] = firestore.SERVER_TIMESTAMP
+        
+        # 更新を実行
+        db.collection(COLLECTION).document(job_id).update(update_data)
 
     finally:
         # 一時ファイルの削除（エラーが発生しても削除を試みる）
