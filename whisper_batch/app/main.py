@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional
 
 from dotenv import load_dotenv
 from google.cloud import firestore, storage
+from common_utils.class_types import WhisperFirestoreData
 
 # ── 外部ユーティリティ ─────────────────────────────
 # 音声ファイル形式変換、文字起こし、話者分離、結果結合のためのモジュール
@@ -70,6 +71,7 @@ def _mark_timeout_jobs(db: firestore.Client) -> None:
     Note:
         - 処理開始時刻から一定時間（基本タイムアウト時間か音声長に比例した時間の長い方）経過したジョブを検出
         - バッチ処理で該当ジョブのステータスを「失敗」に更新
+        - WhisperFirestoreDataモデルを使ってデータを検証
     """
     now = _utcnow()
     col = db.collection(COLLECTION)
@@ -77,23 +79,32 @@ def _mark_timeout_jobs(db: firestore.Client) -> None:
     updated = False
     for snap in col.where("status", "==", "processing").stream():
         data = snap.to_dict()
-        started_at = data.get("process_started_at")
-        if not started_at:
-            continue
-        if started_at.tzinfo is None:
-            started_at = started_at.replace(tzinfo=datetime.timezone.utc)
-        duration_ms = data.get("audio_duration_ms") or 0
-        # タイムアウト時間は基本タイムアウト時間か音声長に比例した時間の長い方を採用
-        timeout_sec = max(
-            PROCESS_TIMEOUT_SECONDS,
-            int(duration_ms/1000 * DURATION_TIMEOUT_FACTOR),
-        )
-        if (now - started_at).total_seconds() > timeout_sec:
-            batch.update(
-                snap.reference,
-                {"status": "failed", "error_message": "timeout", "updated_at": firestore.SERVER_TIMESTAMP},
+        # ドキュメントIDをjob_idとして追加
+        data["job_id"] = snap.id
+        # WhisperFirestoreDataでデータ検証
+        try:
+            firestore_data = WhisperFirestoreData(**data)
+            # 以降はValidationが通ったデータを使用
+            started_at = firestore_data.process_started_at
+            if not started_at:
+                continue
+            if started_at.tzinfo is None:
+                started_at = started_at.replace(tzinfo=datetime.timezone.utc)
+            duration_ms = firestore_data.audio_duration_ms or 0
+            # タイムアウト時間計算
+            timeout_sec = max(
+                PROCESS_TIMEOUT_SECONDS,
+                int(duration_ms/1000 * DURATION_TIMEOUT_FACTOR),
             )
-            updated = True
+            if (now - started_at).total_seconds() > timeout_sec:
+                batch.update(
+                    snap.reference,
+                    {"status": "failed", "error_message": "timeout", "updated_at": firestore.SERVER_TIMESTAMP},
+                )
+                updated = True
+        except Exception as e:
+            # データ検証エラーのログ記録
+            _log(f"データ検証エラー (job_id={snap.id}): {e}", level="ERROR")
     if updated:
         batch.commit()
 
@@ -112,6 +123,7 @@ def _pick_next_job(db: firestore.Client) -> Optional[Dict[str, Any]]:
         - トランザクション内で処理を実行してジョブの競合を防止
         - 作成日時の古い順に1件取得し、ステータスを「processing」に更新
         - ドキュメントIDを「job_id」キーに追加してジョブデータを返す
+        - WhisperFirestoreDataモデルを使ってデータを検証
     """
     @firestore.transactional
     def _txn(tx: firestore.Transaction) -> Optional[Dict[str, Any]]:
@@ -136,7 +148,17 @@ def _pick_next_job(db: firestore.Client) -> Optional[Dict[str, Any]]:
         )
         data = doc.to_dict()
         data["job_id"] = doc.id
-        return data
+        
+        # WhisperFirestoreDataでデータ検証
+        try:
+            firestore_data = WhisperFirestoreData(**data)
+            # 検証が通ったデータを辞書に戻して返す
+            return dict(firestore_data.dict())
+        except Exception as e:
+            # データ検証エラーのログ記録
+            _log(f"データ検証エラー (job_id={doc.id}): {e}", level="ERROR")
+            # エラーの場合は処理をスキップ
+            return None
     return _txn(db.transaction())
 
 
@@ -149,7 +171,7 @@ def _process_job(db: firestore.Client, job: Dict[str, Any]) -> None:
         job (Dict[str, Any]): 処理対象のジョブデータ
     
     Note:
-        - 必須メタデータ（job_id, filename, gcs_bucket_name, file_hash）の検証
+        - WhisperFirestoreDataモデルを使ってデータを検証
         - Cloud Storageから音声ファイルをダウンロード
         - 音声ファイルを16kHzモノラルWAV形式に変換
         - Whisperモデルによる文字起こし
@@ -160,26 +182,22 @@ def _process_job(db: firestore.Client, job: Dict[str, Any]) -> None:
         - エラー発生時は例外をキャッチしてエラー情報を記録
         - 一時ファイルは処理完了後に削除
     """
-    # 必須メタデータのチェック
-    job_id = job.get("job_id")
-    filename = job.get("filename")
-    bucket = job.get("gcs_bucket_name")
-    file_hash = job.get("file_hash")
-
-    missing: List[str] = []
-    if not job_id:
-        missing.append("job_id")
-    if not filename:
-        missing.append("filename")
-    if not bucket:
-        missing.append("gcs_bucket_name")
-    if not file_hash:
-        missing.append("file_hash")
-
-    if missing:
-        msg = f"Required metadata missing: {', '.join(missing)}"
-        _log(f"JOB {job_id or '<unknown>'} ✖ Metadata error: {msg}", level="ERROR")
-        if job_id:
+    # WhisperFirestoreDataでデータ検証を試みる
+    try:
+        # データモデルを通して検証
+        firestore_data = WhisperFirestoreData(**job)
+        
+        # 検証が通ったデータを使用
+        job_id = firestore_data.job_id
+        filename = firestore_data.filename
+        bucket = firestore_data.gcs_bucket_name
+        file_hash = firestore_data.file_hash
+    except Exception as e:
+        # データ検証エラーのログ記録
+        job_id = job.get("job_id", "<unknown>")
+        msg = f"データモデル検証エラー: {e}"
+        _log(f"JOB {job_id} ✖ {msg}", level="ERROR")
+        if job_id != "<unknown>":
             db.collection(COLLECTION).document(job_id).update({
                 "status": "failed",
                 "error_message": msg,
@@ -242,7 +260,6 @@ def _process_job(db: firestore.Client, job: Dict[str, Any]) -> None:
         # 処理成功をFirestoreに反映
         db.collection(COLLECTION).document(job_id).update({
             "status": "completed",
-            "result_json_uri": transcript_uri,
             "process_ended_at": firestore.SERVER_TIMESTAMP,
             "updated_at": firestore.SERVER_TIMESTAMP,
         })
