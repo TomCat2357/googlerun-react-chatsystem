@@ -56,18 +56,18 @@ class WhisperUploadRequest(BaseModel):
 
 # Whisperでのfirebase保存データの型
 class WhisperFirestoreData(BaseModel):
-    job_id: str
-    user_id: str
-    user_email: str
-    filename: str
-    description: str = ""
-    recording_date: str = ""
-    gcs_bucket_name : str
+    job_id: str # ジョブID。リクエストIDをそのまま使用
+    user_id: str # ユーザーのID。Firebase AuthのUIDを使用
+    user_email: str # ユーザーのメールアドレス
+    filename: str # 元の音声ファイルの名前。GCS上のファイル名ではない。
+    description: str = "" # 音声ファイルの説明
+    recording_date: str = "" # 録音日時。YYYY-MM-DD形式。
+    gcs_bucket_name : str # GCSのバケット名
     audio_size: int  # 音声ファイルのサイズ (バイト単位)
     audio_duration_ms: int  # 音声ファイルの再生時間 (ミリ秒単位)
-    file_hash: str
-    language: str = "ja"
-    initial_prompt: str = ""
+    file_hash: str # 音声ファイルのハッシュ値。MD5を使用。
+    language: str = "ja" # 音声ファイルの言語。デフォルトは日本語。
+    initial_prompt: str = ""  # Whisperの初期プロンプト。デフォルトは空文字列。
     status: str  # "queued", "processing", "completed", "failed", "canceled"
     created_at: Any = None  # FirestoreのSERVER_TIMESTAMPを使用するため
     updated_at: Any = None  # FirestoreのSERVER_TIMESTAMPを使用するため
