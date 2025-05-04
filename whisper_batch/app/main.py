@@ -6,6 +6,9 @@ import shutil
 import sys
 import time
 import traceback
+import io
+import pandas as pd
+import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -16,10 +19,10 @@ from common_utils.logger import logger
 
 # ── 外部ユーティリティ ─────────────────────────────
 # 音声ファイル形式変換、文字起こし、話者分離、結果結合のためのモジュール
-from convert_audio import convert_audio  # 音声ファイルを16kHzモノラルWAV形式に変換
+from convert_audio import convert_audio, check_audio_format  # 音声ファイルを16kHzモノラルWAV形式に変換
 from transcribe import transcribe_audio  # 音声を文字起こし
 from diarize import diarize_audio  # 話者分離を実行
-from combine_results import combine_results  # 文字起こしと話者分離の結果を結合
+from combine_results import combine_results, read_json, save_dataframe  # 文字起こしと話者分離の結果を結合
 
 # ── .env 読み込み ────────────────────────────────
 # 設定ファイルを読み込み、既存の環境変数を上書き
@@ -221,30 +224,55 @@ def _process_job(db: firestore.Client, job: Dict[str, Any]) -> None:
         storage_client.bucket(bucket).blob(audio_blob).download_to_filename(local_audio)
         logger.info(f"JOB {job_id} ⤵ Downloaded → {local_audio}")
 
-        # 音声ファイルを16kHzモノラルWAV形式に変換
+        # 音声ファイルを16kHzモノラルWAV形式に変換（または既に適切な形式ならコピー）
         wav_path = tmp_dir / f"{file_hash}_16k_mono.wav"
-        convert_audio(str(local_audio), str(wav_path), use_gpu=USE_GPU)
-        logger.info(f"JOB {job_id} 🎧 Converted → {wav_path}")
+        
+        # ファイルが既に16kHzモノラルWAVか確認
+        is_optimized_format = check_audio_format(str(local_audio))
+        
+        if is_optimized_format:
+            # 既に適切なフォーマットならコピーするだけ
+            shutil.copy2(str(local_audio), str(wav_path))
+            logger.info(f"JOB {job_id} 🎧 Format already 16kHz mono WAV → {wav_path}")
+        else:
+            # 変換が必要な場合は通常通り変換
+            convert_audio(str(local_audio), str(wav_path), use_gpu=USE_GPU)
+            logger.info(f"JOB {job_id} 🎧 Converted → {wav_path}")
 
         # Whisperモデルによる文字起こし
         transcript_local = tmp_dir / transcript_blob
         transcribe_audio(str(wav_path), str(transcript_local), device=DEVICE)
         logger.info(f"JOB {job_id} ✍ Transcribed → {transcript_local}")
 
-        # 話者分離の実行
-        diarization_local = tmp_dir / "speaker.json"
-        diarize_audio(
-            str(wav_path),
-            str(diarization_local),
-            hf_auth_token=HF_AUTH_TOKEN,  # Hugging Face認証トークン
-            num_speakers=job.get("num_speakers"),  # 話者数（指定がある場合）
-            min_speakers=job.get("min_speakers", 1),  # 最小話者数（デフォルト1）
-            max_speakers=job.get("max_speakers", 1),  # 最大話者数（デフォルト1）
-            device=DEVICE,  # 使用デバイス（CUDA/CPU）
-        )
-        logger.info(f"JOB {job_id} 👥 Diarized → {diarization_local}")
+        # 話者数をチェック
+        num_speakers = job.get("num_speakers")
+        min_speakers = job.get("min_speakers", 1)
+        max_speakers = job.get("max_speakers", 1)
 
-        # 文字起こしと話者分離の結果を結合
+        # 話者分離またはシンプルな話者情報の生成
+        diarization_local = tmp_dir / "speaker.json"
+        
+        # 単一話者かどうかを確認
+        is_single_speaker = num_speakers == 1 or (num_speakers is None and max_speakers == 1)
+        
+        if is_single_speaker:
+            # 単一話者の場合、話者分離をスキップして簡易的な話者情報を生成
+            create_single_speaker_json(str(transcript_local), str(diarization_local))
+            logger.info(f"JOB {job_id} 👤 Single speaker mode → {diarization_local}")
+        else:
+            # 複数話者の場合は通常通り話者分離を実行
+            diarize_audio(
+                str(wav_path),
+                str(diarization_local),
+                hf_auth_token=HF_AUTH_TOKEN,  # Hugging Face認証トークン
+                num_speakers=num_speakers,
+                min_speakers=min_speakers,
+                max_speakers=max_speakers,
+                device=DEVICE,
+            )
+            logger.info(f"JOB {job_id} 👥 Diarized → {diarization_local}")
+
+        # 文字起こしと話者分離の結果を結合（シンプルな話者情報の場合も同様）
         final_local = tmp_dir / "final.json"
         combine_results(str(transcript_local), str(diarization_local), str(final_local))
         logger.info(f"JOB {job_id} 🔗 Combined → {final_local}")
@@ -281,6 +309,54 @@ def _process_job(db: firestore.Client, job: Dict[str, Any]) -> None:
     finally:
         # 一時ファイルの削除（エラーが発生しても削除を試みる）
         shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def create_single_speaker_json(transcription_path, output_path):
+    """
+    単一話者用の話者情報JSONを生成する
+    
+    Args:
+        transcription_path (str): 文字起こし結果JSONのパス
+        output_path (str): 出力する話者情報JSONのパス
+    """
+    try:
+        # 文字起こし結果を読み込む
+        transcription_df = read_json(transcription_path)
+        
+        # 単一話者用のデータを作成
+        speaker_data = []
+        for _, row in transcription_df.iterrows():
+            speaker_data.append({
+                "start": row["start"],
+                "end": row["end"],
+                "speaker": "SPEAKER_01"  # 全セグメントを同一話者に割り当て
+            })
+        
+        # データフレームに変換して保存
+        speaker_df = pd.DataFrame(speaker_data)
+        save_dataframe(speaker_df, output_path)
+        
+        logger.info(f"単一話者JSONを生成しました: {output_path}")
+        
+    except Exception as e:
+        # エラー時は最小限の話者情報を生成（空のJSON配列）
+        logger.error(f"単一話者JSONの生成中にエラー: {e}")
+        
+        if output_path.startswith("gs://"):
+            # GCSの場合
+            path_without_prefix = output_path[5:]
+            bucket_name, blob_path = path_without_prefix.split("/", 1)
+            
+            storage_client = storage.Client()
+            bucket = storage_client.bucket(bucket_name)
+            blob = bucket.blob(blob_path)
+            
+            blob.upload_from_string("[]", content_type='application/json')
+        else:
+            # ローカルの場合
+            os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
+            with open(output_path, 'w') as f:
+                json.dump([], f)
 
 
 def main() -> None:

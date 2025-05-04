@@ -3,6 +3,8 @@ import io
 import os
 import subprocess
 import tempfile
+import wave
+import shutil
 from google.cloud import storage
 
 def is_gcs_path(path):
@@ -39,6 +41,31 @@ def get_file_bytes(file_path):
     else:
         return get_local_file_bytes(file_path)
 
+def check_audio_format(audio_path):
+    """
+    音声ファイルが16kHzモノラルWAV形式かチェックする
+    
+    Args:
+        audio_path (str): 検査する音声ファイルのパス
+        
+    Returns:
+        bool: 既に適切なフォーマット（16kHz、モノラル、WAV形式）ならTrue、そうでなければFalse
+    """
+    try:
+        # WAVファイルでなければFalse
+        if not audio_path.lower().endswith('.wav'):
+            return False
+            
+        with wave.open(audio_path, 'rb') as wf:
+            # サンプルレート16kHz、チャンネル数1、サンプル幅2バイト(16bit)かチェック
+            return (wf.getframerate() == 16000 and 
+                    wf.getnchannels() == 1 and 
+                    wf.getsampwidth() == 2)
+    except Exception as e:
+        print(f"フォーマットチェック中にエラー: {e}")
+        return False
+
+
 def save_to_gcs(local_path, gcs_uri):
     """ローカルファイルをGCSにアップロードする"""
     path_without_prefix = gcs_uri[5:]
@@ -53,6 +80,17 @@ def save_to_gcs(local_path, gcs_uri):
 
 def convert_audio(input_path, output_path, use_gpu=True):
     """音声ファイルをWAV形式に変換する"""
+    # 入力ファイルが既に16kHzモノラルWAV形式かチェック
+    if not is_gcs_path(input_path) and check_audio_format(input_path):
+        print(f"Input file {input_path} is already in 16kHz mono WAV format, skipping conversion")
+        # 同じパスでない場合はコピー、同じ場合は何もしない
+        if input_path != output_path:
+            if is_gcs_path(output_path):
+                save_to_gcs(input_path, output_path)
+            else:
+                shutil.copy2(input_path, output_path)
+        return
+    
     # 入力ファイルを読み込む
     audio_bytes = get_file_bytes(input_path)
     
