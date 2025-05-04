@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional
 from dotenv import load_dotenv
 from google.cloud import firestore, storage
 from common_utils.class_types import WhisperFirestoreData
+from common_utils.logger import logger
 
 # ── 外部ユーティリティ ─────────────────────────────
 # 音声ファイル形式変換、文字起こし、話者分離、結果結合のためのモジュール
@@ -44,21 +45,6 @@ def _utcnow() -> datetime.datetime:
     """
     return datetime.datetime.now(tz=datetime.timezone.utc)
 
-
-def _log(msg: str, level: str = "INFO") -> None:
-    """
-    タイムスタンプ付きでログメッセージを出力する
-    
-    Args:
-        msg (str): 出力するメッセージ本文
-        level (str, optional): ログレベル（"INFO"または"ERROR"など）。デフォルトは"INFO"
-    
-    Note:
-        ERRORレベルの場合は標準エラー出力に、それ以外は標準出力に出力する
-    """
-    ts = _utcnow().isoformat(timespec="seconds")
-    out = sys.stderr if level.upper() == "ERROR" else sys.stdout
-    print(f"{ts} [{level}] {msg}", file=out, flush=True)
 
 
 def _mark_timeout_jobs(db: firestore.Client) -> None:
@@ -104,7 +90,7 @@ def _mark_timeout_jobs(db: firestore.Client) -> None:
                 updated = True
         except Exception as e:
             # データ検証エラーのログ記録
-            _log(f"データ検証エラー (job_id={snap.id}): {e}", level="ERROR")
+            logger.error(f"データ検証エラー (job_id={snap.id}): {e}")
     if updated:
         batch.commit()
 
@@ -156,7 +142,7 @@ def _pick_next_job(db: firestore.Client) -> Optional[Dict[str, Any]]:
             return dict(firestore_data.dict())
         except Exception as e:
             # データ検証エラーのログ記録
-            _log(f"データ検証エラー (job_id={doc.id}): {e}", level="ERROR")
+            logger.error(f"データ検証エラー (job_id={doc.id}): {e}")
             # エラーの場合は処理をスキップ
             return None
     return _txn(db.transaction())
@@ -196,7 +182,7 @@ def _process_job(db: firestore.Client, job: Dict[str, Any]) -> None:
         # データ検証エラーのログ記録
         job_id = job.get("job_id", "<unknown>")
         msg = f"データモデル検証エラー: {e}"
-        _log(f"JOB {job_id} ✖ {msg}", level="ERROR")
+        logger.error(f"JOB {job_id} ✖ {msg}")
         if job_id != "<unknown>":
             db.collection(COLLECTION).document(job_id).update({
                 "status": "failed",
@@ -212,7 +198,7 @@ def _process_job(db: firestore.Client, job: Dict[str, Any]) -> None:
     audio_uri = f"gs://{bucket}/{audio_blob}"
     transcript_uri = f"gs://{bucket}/{transcript_blob}"
 
-    _log(f"JOB {job_id} ▶ Start (audio: {audio_uri})")
+    logger.info(f"JOB {job_id} ▶ Start (audio: {audio_uri})")
 
     # 一時ディレクトリの作成（ジョブIDとタイムスタンプを含む一意の名前）
     tmp_dir = TMP_ROOT / f"job_{job_id}_{int(time.time())}"
@@ -223,17 +209,17 @@ def _process_job(db: firestore.Client, job: Dict[str, Any]) -> None:
         # Cloud Storageから音声ファイルをダウンロード
         local_audio = tmp_dir / audio_blob
         storage_client.bucket(bucket).blob(audio_blob).download_to_filename(local_audio)
-        _log(f"JOB {job_id} ⤵ Downloaded → {local_audio}")
+        logger.info(f"JOB {job_id} ⤵ Downloaded → {local_audio}")
 
         # 音声ファイルを16kHzモノラルWAV形式に変換
         wav_path = tmp_dir / f"{file_hash}_16k_mono.wav"
         convert_audio(str(local_audio), str(wav_path), use_gpu=USE_GPU)
-        _log(f"JOB {job_id} 🎧 Converted → {wav_path}")
+        logger.info(f"JOB {job_id} 🎧 Converted → {wav_path}")
 
         # Whisperモデルによる文字起こし
         transcript_local = tmp_dir / transcript_blob
         transcribe_audio(str(wav_path), str(transcript_local), device=DEVICE)
-        _log(f"JOB {job_id} ✍ Transcribed → {transcript_local}")
+        logger.info(f"JOB {job_id} ✍ Transcribed → {transcript_local}")
 
         # 話者分離の実行
         diarization_local = tmp_dir / "speaker.json"
@@ -246,16 +232,16 @@ def _process_job(db: firestore.Client, job: Dict[str, Any]) -> None:
             max_speakers=job.get("max_speakers", 1),  # 最大話者数（デフォルト1）
             device=DEVICE,  # 使用デバイス（CUDA/CPU）
         )
-        _log(f"JOB {job_id} 👥 Diarized → {diarization_local}")
+        logger.info(f"JOB {job_id} 👥 Diarized → {diarization_local}")
 
         # 文字起こしと話者分離の結果を結合
         final_local = tmp_dir / "final.json"
         combine_results(str(transcript_local), str(diarization_local), str(final_local))
-        _log(f"JOB {job_id} 🔗 Combined → {final_local}")
+        logger.info(f"JOB {job_id} 🔗 Combined → {final_local}")
 
         # 結合結果をCloud Storageにアップロード
         storage_client.bucket(bucket).blob(transcript_blob).upload_from_filename(final_local)
-        _log(f"JOB {job_id} ⬆ Uploaded → {transcript_uri}")
+        logger.info(f"JOB {job_id} ⬆ Uploaded → {transcript_uri}")
 
         # 処理成功をFirestoreに反映
         db.collection(COLLECTION).document(job_id).update({
@@ -263,12 +249,12 @@ def _process_job(db: firestore.Client, job: Dict[str, Any]) -> None:
             "process_ended_at": firestore.SERVER_TIMESTAMP,
             "updated_at": firestore.SERVER_TIMESTAMP,
         })
-        _log(f"JOB {job_id} ✔ Completed")
+        logger.info(f"JOB {job_id} ✔ Completed")
 
     except Exception as e:
         # エラー発生時の処理
         err = str(e)
-        _log(f"JOB {job_id} ✖ Failed: {err}\n{traceback.format_exc()}", level="ERROR")
+        logger.error(f"JOB {job_id} ✖ Failed: {err}\n{traceback.format_exc()}")
         db.collection(COLLECTION).document(job_id).update({
             "status": "failed",
             "error_message": err,
@@ -302,13 +288,13 @@ def main() -> None:
             if job:
                 _process_job(db, job)  # ジョブを処理
             else:
-                _log("キューが空です。待機…")
+                logger.info("キューが空です。待機…")
                 time.sleep(POLL_INTERVAL_SECONDS)  # 一定時間待機
         except KeyboardInterrupt:
-            _log("SIGINT 受信。ワーカーを終了します", level="INFO")
+            logger.info("SIGINT 受信。ワーカーを終了します")
             break
         except Exception as e:
-            _log(f"Main loop error: {e}\n{traceback.format_exc()}", level="ERROR")
+            logger.error(f"Main loop error: {e}\n{traceback.format_exc()}")
             time.sleep(POLL_INTERVAL_SECONDS)  # エラー時も一定時間待機
 
 
