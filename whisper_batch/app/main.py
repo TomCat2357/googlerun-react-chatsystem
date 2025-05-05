@@ -19,14 +19,35 @@ from common_utils.logger import logger
 
 # ── 外部ユーティリティ ─────────────────────────────
 # 音声ファイル形式変換、文字起こし、話者分離、結果結合のためのモジュール
-from .convert_audio import convert_audio, check_audio_format  # 音声ファイルを16kHzモノラルWAV形式に変換
+from .convert_audio import (
+    convert_audio,
+    check_audio_format,
+)  # 音声ファイルを16kHzモノラルWAV形式に変換
 from .transcribe import transcribe_audio  # 音声を文字起こし
 from .diarize import diarize_audio  # 話者分離を実行
-from .combine_results import combine_results, read_json, save_dataframe  # 文字起こしと話者分離の結果を結合
+from .combine_results import (
+    combine_results,
+    read_json,
+    save_dataframe,
+)  # 文字起こしと話者分離の結果を結合
 
 # ── .env 読み込み ────────────────────────────────
 # 設定ファイルを読み込み、既存の環境変数を上書き
-load_dotenv("config/.env", override=True)
+
+# スクリプトの場所を基準にする
+BASE_DIR = Path(__file__).resolve().parent.parent
+config_path = os.path.join(BASE_DIR, "config", ".env")
+load_dotenv(config_path)
+
+develop_config_path = os.path.join(BASE_DIR, "config_develop", ".env.develop")
+if os.path.exists(develop_config_path):
+    load_dotenv(develop_config_path)
+
+# スクリプトの場所を基準にして、BASEDIRをつくって、GOOGLE_APPLICATION_CREDENTIALSについても絶対パスにする。
+if BASE_DIR not in os.environ["GOOGLE_APPLICATION_CREDENTIALS"]:
+    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = os.path.join(
+        BASE_DIR, os.environ["GOOGLE_APPLICATION_CREDENTIALS"]
+    )
 
 # ── 環境変数（未設定時は KeyError を発生させる） ───────────────────────────────────
 COLLECTION: str = os.environ["WHISPER_JOBS_COLLECTION"]  # Firestoreのコレクション名
@@ -82,11 +103,14 @@ def _mark_timeout_jobs(db: firestore.Client) -> None:
             started_at = firestore_data.process_started_at
             if not started_at:
                 continue
-                
+
             # FirestoreのTimestamp型を適切に処理
             from google.cloud.firestore_v1._helpers import Timestamp
+
             if isinstance(started_at, Timestamp):
-                started_at = started_at.to_datetime().replace(tzinfo=datetime.timezone.utc)
+                started_at = started_at.to_datetime().replace(
+                    tzinfo=datetime.timezone.utc
+                )
             elif started_at.tzinfo is None:
                 started_at = started_at.replace(tzinfo=datetime.timezone.utc)
             duration_ms = firestore_data.audio_duration_ms or 0
@@ -153,7 +177,7 @@ def _pick_next_job(db: firestore.Client) -> Optional[Dict[str, Any]]:
         # WhisperFirestoreDataでデータ検証
         try:
             data = doc.to_dict()
-            data["job_id"] = doc.id # ドキュメントIDをjob_idとして追加
+            data["job_id"] = doc.id  # ドキュメントIDをjob_idとして追加
             firestore_data = WhisperFirestoreData(**data)
             # 検証が通ったデータを辞書に戻して返す
             return dict(firestore_data.model_dump())
@@ -235,10 +259,10 @@ def _process_job(db: firestore.Client, job: Dict[str, Any]) -> None:
 
         # 音声ファイルを16kHzモノラルWAV形式に変換（または既に適切な形式ならコピー）
         wav_path = tmp_dir / f"{file_hash}_16k_mono.wav"
-        
+
         # ファイルが既に16kHzモノラルWAVか確認
         is_optimized_format = check_audio_format(str(local_audio))
-        
+
         if is_optimized_format:
             # 既に適切なフォーマットならコピーするだけ
             shutil.copy2(str(local_audio), str(wav_path))
@@ -250,20 +274,28 @@ def _process_job(db: firestore.Client, job: Dict[str, Any]) -> None:
 
         # Whisperモデルによる文字起こし
         transcript_local = tmp_dir / transcript_blob
-        transcribe_audio(str(wav_path), str(transcript_local), device=DEVICE, job_id=job_id)
+        transcribe_audio(
+            str(wav_path), str(transcript_local), device=DEVICE, job_id=job_id
+        )
         logger.info(f"JOB {job_id} ✍ Transcribed → {transcript_local}")
 
         # 話者数をチェック（文字列型の可能性があるので整数に変換）
-        num_speakers = int(job.get("num_speakers")) if job.get("num_speakers") is not None else None
+        num_speakers = (
+            int(job.get("num_speakers"))
+            if job.get("num_speakers") is not None
+            else None
+        )
         min_speakers = int(job.get("min_speakers", 1))
         max_speakers = int(job.get("max_speakers", 1))
 
         # 話者分離またはシンプルな話者情報の生成
         diarization_local = tmp_dir / "speaker.json"
-        
+
         # 単一話者かどうかを確認
-        is_single_speaker = num_speakers == 1 or (num_speakers is None and max_speakers == 1)
-        
+        is_single_speaker = num_speakers == 1 or (
+            num_speakers is None and max_speakers == 1
+        )
+
         if is_single_speaker:
             # 単一話者の場合、話者分離をスキップして簡易的な話者情報を生成
             create_single_speaker_json(str(transcript_local), str(diarization_local))
@@ -278,7 +310,7 @@ def _process_job(db: firestore.Client, job: Dict[str, Any]) -> None:
                 min_speakers=min_speakers,
                 max_speakers=max_speakers,
                 device=DEVICE,
-                job_id=job_id
+                job_id=job_id,
             )
             logger.info(f"JOB {job_id} 👥 Diarized → {diarization_local}")
 
@@ -292,21 +324,23 @@ def _process_job(db: firestore.Client, job: Dict[str, Any]) -> None:
             transcript_local
         )
         logger.info(f"JOB {job_id} ⬆ Uploaded transcription → {transcript_uri}")
-        
+
         # 結合結果を別ファイルとしてCloud Storageにアップロード
-        storage_client.bucket(bucket).blob(final_blob).upload_from_filename(
-            final_local
-        )
+        storage_client.bucket(bucket).blob(final_blob).upload_from_filename(final_local)
         logger.info(f"JOB {job_id} ⬆ Uploaded final result → {final_uri}")
 
         # 処理成功をFirestoreに反映する前に現在のステータスを確認
         job_doc = db.collection(COLLECTION).document(job_id).get()
         if not job_doc.exists:
-            logger.error(f"JOB {job_id} ✖ ドキュメントが見つかりません。更新をスキップします。")
+            logger.error(
+                f"JOB {job_id} ✖ ドキュメントが見つかりません。更新をスキップします。"
+            )
         else:
             current_status = job_doc.to_dict().get("status", "")
             if current_status != "processing":
-                logger.error(f"JOB {job_id} ✖ 現在のステータスが processing ではありません（{current_status}）。更新をスキップします。")
+                logger.error(
+                    f"JOB {job_id} ✖ 現在のステータスが processing ではありません（{current_status}）。更新をスキップします。"
+                )
             else:
                 # ステータスが"processing"の場合のみ更新
                 db.collection(COLLECTION).document(job_id).update(
@@ -322,18 +356,22 @@ def _process_job(db: firestore.Client, job: Dict[str, Any]) -> None:
         # エラー発生時の処理
         err = str(e)
         logger.error(f"JOB {job_id} ✖ Failed: {err}\n{traceback.format_exc()}")
-        
+
         # Firestoreのドキュメントを取得
         job_doc = db.collection(COLLECTION).document(job_id).get()
-        
+
         if not job_doc.exists:
-            logger.error(f"JOB {job_id} ✖ エラー発生時にドキュメントが見つかりません。更新をスキップします。")
+            logger.error(
+                f"JOB {job_id} ✖ エラー発生時にドキュメントが見つかりません。更新をスキップします。"
+            )
         else:
             job_data = job_doc.to_dict() or {}
             current_status = job_data.get("status", "")
-            
+
             if current_status != "processing":
-                logger.error(f"JOB {job_id} ✖ エラー発生時に現在のステータスが processing ではありません（{current_status}）。更新をスキップします。")
+                logger.error(
+                    f"JOB {job_id} ✖ エラー発生時に現在のステータスが processing ではありません（{current_status}）。更新をスキップします。"
+                )
             else:
                 # ステータスが"processing"の場合のみ更新
                 # 更新データを準備
@@ -343,11 +381,11 @@ def _process_job(db: firestore.Client, job: Dict[str, Any]) -> None:
                     "process_ended_at": firestore.SERVER_TIMESTAMP,
                     "updated_at": firestore.SERVER_TIMESTAMP,
                 }
-                
+
                 # process_started_atがない場合は追加（タイムアウト判定のため）
                 if not job_data.get("process_started_at"):
                     update_data["process_started_at"] = firestore.SERVER_TIMESTAMP
-                
+
                 # 更新を実行
                 db.collection(COLLECTION).document(job_id).update(update_data)
                 logger.error(f"JOB {job_id} ✖ 処理失敗を記録しました: {err}")
@@ -360,7 +398,7 @@ def _process_job(db: firestore.Client, job: Dict[str, Any]) -> None:
 def create_single_speaker_json(transcription_path, output_path):
     """
     単一話者用の話者情報JSONを生成する
-    
+
     Args:
         transcription_path (str): 文字起こし結果JSONのパス
         output_path (str): 出力する話者情報JSONのパス
@@ -368,40 +406,42 @@ def create_single_speaker_json(transcription_path, output_path):
     try:
         # 文字起こし結果を読み込む
         transcription_df = read_json(transcription_path)
-        
+
         # 単一話者用のデータを作成
         speaker_data = []
         for _, row in transcription_df.iterrows():
-            speaker_data.append({
-                "start": row["start"],
-                "end": row["end"],
-                "speaker": "SPEAKER_01"  # 全セグメントを同一話者に割り当て
-            })
-        
+            speaker_data.append(
+                {
+                    "start": row["start"],
+                    "end": row["end"],
+                    "speaker": "SPEAKER_01",  # 全セグメントを同一話者に割り当て
+                }
+            )
+
         # データフレームに変換して保存
         speaker_df = pd.DataFrame(speaker_data)
         save_dataframe(speaker_df, output_path)
-        
+
         logger.info(f"単一話者JSONを生成しました: {output_path}")
-        
+
     except Exception as e:
         # エラー時は最小限の話者情報を生成（空のJSON配列）
         logger.error(f"単一話者JSONの生成中にエラー: {e}")
-        
+
         if output_path.startswith("gs://"):
             # GCSの場合
             path_without_prefix = output_path[5:]
             bucket_name, blob_path = path_without_prefix.split("/", 1)
-            
+
             storage_client = storage.Client()
             bucket = storage_client.bucket(bucket_name)
             blob = bucket.blob(blob_path)
-            
-            blob.upload_from_string("[]", content_type='application/json')
+
+            blob.upload_from_string("[]", content_type="application/json")
         else:
             # ローカルの場合
             os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
-            with open(output_path, 'w') as f:
+            with open(output_path, "w") as f:
                 json.dump([], f)
 
 
