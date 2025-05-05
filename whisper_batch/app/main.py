@@ -299,38 +299,58 @@ def _process_job(db: firestore.Client, job: Dict[str, Any]) -> None:
         )
         logger.info(f"JOB {job_id} ⬆ Uploaded final result → {final_uri}")
 
-        # 処理成功をFirestoreに反映
-        db.collection(COLLECTION).document(job_id).update(
-            {
-                "status": "completed",
-                "process_ended_at": firestore.SERVER_TIMESTAMP,
-                "updated_at": firestore.SERVER_TIMESTAMP,
-            }
-        )
-        logger.info(f"JOB {job_id} ✔ Completed")
+        # 処理成功をFirestoreに反映する前に現在のステータスを確認
+        job_doc = db.collection(COLLECTION).document(job_id).get()
+        if not job_doc.exists:
+            logger.error(f"JOB {job_id} ✖ ドキュメントが見つかりません。更新をスキップします。")
+        else:
+            current_status = job_doc.to_dict().get("status", "")
+            if current_status != "processing":
+                logger.error(f"JOB {job_id} ✖ 現在のステータスが processing ではありません（{current_status}）。更新をスキップします。")
+            else:
+                # ステータスが"processing"の場合のみ更新
+                db.collection(COLLECTION).document(job_id).update(
+                    {
+                        "status": "completed",
+                        "process_ended_at": firestore.SERVER_TIMESTAMP,
+                        "updated_at": firestore.SERVER_TIMESTAMP,
+                    }
+                )
+                logger.info(f"JOB {job_id} ✔ Completed")
 
     except Exception as e:
         # エラー発生時の処理
         err = str(e)
         logger.error(f"JOB {job_id} ✖ Failed: {err}\n{traceback.format_exc()}")
         
-        # 更新データを準備
-        update_data = {
-            "status": "failed",
-            "error_message": err,
-            "process_ended_at": firestore.SERVER_TIMESTAMP,
-            "updated_at": firestore.SERVER_TIMESTAMP,
-        }
-        
-        # process_started_atがない場合は追加（タイムアウト判定のため）
+        # Firestoreのドキュメントを取得
         job_doc = db.collection(COLLECTION).document(job_id).get()
-        if job_doc.exists:
-            job_data = job_doc.to_dict() or {}
-            if not job_data.get("process_started_at"):
-                update_data["process_started_at"] = firestore.SERVER_TIMESTAMP
         
-        # 更新を実行
-        db.collection(COLLECTION).document(job_id).update(update_data)
+        if not job_doc.exists:
+            logger.error(f"JOB {job_id} ✖ エラー発生時にドキュメントが見つかりません。更新をスキップします。")
+        else:
+            job_data = job_doc.to_dict() or {}
+            current_status = job_data.get("status", "")
+            
+            if current_status != "processing":
+                logger.error(f"JOB {job_id} ✖ エラー発生時に現在のステータスが processing ではありません（{current_status}）。更新をスキップします。")
+            else:
+                # ステータスが"processing"の場合のみ更新
+                # 更新データを準備
+                update_data = {
+                    "status": "failed",
+                    "error_message": err,
+                    "process_ended_at": firestore.SERVER_TIMESTAMP,
+                    "updated_at": firestore.SERVER_TIMESTAMP,
+                }
+                
+                # process_started_atがない場合は追加（タイムアウト判定のため）
+                if not job_data.get("process_started_at"):
+                    update_data["process_started_at"] = firestore.SERVER_TIMESTAMP
+                
+                # 更新を実行
+                db.collection(COLLECTION).document(job_id).update(update_data)
+                logger.error(f"JOB {job_id} ✖ 処理失敗を記録しました: {err}")
 
     finally:
         # 一時ファイルの削除（エラーが発生しても削除を試みる）
