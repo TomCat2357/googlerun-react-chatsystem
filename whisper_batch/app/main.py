@@ -102,6 +102,17 @@ def _mark_timeout_jobs(db: firestore.Client) -> None:
             # 以降はValidationが通ったデータを使用
             started_at = firestore_data.process_started_at
             if not started_at:
+                # process_started_atがNoneのジョブは異常状態とみなし、失敗としてマーク
+                batch.update(
+                    snap.reference,
+                    {
+                        "status": "failed",
+                        "error_message": "process_started_at is None",
+                        "updated_at": firestore.SERVER_TIMESTAMP,
+                    },
+                )
+                updated = True
+                logger.warning(f"JOB {snap.id} ✖ process_started_atがNoneのため失敗としてマーク")
                 continue
 
             # FirestoreのTimestamp型を適切に処理
