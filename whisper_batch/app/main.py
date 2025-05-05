@@ -44,7 +44,7 @@ if os.path.exists(develop_config_path):
     load_dotenv(develop_config_path)
 
 # スクリプトの場所を基準にして、BASEDIRをつくって、GOOGLE_APPLICATION_CREDENTIALSについても絶対パスにする。
-if BASE_DIR not in os.environ["GOOGLE_APPLICATION_CREDENTIALS"]:
+if str(BASE_DIR) not in os.environ["GOOGLE_APPLICATION_CREDENTIALS"]:
     os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = os.path.join(
         BASE_DIR, os.environ["GOOGLE_APPLICATION_CREDENTIALS"]
     )
@@ -166,6 +166,7 @@ def _pick_next_job(db: firestore.Client) -> Optional[Dict[str, Any]]:
         if not docs:
             return None
         doc = docs[0]
+        # Firestore 上のステータスを更新
         tx.update(
             doc.reference,
             {
@@ -174,17 +175,19 @@ def _pick_next_job(db: firestore.Client) -> Optional[Dict[str, Any]]:
                 "updated_at": firestore.SERVER_TIMESTAMP,
             },
         )
-        # WhisperFirestoreDataでデータ検証
+        # 戻り値用データの組み立て（更新後のステータスを反映）
         try:
             data = doc.to_dict()
-            data["job_id"] = doc.id  # ドキュメントIDをjob_idとして追加
+            data["job_id"] = doc.id  # ドキュメントIDを job_id として追加
+            # ここでステータスを processing に上書き
+            data["status"] = "processing"
+            # WhisperFirestoreDataでデータ検証
             firestore_data = WhisperFirestoreData(**data)
             # 検証が通ったデータを辞書に戻して返す
             return dict(firestore_data.model_dump())
         except Exception as e:
             # データ検証エラーのログ記録
             logger.error(f"データ検証エラー (job_id={doc.id}): {e}")
-            # エラーの場合は処理をスキップ
             return None
 
     return _txn(db.transaction())
