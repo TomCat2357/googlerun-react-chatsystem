@@ -132,20 +132,3 @@ class WhisperPubSubMessageData(BaseModel):
                 raise ValueError(f"timestampはISO 8601形式である必要があります: {v}")
         return v
 
-
-# whisperのバッチ処理用のパラメータの型
-class WhisperBatchParameter(BaseModel):
-    JOB_ID: str
-    FULL_AUDIO_PATH: str  # GCS_AUDIO_PATHからAUDIO_PATHに変更
-    FULL_TRANSCRIPTION_PATH: str  # 追加
-    HF_AUTH_TOKEN: str
-    # Firestoreからの追加パラメータ
-    NUM_SPEAKERS: Optional[str] = ""
-    MIN_SPEAKERS: str
-    MAX_SPEAKERS: str
-    LANGUAGE: str = "ja"
-    INITIAL_PROMPT: str = ""
-
-    class Config:
-        # 追加のフィールドを許可しない
-        extra = "forbid"
