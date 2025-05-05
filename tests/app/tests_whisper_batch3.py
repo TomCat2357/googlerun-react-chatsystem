@@ -19,7 +19,7 @@ unittest.mock を使う高速単体テストをバランスさせた
 """
 
 from __future__ import annotations
-
+import sys
 import datetime as _dt
 import importlib
 import json
