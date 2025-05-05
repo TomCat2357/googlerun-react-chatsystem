@@ -19,10 +19,10 @@ from common_utils.logger import logger
 
 # ── 外部ユーティリティ ─────────────────────────────
 # 音声ファイル形式変換、文字起こし、話者分離、結果結合のためのモジュール
-from convert_audio import convert_audio, check_audio_format  # 音声ファイルを16kHzモノラルWAV形式に変換
-from transcribe import transcribe_audio  # 音声を文字起こし
-from diarize import diarize_audio  # 話者分離を実行
-from combine_results import combine_results, read_json, save_dataframe  # 文字起こしと話者分離の結果を結合
+from .convert_audio import convert_audio, check_audio_format  # 音声ファイルを16kHzモノラルWAV形式に変換
+from .transcribe import transcribe_audio  # 音声を文字起こし
+from .diarize import diarize_audio  # 話者分離を実行
+from .combine_results import combine_results, read_json, save_dataframe  # 文字起こしと話者分離の結果を結合
 
 # ── .env 読み込み ────────────────────────────────
 # 設定ファイルを読み込み、既存の環境変数を上書き
