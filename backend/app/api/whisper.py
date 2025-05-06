@@ -129,30 +129,25 @@ async def upload_audio(
                 audio = AudioSegment.from_file(audio_file)
             
             # 長さをミリ秒単位で取得
-            audio_duration = int(math.ceil(len(audio) / 1000))
-            logger.debug(f"音声長さ: {audio_duration} 秒")
+            audio_duration_ms = len(audio)  # ミリ秒単位で取得
+            logger.debug(f"音声長さ: {audio_duration_ms} ms")
             
         except Exception as e:
             logger.error("音声長さの取得に失敗しました: %s", str(e))
             return JSONResponse(status_code=400, content={"detail": "音声長さの取得に失敗しました"})
         
-        # GCSのパス設定
+        # GCSクライアントの設定
         storage_client: storage.Client = storage.Client()
         bucket = storage_client.bucket(GCS_BUCKET_NAME)
-        base_dir: str = f"whisper/{user_id}/{file_hash}"
         
         # 音声ファイルのアップロード
-        blob = bucket.blob(f"{base_dir}/origin{audio_file_extension}")
+        blob = bucket.blob(f"whisper/{user_id}/{file_hash}/origin{audio_file_extension}")
         blob.upload_from_string(audio_content, content_type=mime_type)
 
         # Firestoreにジョブ情報を記録
         # サーバー側で一意なIDを生成
         job_id: str = str(uuid.uuid4())
         timestamp = firestore.SERVER_TIMESTAMP
-
-        # 音声ファイルパスと文字起こしファイルパスを設定
-        audio_file_path = f"{base_dir}/origin{audio_file_extension}"
-        transcription_file_path = ""
 
         # ジョブデータの作成
         whisper_job: WhisperFirestoreData = WhisperFirestoreData(
@@ -163,9 +158,7 @@ async def upload_audio(
             description=whisper_request.description,
             recording_date=whisper_request.recording_date,
             gcs_bucket_name=GCS_BUCKET_NAME,
-            audio_file_path=audio_file_path,
-            transcription_file_path=transcription_file_path,
-            audio_duration=audio_duration,
+            audio_duration_ms=audio_duration_ms,
             audio_size=audio_size,
             file_hash=file_hash,
             language=whisper_request.language or "ja",
@@ -175,7 +168,7 @@ async def upload_audio(
             updated_at=timestamp,
             process_started_at=None,
             process_ended_at=None,
-            tags=whisper_request.tags,
+            tags=whisper_request.tags or [],
             error_message=None,
             # 話者数パラメータを追加
             num_speakers=whisper_request.num_speakers,
@@ -200,7 +193,7 @@ async def upload_audio(
             timestamp=current_time
         )
 
-        message_bytes: bytes = json.dumps(message_data).encode("utf-8")
+        message_bytes: bytes = message_data.json().encode("utf-8")
         publish_future: pubsub_v1.publisher.futures.Future = publisher.publish(topic_path, data=message_bytes)
         publish_future.result()
         
