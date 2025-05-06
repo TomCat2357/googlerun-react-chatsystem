@@ -3,6 +3,14 @@ from typing import Dict, List, Any, Optional
 import datetime, re
 
 
+# Whisperのセグメントの型 (フロントエンドの apiTypes.ts と合わせる)
+class WhisperSegment(BaseModel):
+    start: float  # number は float で表現
+    end: float
+    text: str
+    speaker: str
+
+
 # モデルクラス定義
 class GeocodeLineData(BaseModel):
     query: str
@@ -56,7 +64,7 @@ class WhisperUploadRequest(BaseModel):
     max_speakers: Optional[int] = 6  # 最大話者数（自動検出の範囲指定用）
 
 
-# Whisperでのfirebase保存データの型
+# WhisperのFirestoreデータの型に segments を追加
 class WhisperFirestoreData(BaseModel):
     job_id: str # ジョブID。リクエストIDをそのまま使用
     user_id: str # ユーザーのID。Firebase AuthのUIDを使用
@@ -83,6 +91,7 @@ class WhisperFirestoreData(BaseModel):
     max_speakers: Optional[int] = 1  # 最大話者数（範囲指定の場合）
 
     error_message: Optional[str] = None
+    segments: Optional[List[WhisperSegment]] = None # 文字起こし結果のセグメントを追加
 
     class Config:
         # 追加のフィールドを許可しない
@@ -99,6 +108,10 @@ class WhisperFirestoreData(BaseModel):
             )
         return v
 
+
+# Whisper編集リクエストの型
+class WhisperEditRequest(BaseModel):
+    segments: List[WhisperSegment]
 
 # whisper関係のpub/subメッセージの型
 class WhisperPubSubMessageData(BaseModel):

@@ -11,7 +11,7 @@ from functools import partial
 
 from app.api.auth import get_current_user
 from common_utils.logger import logger, create_dict_logger, log_request
-from common_utils.class_types import WhisperUploadRequest, WhisperFirestoreData, WhisperPubSubMessageData
+from common_utils.class_types import WhisperUploadRequest, WhisperFirestoreData, WhisperPubSubMessageData, WhisperSegment, WhisperEditRequest
 
 # 環境変数から設定を読み込み
 from dotenv import load_dotenv
@@ -384,6 +384,64 @@ async def cancel_job(
     except Exception as e:
         logger.exception(f"ジョブキャンセルエラー: {file_hash}")
         return JSONResponse(status_code=500, content={"detail": f"ジョブキャンセルエラー: {str(e)}"})
+
+@router.post("/whisper/jobs/{file_hash}/edit")
+async def edit_job_transcript(
+    request: Request,
+    file_hash: str,
+    edit_request: WhisperEditRequest, # リクエストボディを受け取る
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """特定ジョブの文字起こし結果を編集する"""
+    try:
+        request_info: Dict[str, Any] = await log_request(
+            request, current_user, GENERAL_LOG_MAX_LENGTH
+        )
+        user_id = current_user["uid"]
+
+        db = firestore.Client()
+        col_ref = db.collection(WHISPER_JOBS_COLLECTION)
+        
+        # file_hashとuser_idでドキュメントを検索
+        query = col_ref.where(filter=FieldFilter("file_hash", "==", file_hash)).where(
+            filter=FieldFilter("user_id", "==", user_id)
+        )
+        docs = list(query.limit(1).stream())
+
+        if not docs:
+            logger.warning(f"編集対象のジョブが見つかりません: file_hash={file_hash}, user_id={user_id}")
+            raise HTTPException(status_code=404, detail="編集対象のジョブが見つかりません")
+
+        job_doc_ref = docs[0].reference
+        job_id = docs[0].id # ログ出力用
+        
+        # Firestoreドキュメントを更新
+        update_data = {
+            "segments": [segment.model_dump() for segment in edit_request.segments], # Pydanticモデルを辞書に変換
+            "updated_at": firestore.SERVER_TIMESTAMP,
+        }
+        job_doc_ref.update(update_data)
+        
+        logger.info(f"ジョブ {job_id} (hash: {file_hash}) の文字起こしを更新しました。")
+        response_data = {"status": "success", "message": "文字起こし結果を更新しました", "file_hash": file_hash, "job_id": job_id}
+        
+        return create_dict_logger(
+            response_data,
+            meta_info={
+                k: request_info[k]
+                for k in ("X-Request-Id", "path", "email")
+                if k in request_info
+            },
+            max_length=GENERAL_LOG_MAX_LENGTH,
+        )
+
+    except HTTPException as he:
+        # ログに詳細情報を残す
+        logger.error(f"ジョブ編集HTTPエラー ({he.status_code}): {he.detail} for file_hash={file_hash}", exc_info=True)
+        raise he
+    except Exception as e:
+        logger.exception(f"ジョブ編集中の予期せぬエラー: file_hash={file_hash}")
+        return JSONResponse(status_code=500, content={"detail": f"ジョブ編集エラー: {str(e)}"})
 
 @router.post("/whisper/jobs/{file_hash}/retry")
 async def retry_job(
