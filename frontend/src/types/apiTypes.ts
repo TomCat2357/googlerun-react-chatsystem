@@ -48,6 +48,8 @@ export interface WhisperUploadRequest {
   description?: string;
   recording_date?: string;
   tags?: string[];
+  language?: string;
+  initial_prompt?: string;
 }
 
 // Whisperのセグメント型

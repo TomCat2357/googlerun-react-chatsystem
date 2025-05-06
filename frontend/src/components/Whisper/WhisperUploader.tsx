@@ -15,6 +15,8 @@ interface WhisperUploaderProps {
   onDescriptionChange: (description: string) => void;
   onRecordingDateChange: (date: string) => void;
   onTagsChange?: (tags: string[]) => void;
+  onLanguageChange?: (language: string) => void;
+  onInitialPromptChange?: (prompt: string) => void;
 }
 
 const WhisperUploader: React.FC<WhisperUploaderProps> = ({

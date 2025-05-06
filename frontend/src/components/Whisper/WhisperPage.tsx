@@ -19,6 +19,8 @@ const WhisperPage: React.FC = () => {
   const [description, setDescription] = useState<string>("");
   const [recordingDate, setRecordingDate] = useState<string>("");
   const [tags, setTags] = useState<string[]>([]);
+  const [language, setLanguage] = useState<string>("ja");
+  const [initialPrompt, setInitialPrompt] = useState<string>("");
   const [isUploading, setIsUploading] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string>("");
   const [jobs, setJobs] = useState<any[]>([]);
@@ -121,7 +123,9 @@ const WhisperPage: React.FC = () => {
         filename: audioInfo.fileName,
         description: description,
         recording_date: recordingDate,
-        tags: tags
+        tags: tags,
+        language: language,
+        initial_prompt: initialPrompt
       };
 
       const response = await fetch(`${API_BASE_URL}/backend/whisper`, {
@@ -154,6 +158,8 @@ const WhisperPage: React.FC = () => {
       setDescription("");
       setRecordingDate("");
       setTags([]);
+      setLanguage("ja");
+      setInitialPrompt("");
       
       // ジョブ一覧画面に切り替え
       setView("jobs");
@@ -354,14 +360,20 @@ const WhisperPage: React.FC = () => {
             onDescriptionChange={setDescription}
             onRecordingDateChange={setRecordingDate}
             onTagsChange={setTags}
+            onLanguageChange={setLanguage}
+            onInitialPromptChange={setInitialPrompt}
           />
 
           <WhisperMetadataEditor
             description={description}
             recordingDate={recordingDate}
+            language={language}
+            initialPrompt={initialPrompt}
             isSending={isUploading}
             onDescriptionChange={setDescription}
             onRecordingDateChange={setRecordingDate}
+            onLanguageChange={setLanguage}
+            onInitialPromptChange={setInitialPrompt}
             onSend={handleUpload}
           />
         </div>
