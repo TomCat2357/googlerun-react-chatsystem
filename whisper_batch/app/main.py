@@ -19,13 +19,13 @@ from common_utils.logger import logger
 
 # ── 外部ユーティリティ ─────────────────────────────
 # 音声ファイル形式変換、文字起こし、話者分離、結果結合のためのモジュール
-from .convert_audio import (
+from whisper_batch.app.convert_audio import (
     convert_audio,
     check_audio_format,
 )  # 音声ファイルを16kHzモノラルWAV形式に変換
-from .transcribe import transcribe_audio  # 音声を文字起こし
-from .diarize import diarize_audio  # 話者分離を実行
-from .combine_results import (
+from whisper_batch.app.transcribe import transcribe_audio  # 音声を文字起こし
+from whisper_batch.app.diarize import diarize_audio  # 話者分離を実行
+from whisper_batch.app.combine_results import (
     combine_results,
     read_json,
     save_dataframe,
