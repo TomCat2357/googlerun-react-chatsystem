@@ -253,10 +253,12 @@ def _process_job(db: firestore.Client, job: Dict[str, Any]) -> None:
     ext = Path(filename).suffix.lstrip(".").lower()
     audio_blob = f"{file_hash}_audio.{ext}"
     transcript_blob = f"{file_hash}_transcript.json"
-    final_blob = f"{file_hash}_final.json"  # 結合結果用の別ファイル名
+    diarization_blob = f"{file_hash}_diarization.json"  # 話者分離結果用のファイル名
+    combine_blob = f"{file_hash}_combine.json"  # 結合結果用の別ファイル名
     audio_uri = f"gs://{bucket}/{audio_blob}"
     transcript_uri = f"gs://{bucket}/{transcript_blob}"
-    final_uri = f"gs://{bucket}/{final_blob}"  # 結合結果用のURI
+    diarization_uri = f"gs://{bucket}/{diarization_blob}"  # 話者分離結果用のURI
+    combine_uri = f"gs://{bucket}/{combine_blob}"  # 結合結果用のURI
 
     logger.info(f"JOB {job_id} ▶ Start (audio: {audio_uri})")
 
@@ -329,9 +331,9 @@ def _process_job(db: firestore.Client, job: Dict[str, Any]) -> None:
             logger.info(f"JOB {job_id} 👥 Diarized → {diarization_local}")
 
         # 文字起こしと話者分離の結果を結合（シンプルな話者情報の場合も同様）
-        final_local = tmp_dir / "final.json"
-        combine_results(str(transcript_local), str(diarization_local), str(final_local))
-        logger.info(f"JOB {job_id} 🔗 Combined → {final_local}")
+        combine_local = tmp_dir / "combine.json"
+        combine_results(str(transcript_local), str(diarization_local), str(combine_local))
+        logger.info(f"JOB {job_id} 🔗 Combined → {combine_local}")
 
         # 文字起こし結果をCloud Storageにアップロード
         storage_client.bucket(bucket).blob(transcript_blob).upload_from_filename(
@@ -339,9 +341,13 @@ def _process_job(db: firestore.Client, job: Dict[str, Any]) -> None:
         )
         logger.info(f"JOB {job_id} ⬆ Uploaded transcription → {transcript_uri}")
 
+        # 話者分離結果をCloud Storageにアップロード
+        storage_client.bucket(bucket).blob(diarization_blob).upload_from_filename(diarization_local)
+        logger.info(f"JOB {job_id} ⬆ Uploaded diarization result → {diarization_uri}")
+
         # 結合結果を別ファイルとしてCloud Storageにアップロード
-        storage_client.bucket(bucket).blob(final_blob).upload_from_filename(final_local)
-        logger.info(f"JOB {job_id} ⬆ Uploaded final result → {final_uri}")
+        storage_client.bucket(bucket).blob(combine_blob).upload_from_filename(combine_local)
+        logger.info(f"JOB {job_id} ⬆ Uploaded combine result → {combine_uri}")
 
         # 処理成功をFirestoreに反映する前に現在のステータスを確認
         job_doc = db.collection(COLLECTION).document(job_id).get()
