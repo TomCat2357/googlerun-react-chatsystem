@@ -1,5 +1,6 @@
 // frontend/src/component/Whisper/WhisperUploader.tsx
 import React, { useRef, useState } from "react";
+import { toast } from "react-toastify";
 
 export interface AudioInfo {
   duration: number;
@@ -49,10 +50,19 @@ const WhisperUploader: React.FC<WhisperUploaderProps> = ({
     return `${year}/${month}/${day}`;
   };
 
+  // 最大ファイルサイズ (10MB)
+  const MAX_BYTES = 10 * 1024 * 1024;
+
   // ファイル処理関数
   const processFile = async (file: File) => {
     if (!file.type.startsWith("audio/")) {
       alert("音声ファイル以外はアップロードできません");
+      return;
+    }
+    
+    // ファイルサイズチェック
+    if (file.size > MAX_BYTES) {
+      toast.error("10 MB を超えるファイルはアップロードできません");
       return;
     }
     

@@ -3,7 +3,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from typing import Dict, Any, List, Optional
-import os, json, io, base64, hashlib, math, datetime
+import os, json, io, base64, hashlib, math, datetime, uuid
 from pydub import AudioSegment
 from google.cloud import storage, pubsub_v1, firestore
 from google.cloud.firestore_v1 import FieldFilter
@@ -27,6 +27,9 @@ PUBSUB_TOPIC = os.environ["PUBSUB_TOPIC"]
 WHISPER_JOBS_COLLECTION = os.environ["WHISPER_JOBS_COLLECTION"]
 GENERAL_LOG_MAX_LENGTH = int(os.environ["GENERAL_LOG_MAX_LENGTH"])
 SENSITIVE_KEYS = os.environ["SENSITIVE_KEYS"].split(",")
+# 最大音声サイズ設定
+MAX_AUDIO_BYTES = int(os.environ.get("MAX_AUDIO_BYTES", 100 * 1024 * 1024))  # デフォルト 100MB
+MAX_AUDIO_BASE64_CHARS = int(os.environ.get("MAX_AUDIO_BASE64_CHARS", 150 * 1024 * 1024))  # デフォルト 150MB
 
 router = APIRouter()
 
@@ -71,14 +74,21 @@ async def upload_audio(
         if not mime_type.startswith("audio/"):
             return JSONResponse(status_code=400, content={"detail": f"無効な音声フォーマット: {mime_type}"})
 
-        # Base64データのデコード
+        # Base64データのデコード前にサイズチェック
         try:
-            audio_content: bytes = base64.b64decode(whisper_request.audio_data.split(",")[1])
+            base64_data = whisper_request.audio_data.split(",")[1]
+            if len(base64_data) > MAX_AUDIO_BASE64_CHARS:
+                return JSONResponse(status_code=413, content={"detail": "音声データが大きすぎます"})
+                
+            audio_content: bytes = base64.b64decode(base64_data)
+            
+            if len(audio_content) > MAX_AUDIO_BYTES:
+                return JSONResponse(status_code=413, content={"detail": "音声ファイルが大きすぎます"})
         except Exception:
             return JSONResponse(status_code=400, content={"detail": "Base64デコードに失敗しました"})
 
-        # ファイルのハッシュ値を計算
-        file_hash: str = hashlib.md5(audio_content).hexdigest()
+        # より強力なハッシュアルゴリズムを使用
+        file_hash: str = hashlib.sha256(audio_content).hexdigest()
 
         # MIMEタイプから拡張子を取得
         mime_mapping: Dict[str, str] = {
@@ -136,8 +146,8 @@ async def upload_audio(
         blob.upload_from_string(audio_content, content_type=mime_type)
 
         # Firestoreにジョブ情報を記録
-        # リクエストIDをそのままjob_idに使う。一意なので問題なし
-        job_id: str = request_info['X-Request-Id']
+        # サーバー側で一意なIDを生成
+        job_id: str = str(uuid.uuid4())
         timestamp = firestore.SERVER_TIMESTAMP
 
         # 音声ファイルパスと文字起こしファイルパスを設定
@@ -311,9 +321,17 @@ def _update_job_status(
     snap = next(iter(q.stream()), None)
     if not snap:
         raise HTTPException(status_code=404, detail="ジョブが見つかりません")
-
-    def txn(transaction, ref):
-        data = ref.get(transaction=transaction).to_dict()
+    
+    # トランザクションの適切な使い方
+    transaction = db.transaction()
+    
+    @firestore.transactional
+    def update_transaction(transaction, ref):
+        doc_snapshot = ref.get(transaction=transaction)
+        if not doc_snapshot.exists:
+            raise HTTPException(status_code=404, detail="ジョブが見つかりません")
+            
+        data = doc_snapshot.to_dict()
         if data["status"] == new_status:
             return  # 既に同じステータスなら何もしない
             
@@ -324,8 +342,12 @@ def _update_job_status(
             raise HTTPException(400, "retry できる状態ではありません")
 
         transaction.update(ref, {"status": new_status, "updated_at": firestore.SERVER_TIMESTAMP})
-
-    db.transaction()(txn)(snap.reference)
+    
+    try:
+        update_transaction(transaction, snap.reference)
+    except firestore.TransactionFailed as e:
+        raise HTTPException(status_code=409, detail="ステータス更新に失敗しました") from e
+        
     return snap.id
 
 @router.post("/whisper/jobs/{file_hash}/cancel")

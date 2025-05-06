@@ -1,5 +1,5 @@
 // frontend/src/component/Whisper/WhisperPage.tsx
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useToken } from "../../hooks/useToken";
 import * as Config from "../../config";
 import { generateRequestId } from '../../utils/requestIdUtils';
@@ -30,28 +30,34 @@ const WhisperPage: React.FC = () => {
   const [sortOrder, setSortOrder] = useState<string>("date-desc");
   const [refreshInterval, setRefreshInterval] = useState<number | null>(null);
 
+  // インターバル参照用のrefを追加
+  const intervalId = useRef<number | null>(null);
+
   // 初回読み込み時にジョブ一覧を取得
   useEffect(() => {
     if (token) {
       fetchJobs();
       
+      // 既存のインターバルをクリア
+      if (intervalId.current) {
+        window.clearInterval(intervalId.current);
+      }
+      
       // 30秒ごとに自動更新する設定
-      const interval = window.setInterval(() => {
+      intervalId.current = window.setInterval(() => {
         if (view === "jobs" && !selectedJob) {
           fetchJobs();
         }
       }, 30000); // 30秒ごと
       
-      setRefreshInterval(interval);
-      
       // コンポーネントのアンマウント時にインターバルをクリア
       return () => {
-        if (refreshInterval) {
-          window.clearInterval(refreshInterval);
+        if (intervalId.current) {
+          window.clearInterval(intervalId.current);
         }
       };
     }
-  }, [token]);
+  }, [token, view]); // viewの変更も監視
   
   // view変更時にも更新
   useEffect(() => {
@@ -251,7 +257,8 @@ const WhisperPage: React.FC = () => {
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => null);
-        throw new Error(errorData?.detail || `ジョブのキャンセルに失敗しました (${response.status})`);
+        const errorDetail = errorData?.detail || `ジョブのキャンセルに失敗しました (${response.status})`;
+        throw new Error(errorDetail);
       }
 
       alert("ジョブがキャンセルされました");
@@ -284,7 +291,8 @@ const WhisperPage: React.FC = () => {
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => null);
-        throw new Error(errorData?.detail || `ジョブの再キューに失敗しました (${response.status})`);
+        const errorDetail = errorData?.detail || `ジョブの再キューに失敗しました (${response.status})`;
+        throw new Error(errorDetail);
       }
 
       alert("ジョブが再度キューに入れられました");
