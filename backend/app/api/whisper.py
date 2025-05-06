@@ -27,9 +27,12 @@ PUBSUB_TOPIC = os.environ["PUBSUB_TOPIC"]
 WHISPER_JOBS_COLLECTION = os.environ["WHISPER_JOBS_COLLECTION"]
 GENERAL_LOG_MAX_LENGTH = int(os.environ["GENERAL_LOG_MAX_LENGTH"])
 SENSITIVE_KEYS = os.environ["SENSITIVE_KEYS"].split(",")
-# 最大音声サイズ設定
-MAX_AUDIO_BYTES = int(os.environ.get("MAX_AUDIO_BYTES", 100 * 1024 * 1024))  # デフォルト 100MB
-MAX_AUDIO_BASE64_CHARS = int(os.environ.get("MAX_AUDIO_BASE64_CHARS", 150 * 1024 * 1024))  # デフォルト 150MB
+# Whisper制限設定
+WHISPER_MAX_SECONDS = int(os.environ["WHISPER_MAX_SECONDS"])
+WHISPER_MAX_BYTES = int(os.environ["WHISPER_MAX_BYTES"])
+# 最大音声サイズ設定（互換性のために残す）
+MAX_AUDIO_BYTES = min(WHISPER_MAX_BYTES, int(os.environ.get("MAX_AUDIO_BYTES", 100 * 1024 * 1024)))  # WHISPER_MAX_BYTESとの小さい方
+MAX_AUDIO_BASE64_CHARS = int(os.environ.get("MAX_AUDIO_BASE64_CHARS", int(WHISPER_MAX_BYTES * 1.5)))  # Base64エンコードによるオーバーヘッド考慮
 
 router = APIRouter()
 
@@ -74,16 +77,17 @@ async def upload_audio(
         if not mime_type.startswith("audio/"):
             return JSONResponse(status_code=400, content={"detail": f"無効な音声フォーマット: {mime_type}"})
 
-        # Base64データのデコード前にサイズチェック
+            # Base64データのデコード前にサイズチェック
         try:
             base64_data = whisper_request.audio_data.split(",")[1]
             if len(base64_data) > MAX_AUDIO_BASE64_CHARS:
-                return JSONResponse(status_code=413, content={"detail": "音声データが大きすぎます"})
+                return JSONResponse(status_code=413, content={"detail": f"音声データが大きすぎます（最大{MAX_AUDIO_BASE64_CHARS/1024/1024:.1f}MB）"})
                 
             audio_content: bytes = base64.b64decode(base64_data)
             
-            if len(audio_content) > MAX_AUDIO_BYTES:
-                return JSONResponse(status_code=413, content={"detail": "音声ファイルが大きすぎます"})
+            # ファイルサイズチェック
+            if len(audio_content) > WHISPER_MAX_BYTES:
+                return JSONResponse(status_code=413, content={"detail": f"音声ファイルが大きすぎます（最大{WHISPER_MAX_BYTES/1024/1024:.1f}MB）"})
         except Exception:
             return JSONResponse(status_code=400, content={"detail": "Base64デコードに失敗しました"})
 
@@ -131,6 +135,13 @@ async def upload_audio(
             # 長さをミリ秒単位で取得
             audio_duration_ms = len(audio)  # ミリ秒単位で取得
             logger.debug(f"音声長さ: {audio_duration_ms} ms")
+            
+            # 音声の長さチェック（秒単位に変換）
+            if audio_duration_ms > WHISPER_MAX_SECONDS * 1000:
+                return JSONResponse(
+                    status_code=413, 
+                    content={"detail": f"音声の長さが制限を超えています（最大{WHISPER_MAX_SECONDS/60:.1f}分）"}
+                )
             
         except Exception as e:
             logger.error("音声長さの取得に失敗しました: %s", str(e))

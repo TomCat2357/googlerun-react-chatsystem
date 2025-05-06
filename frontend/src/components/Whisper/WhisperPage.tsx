@@ -112,6 +112,18 @@ const WhisperPage: React.FC = () => {
       setErrorMessage("音声データの情報が不完全です");
       return;
     }
+    
+    // ファイルサイズチェック
+    if (audioInfo.fileSize && audioInfo.fileSize > Config.getServerConfig().WHISPER_MAX_BYTES) {
+      setErrorMessage(`音声ファイルが大きすぎます（最大${Math.floor(Config.getServerConfig().WHISPER_MAX_BYTES/1024/1024)}MB）`);
+      return;
+    }
+    
+    // 音声長さチェック
+    if (audioInfo.duration > Config.getServerConfig().WHISPER_MAX_SECONDS) {
+      setErrorMessage(`音声の長さが制限を超えています（最大${Math.floor(Config.getServerConfig().WHISPER_MAX_SECONDS/60)}分）`);
+      return;
+    }
 
     try {
       setIsUploading(true);

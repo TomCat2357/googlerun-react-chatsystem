@@ -34,6 +34,8 @@ let serverConfig = {
   GEOCODING_NO_IMAGE_MAX_BATCH_SIZE: 0,
   GEOCODING_WITH_IMAGE_MAX_BATCH_SIZE: 0,
   SPEECH_MAX_SECONDS: 0,
+  WHISPER_MAX_SECONDS: 0, // Whisper文字起こし最大秒数
+  WHISPER_MAX_BYTES: 0,   // Whisper文字起こし最大ファイルサイズ（バイト）
   MODELS: "",
   // 追加する新しい設定
   IMAGEN_MODELS: "",

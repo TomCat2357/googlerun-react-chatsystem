@@ -34,6 +34,7 @@ IMAGEN_ADD_WATERMARK = os.environ["IMAGEN_ADD_WATERMARK"]
 IMAGEN_SAFETY_FILTER_LEVELS = os.environ["IMAGEN_SAFETY_FILTER_LEVELS"]
 IMAGEN_PERSON_GENERATIONS = os.environ["IMAGEN_PERSON_GENERATIONS"]
 WHISPER_MAX_SECONDS = int(os.environ["WHISPER_MAX_SECONDS"])
+WHISPER_MAX_BYTES = int(os.environ["WHISPER_MAX_BYTES"])
 
 # ロギング設定
 CONFIG_LOG_MAX_LENGTH = int(os.environ["CONFIG_LOG_MAX_LENGTH"])
@@ -71,6 +72,7 @@ async def get_config(request: Request, current_user: Dict[str, Any] = Depends(ge
             "IMAGEN_SAFETY_FILTER_LEVELS": IMAGEN_SAFETY_FILTER_LEVELS,
             "IMAGEN_PERSON_GENERATIONS": IMAGEN_PERSON_GENERATIONS,
             "WHISPER_MAX_SECONDS" : WHISPER_MAX_SECONDS,
+            "WHISPER_MAX_BYTES" : WHISPER_MAX_BYTES,
         }
         logger.debug("Config取得成功")
         return create_dict_logger(
