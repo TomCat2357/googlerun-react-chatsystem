@@ -64,7 +64,15 @@ const WhisperPage: React.FC = () => {
   const fetchJobs = async () => {
     try {
       const requestId = generateRequestId();
-      const response = await fetch(`${API_BASE_URL}/backend/whisper/jobs`, {
+      
+      // クエリパラメータの構築
+      const queryParams = new URLSearchParams();
+      if (filterStatus !== "all") {
+        queryParams.append("status", filterStatus);
+      }
+      // タグフィルターなどの追加があれば実装可能
+      
+      const response = await fetch(`${API_BASE_URL}/backend/whisper/jobs?${queryParams}`, {
         method: "GET",
         headers: {
           "Content-Type": "application/json",
@@ -232,7 +240,6 @@ const WhisperPage: React.FC = () => {
       setErrorMessage("");
       const requestId = generateRequestId();
       
-      // ハッシュ値ベースのエンドポイントに変更
       const response = await fetch(`${API_BASE_URL}/backend/whisper/jobs/${fileHash}/cancel`, {
         method: "POST",
         headers: {
@@ -252,6 +259,39 @@ const WhisperPage: React.FC = () => {
       
     } catch (error) {
       console.error("キャンセルエラー:", error);
+      setErrorMessage(error instanceof Error ? error.message : String(error));
+    }
+  };
+  
+  // ジョブの再キュー
+  const retryJob = async (jobId: string, fileHash: string) => {
+    if (!confirm("このジョブを再度キューに入れますか？")) {
+      return;
+    }
+    
+    try {
+      setErrorMessage("");
+      const requestId = generateRequestId();
+      
+      const response = await fetch(`${API_BASE_URL}/backend/whisper/jobs/${fileHash}/retry`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`,
+          "X-Request-Id": requestId
+        }
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => null);
+        throw new Error(errorData?.detail || `ジョブの再キューに失敗しました (${response.status})`);
+      }
+
+      alert("ジョブが再度キューに入れられました");
+      fetchJobs();
+      
+    } catch (error) {
+      console.error("再キューエラー:", error);
       setErrorMessage(error instanceof Error ? error.message : String(error));
     }
   };
@@ -348,7 +388,8 @@ const WhisperPage: React.FC = () => {
               jobs={jobs}
               onJobSelect={(jobId, fileHash) => fetchJobDetails(jobId, fileHash)}
               onRefresh={fetchJobs}
-              onDelete={(jobId, fileHash) => cancelJob(jobId, fileHash)}
+              onCancel={(jobId, fileHash) => cancelJob(jobId, fileHash)}
+              onRetry={(jobId, fileHash) => retryJob(jobId, fileHash)}
               filterStatus={filterStatus}
               onFilterChange={setFilterStatus}
               sortOrder={sortOrder}

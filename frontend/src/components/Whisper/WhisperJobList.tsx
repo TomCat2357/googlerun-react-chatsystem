@@ -14,9 +14,10 @@ interface Job {
 
 interface WhisperJobListProps {
   jobs: Job[];
-  onJobSelect: (jobId: string, fileHash: string) => void; // ファイルハッシュも渡すように変更
+  onJobSelect: (jobId: string, fileHash: string) => void; 
   onRefresh: () => void;
-  onDelete?: (jobId: string, fileHash: string) => void; // ファイルハッシュも渡すように変更
+  onCancel?: (jobId: string, fileHash: string) => void; // キャンセル専用
+  onRetry?: (jobId: string, fileHash: string) => void;  // 再キュー専用
   filterStatus: string;
   onFilterChange: (status: string) => void;
   sortOrder: string;
@@ -27,7 +28,8 @@ const WhisperJobList: React.FC<WhisperJobListProps> = ({
   jobs,
   onJobSelect,
   onRefresh,
-  onDelete,
+  onCancel,
+  onRetry,
   filterStatus,
   onFilterChange,
   sortOrder,
@@ -179,12 +181,23 @@ const WhisperJobList: React.FC<WhisperJobListProps> = ({
                       {job.status === "completed" ? "再生・編集" : "詳細"}
                     </button>
                     
-                    {onDelete && job.status !== "processing" && (
+                    {/* キュー待ちのジョブにはキャンセルボタンを表示 */}
+                    {onCancel && job.status === "queued" && (
                       <button
-                        onClick={() => onDelete(job.id, job.file_hash)}
+                        onClick={() => onCancel(job.id, job.file_hash)}
                         className="px-3 py-1 rounded bg-red-600 hover:bg-red-700 text-white"
                       >
-                        {job.status === "queued" ? "キャンセル" : "削除"}
+                        キャンセル
+                      </button>
+                    )}
+                    
+                    {/* 完了/失敗/キャンセル済みのジョブには再キューボタンを表示 */}
+                    {onRetry && ["completed", "failed", "canceled"].includes(job.status) && (
+                      <button
+                        onClick={() => onRetry(job.id, job.file_hash)}
+                        className="px-3 py-1 rounded bg-yellow-600 hover:bg-yellow-700 text-white"
+                      >
+                        再キュー
                       </button>
                     )}
                   </td>
