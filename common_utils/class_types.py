@@ -49,6 +49,8 @@ class WhisperUploadRequest(BaseModel):
     recording_date: Optional[str] = ""
     tags: Optional[List[str]] = []  # タグのリスト
     # 話者数関連パラメータを追加
+    language: str = "ja" # 言語コード。デフォルトは日本語
+    initial_prompt: str = "" # Whisperの初期プロンプト。デフォルトは空文字列。
     num_speakers: Optional[int] = None  # 明示的に指定された話者数
     min_speakers: Optional[int] = 1  # 最小話者数（自動検出の範囲指定用）
     max_speakers: Optional[int] = 6  # 最大話者数（自動検出の範囲指定用）
