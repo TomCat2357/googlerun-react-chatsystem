@@ -75,7 +75,7 @@ class WhisperFirestoreData(BaseModel):
     gcs_bucket_name : str # GCSのバケット名
     audio_size: int  # 音声ファイルのサイズ (バイト単位)
     audio_duration_ms: int  # 音声ファイルの再生時間 (ミリ秒単位)
-    file_hash: str # 音声ファイルのハッシュ値。MD5を使用。
+    file_hash: str # 音声ファイルのハッシュ値。SHA256を使用。
     language: str = "ja" # 音声ファイルの言語。デフォルトは日本語。
     initial_prompt: str = ""  # Whisperの初期プロンプト。デフォルトは空文字列。
     status: str  # "queued", "processing", "completed", "failed", "canceled"
@@ -92,6 +92,11 @@ class WhisperFirestoreData(BaseModel):
 
     error_message: Optional[str] = None
     segments: Optional[List[WhisperSegment]] = None # 文字起こし結果のセグメントを追加
+
+    # GCS file paths (relative to bucket root)
+    audio_file_path: Optional[str] = None # e.g., "whisper/user_id/file_hash/origin.mp3"
+    transcription_file_path: Optional[str] = None # e.g., "whisper/user_id/file_hash/file_hash_combine.json"
+    gcp_batch_job_name: Optional[str] = None # To store the name of the launched GCP Batch Job
 
     class Config:
         # 追加のフィールドを許可しない
@@ -114,11 +119,12 @@ class WhisperEditRequest(BaseModel):
     segments: List[WhisperSegment]
 
 # whisper関係のpub/subメッセージの型
+# whisper関係のpub/subメッセージの型 (GCP Batchからの通知を想定)
 class WhisperPubSubMessageData(BaseModel):
     job_id: str
-    event_type: str
+    event_type: str # e.g., "job_completed", "job_failed" (consistent with whisper_batch/app/main.py)
     error_message: Optional[str] = None
-    timestamp: str
+    timestamp: str # ISO 8601 format
 
     class Config:
         # 追加のフィールドを許可しない
@@ -127,7 +133,8 @@ class WhisperPubSubMessageData(BaseModel):
     @field_validator("event_type")
     @classmethod
     def validate_event_type(cls, v):
-        valid_event_types = ["new_job", "job_completed", "job_failed", "job_canceled"]
+        # Adjusted to include common batch outcomes.
+        valid_event_types = ["new_job", "job_completed", "job_failed", "job_canceled", "batch_complete", "batch_failed"]
         if v not in valid_event_types:
             raise ValueError(
                 f"無効なイベントタイプ: {v}. 有効なイベントタイプ: {valid_event_types}"
@@ -146,4 +153,20 @@ class WhisperPubSubMessageData(BaseModel):
             except ValueError:
                 raise ValueError(f"timestampはISO 8601形式である必要があります: {v}")
         return v
+
+# Parameter for GCP Batch job environment variables (from whisper_queue/app/main.py)
+# This defines what the container (whisper_batch/app/main.py) expects as env vars.
+class WhisperBatchParameter(BaseModel):
+    JOB_ID: str
+    FULL_AUDIO_PATH: str             # Full GCS path gs://bucket/path/to/audio.mp3
+    FULL_TRANSCRIPTION_PATH: str     # Full GCS path gs://bucket/path/to/output.json
+    HF_AUTH_TOKEN: str
+    NUM_SPEAKERS: Optional[str] = "" # Needs to be string for environment variable
+    MIN_SPEAKERS: str = "1"
+    MAX_SPEAKERS: str = "1"
+    LANGUAGE: str = "ja"
+    INITIAL_PROMPT: str = ""
+
+    class Config:
+        extra = "forbid"
 

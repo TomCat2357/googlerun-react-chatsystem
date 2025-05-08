@@ -1,6 +1,6 @@
 # API ルート: whisper.py - Whisper音声文字起こし関連のエンドポイント
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, BackgroundTasks
 from fastapi.responses import JSONResponse
 from typing import Dict, Any, List, Optional
 import os, json, io, base64, hashlib, math, datetime, uuid
@@ -12,6 +12,9 @@ from functools import partial
 from app.api.auth import get_current_user
 from common_utils.logger import logger, create_dict_logger, log_request
 from common_utils.class_types import WhisperUploadRequest, WhisperFirestoreData, WhisperPubSubMessageData, WhisperSegment, WhisperEditRequest
+
+# Import the new batch processing trigger function
+from app.api.batch import trigger_whisper_batch_processing
 
 # 環境変数から設定を読み込み
 from dotenv import load_dotenv
@@ -46,6 +49,7 @@ create_dict_logger = partial(create_dict_logger, sensitive_keys=SENSITIVE_KEYS)
 async def upload_audio(
     request: Request, 
     whisper_request: WhisperUploadRequest,
+    background_tasks: BackgroundTasks, # Add BackgroundTasks dependency
     current_user: Dict[str, Any] = Depends(get_current_user)
 ) -> Dict[str, Any]:
     try:
@@ -147,68 +151,91 @@ async def upload_audio(
             logger.error("音声長さの取得に失敗しました: %s", str(e))
             return JSONResponse(status_code=400, content={"detail": "音声長さの取得に失敗しました"})
         
-        # GCSクライアントの設定
-        storage_client: storage.Client = storage.Client()
-        bucket = storage_client.bucket(GCS_BUCKET_NAME)
+        # Determine GCS paths
+        user_id: str = current_user["uid"]
+        # file_hash is already calculated: e.g., file_hash: str = hashlib.sha256(audio_content).hexdigest()
+        # audio_file_extension is determined: e.g., .mp3
+
+        gcs_path_prefix = f"whisper/{user_id}/{file_hash}"
+        original_audio_gcs_filename = f"origin{audio_file_extension}"
+        audio_gcs_full_path = f"{gcs_path_prefix}/{original_audio_gcs_filename}"
         
-        # 音声ファイルのアップロード
-        blob = bucket.blob(f"whisper/{user_id}/{file_hash}/origin{audio_file_extension}")
+        # Path for the final combined transcript from whisper_batch/app/main.py
+        # whisper_batch/app/main.py saves combine results as f"{file_hash}_combine.json"
+        # So the path relative to bucket root will be:
+        transcription_output_gcs_filename = f"{file_hash}_combine.json" # Name used by whisper_batch
+        transcription_gcs_full_path = f"{gcs_path_prefix}/{transcription_output_gcs_filename}"
+
+
+        # GCSクライアントの設定
+        storage_client_instance: storage.Client = storage.Client() # Renamed to avoid conflict if storage is imported module
+        bucket = storage_client_instance.bucket(GCS_BUCKET_NAME)
+        
+        # 音声ファイルのアップロード (using audio_gcs_full_path)
+        blob = bucket.blob(audio_gcs_full_path) # Use the determined full path
         blob.upload_from_string(audio_content, content_type=mime_type)
+        logger.info(f"Uploaded original audio to gs://{GCS_BUCKET_NAME}/{audio_gcs_full_path}")
 
         # Firestoreにジョブ情報を記録
-        # サーバー側で一意なIDを生成
-        job_id: str = str(uuid.uuid4())
+        job_id: str = str(uuid.uuid4()) # server-generated unique ID
         timestamp = firestore.SERVER_TIMESTAMP
 
-        # ジョブデータの作成
-        whisper_job: WhisperFirestoreData = WhisperFirestoreData(
+        whisper_job_data = WhisperFirestoreData(
             job_id=job_id,
             user_id=user_id,
-            user_email=user_email,
+            user_email=current_user.get("email", ""), # Ensure email is correctly fetched
             filename=whisper_request.filename,
             description=whisper_request.description,
             recording_date=whisper_request.recording_date,
             gcs_bucket_name=GCS_BUCKET_NAME,
-            audio_duration_ms=audio_duration_ms,
-            audio_size=audio_size,
+            audio_duration_ms=audio_duration_ms, # Ensure this is populated
+            audio_size=audio_size, # Ensure this is populated
             file_hash=file_hash,
             language=whisper_request.language,
             initial_prompt=whisper_request.initial_prompt,
-            status="queued",
+            status="queued", # Initial status
             created_at=timestamp,
             updated_at=timestamp,
-            process_started_at=None,
-            process_ended_at=None,
             tags=whisper_request.tags or [],
-            error_message=None,
-            # 話者数パラメータを追加
             num_speakers=whisper_request.num_speakers,
-            min_speakers=whisper_request.min_speakers or 1,
-            max_speakers=whisper_request.max_speakers or 1,
+            min_speakers=whisper_request.min_speakers or 1, # Default if None
+            max_speakers=whisper_request.max_speakers or 1, # Default if None
+            # New GCS path fields
+            audio_file_path=audio_gcs_full_path,
+            transcription_file_path=transcription_gcs_full_path,
+            # segments, error_message, process_started_at, process_ended_at, gcp_batch_job_name are None initially
         )
 
-        # Firestoreに保存
         db = firestore.Client()
-        db.collection(WHISPER_JOBS_COLLECTION).document(job_id).set(whisper_job.model_dump())
+        job_doc_ref = db.collection(WHISPER_JOBS_COLLECTION).document(job_id)
+        job_doc_ref.set(whisper_job_data.model_dump())
+        logger.info(f"Whisper job {job_id} queued in Firestore.")
 
-        # Pub/Subに通知
-        publisher: pubsub_v1.PublisherClient = pubsub_v1.PublisherClient()
-        topic_path: str = publisher.topic_path(GCP_PROJECT_ID, PUBSUB_TOPIC)
-
-        # ISO 8601形式の現在時刻を生成
-        current_time = datetime.datetime.now(datetime.timezone.utc).isoformat()
-
-        message_data = WhisperPubSubMessageData(
-            job_id=job_id,
-            event_type="new_job",
-            timestamp=current_time
-        )
-
-        message_bytes: bytes = message_data.json().encode("utf-8")
-        publish_future: pubsub_v1.publisher.futures.Future = publisher.publish(topic_path, data=message_bytes)
-        publish_future.result()
+        # Trigger batch processing (asynchronously)
+        # This will check processing limits and then launch the GCP Batch Job
+        # The trigger_whisper_batch_processing itself might use background_tasks
+        # if the GCP Batch job creation is slow.
+        # Pass the job_id, the function will fetch the full data from Firestore.
+        background_tasks.add_task(trigger_whisper_batch_processing, job_id, background_tasks)
+        logger.info(f"Scheduled batch processing trigger for job {job_id}.")
         
-        response_data = {"status": "success", "job_id": job_id, "file_hash": file_hash}
+        # Pub/Sub notification for "new_job" is no longer needed here if batch is triggered directly.
+        # If other systems rely on this Pub/Sub message, it can be kept.
+        # For now, let's assume direct triggering replaces the need for this specific Pub/Sub message.
+        # publisher: pubsub_v1.PublisherClient = pubsub_v1.PublisherClient()
+        # topic_path: str = publisher.topic_path(GCP_PROJECT_ID, PUBSUB_TOPIC)
+        # current_time_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        # message_data_obj = WhisperPubSubMessageData( # Ensure class name matches
+        #     job_id=job_id,
+        #     event_type="new_job", # This event might still be useful for other listeners
+        #     timestamp=current_time_iso
+        # )
+        # message_bytes: bytes = message_data_obj.model_dump_json().encode("utf-8") # Use model_dump_json for Pydantic v2+
+        # publish_future: pubsub_v1.publisher.futures.Future = publisher.publish(topic_path, data=message_bytes)
+        # publish_future.result() # Wait for publish to complete
+        # logger.debug(f"Published 'new_job' event to Pub/Sub for job {job_id}")
+        
+        response_data = {"status": "success", "job_id": job_id, "file_hash": file_hash, "message": "Job queued for processing."}
         return create_dict_logger(
             response_data,
             meta_info={
@@ -219,9 +246,13 @@ async def upload_audio(
             max_length=GENERAL_LOG_MAX_LENGTH,
         )
 
+    except HTTPException as he:
+        logger.error(f"HTTP Exception in audio upload: {he.detail}", exc_info=True)
+        raise he
     except Exception as e:
-        logger.exception("音声アップロードエラー")
-        return JSONResponse(status_code=500, content={"detail": f"アップロードエラー: {str(e)}"})
+        logger.exception("General error during audio upload and batch trigger.") # Default logger.exception logs stack trace
+        # Consider specific error handling for batch trigger failures if not an HTTPException
+        raise HTTPException(status_code=500, detail=f"Upload or batch trigger error: {str(e)}")
 
 @router.get("/whisper/jobs")
 async def list_jobs(
@@ -447,18 +478,54 @@ async def edit_job_transcript(
 async def retry_job(
     request: Request,
     file_hash: str,
+    background_tasks: BackgroundTasks, # Add BackgroundTasks
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
-    """完了/失敗/キャンセル済みのジョブを再キューする"""
+    """完了/失敗/キャンセル済みのジョブを再キューし、バッチ処理を再トリガーする"""
     try:
+        # ... (log_request logic) ...
         request_info: Dict[str, Any] = await log_request(
             request, current_user, GENERAL_LOG_MAX_LENGTH
         )
+        user_id = current_user["uid"]
+
+        db_client = firestore.Client() # Explicitly create client or use global
+        col_ref = db_client.collection(WHISPER_JOBS_COLLECTION)
         
-        db = firestore.Client()
-        job_id = _update_job_status(db, file_hash, current_user["uid"], "queued")
+        # Find the job by file_hash and user_id
+        query = col_ref.where(filter=FieldFilter("file_hash", "==", file_hash)).where(
+            filter=FieldFilter("user_id", "==", user_id)
+        ).limit(1) # Assuming one job per file_hash for a user, or take the latest.
         
-        response_data = {"status": "queued", "job_id": job_id, "file_hash": file_hash}
+        docs = list(query.stream())
+        if not docs:
+            raise HTTPException(status_code=404, detail="Retry target job not found.")
+        
+        job_doc_ref = docs[0].reference
+        job_id_to_retry = docs[0].id
+        current_job_status = docs[0].to_dict().get("status")
+
+        # Business rule: only retry from terminal states
+        if current_job_status not in {"completed", "failed", "canceled"}:
+            raise HTTPException(status_code=400, detail=f"Job in status '{current_job_status}' cannot be retried now.")
+
+        # Update status to 'queued'
+        job_doc_ref.update({
+            "status": "queued",
+            "updated_at": firestore.SERVER_TIMESTAMP,
+            "error_message": None, # Clear previous error
+            "process_started_at": None,
+            "process_ended_at": None,
+            "gcp_batch_job_name": None, # Clear previous batch job name
+            # segments might be cleared or kept depending on desired retry behavior
+        })
+        logger.info(f"Job {job_id_to_retry} (hash: {file_hash}) status updated to 'queued' for retry.")
+
+        # Trigger batch processing again
+        background_tasks.add_task(trigger_whisper_batch_processing, job_id_to_retry, background_tasks)
+        logger.info(f"Scheduled batch processing re-trigger for job {job_id_to_retry}.")
+
+        response_data = {"status": "queued_for_retry", "job_id": job_id_to_retry, "file_hash": file_hash}
         return create_dict_logger(
             response_data,
             meta_info={
