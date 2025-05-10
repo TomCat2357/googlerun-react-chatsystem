@@ -8,7 +8,8 @@ import subprocess, shlex, tempfile
 from pydantic import BaseModel
 from pydub import AudioSegment
 from google.cloud import storage, pubsub_v1, firestore
-from google.cloud.firestore_v1 import FieldFilter
+from google.cloud.firestore_v1 import FieldFilter, WriteBatch
+from google.cloud.firestore_v1._helpers import Timestamp
 from functools import partial
 
 from app.api.auth import get_current_user
@@ -41,6 +42,9 @@ WHISPER_MAX_BYTES = int(os.environ["WHISPER_MAX_BYTES"])
 # 最大音声サイズ設定（互換性のために残す）
 MAX_AUDIO_BYTES = min(WHISPER_MAX_BYTES, int(os.environ.get("MAX_AUDIO_BYTES", 100 * 1024 * 1024)))  # WHISPER_MAX_BYTESとの小さい方
 MAX_AUDIO_BASE64_CHARS = int(os.environ.get("MAX_AUDIO_BASE64_CHARS", int(WHISPER_MAX_BYTES * 1.5)))  # Base64エンコードによるオーバーヘッド考慮
+# PROCESS_TIMEOUT_SECONDS と AUDIO_TIMEOUT_MULTIPLIER を .env から読み込む
+PROCESS_TIMEOUT_SECONDS = int(os.environ.get("PROCESS_TIMEOUT_SECONDS", "300"))
+AUDIO_TIMEOUT_MULTIPLIER = float(os.environ.get("AUDIO_TIMEOUT_MULTIPLIER", "2.0"))
 
 router = APIRouter()
 
@@ -276,41 +280,134 @@ async def upload_audio(
         # Consider specific error handling for batch trigger failures if not an HTTPException
         raise HTTPException(status_code=500, detail=f"Upload or batch trigger error: {str(e)}")
 
+async def check_and_update_timeout_jobs(db: firestore.Client, user_id_for_filter: Optional[str] = None):
+    """
+    処理中のジョブでタイムアウトしたものを検索し、ステータスを 'failed' に更新する。
+    user_id_for_filter が指定された場合、そのユーザーのジョブのみを対象とする。
+    指定されない場合は、全ユーザーの 'processing' ジョブを対象とする。
+    """
+    now_utc = datetime.datetime.now(datetime.timezone.utc)
+    processing_jobs_query = db.collection(WHISPER_JOBS_COLLECTION).where(
+        filter=FieldFilter("status", "==", "processing")
+    )
+    # 特定ユーザーのジョブのみを対象とする場合
+    # if user_id_for_filter:
+    #     processing_jobs_query = processing_jobs_query.where(filter=FieldFilter("user_id", "==", user_id_for_filter))
+
+    timed_out_jobs_batch = db.batch()
+    updates_count = 0
+
+    for job_snap in processing_jobs_query.stream():
+        job_data_dict = job_snap.to_dict()
+        if not job_data_dict:
+            continue
+
+        # job_id をドキュメントIDから取得
+        job_data_dict["job_id"] = job_snap.id
+        
+        try:
+            # WhisperFirestoreDataでパースして型安全にアクセス
+            job_data = WhisperFirestoreData(**job_data_dict)
+
+            process_started_at = job_data.process_started_at
+            if not process_started_at:
+                logger.warning(f"Job {job_data.job_id} is 'processing' but 'process_started_at' is not set. Skipping timeout check.")
+                continue
+
+            # FirestoreのTimestamp型をdatetimeに変換
+            if isinstance(process_started_at, Timestamp):
+                process_started_at_dt = process_started_at.to_datetime().replace(tzinfo=datetime.timezone.utc)
+            elif isinstance(process_started_at, datetime.datetime):
+                if process_started_at.tzinfo is None:
+                    process_started_at_dt = process_started_at.replace(tzinfo=datetime.timezone.utc)
+                else:
+                    process_started_at_dt = process_started_at.astimezone(datetime.timezone.utc)
+            else:
+                logger.warning(f"Job {job_data.job_id} has invalid 'process_started_at' type: {type(process_started_at)}. Skipping.")
+                continue
+
+            audio_duration_ms = job_data.audio_duration_ms or 0
+            
+            # タイムアウト秒数の計算
+            timeout_seconds_for_job = max(
+                PROCESS_TIMEOUT_SECONDS,
+                (audio_duration_ms / 1000.0) * AUDIO_TIMEOUT_MULTIPLIER
+            )
+
+            elapsed_seconds = (now_utc - process_started_at_dt).total_seconds()
+
+            if elapsed_seconds > timeout_seconds_for_job:
+                logger.info(f"Job {job_data.job_id} timed out. Elapsed: {elapsed_seconds:.2f}s, Timeout: {timeout_seconds_for_job:.2f}s. Updating status to 'failed'.")
+                timed_out_jobs_batch.update(job_snap.reference, {
+                    "status": "failed",
+                    "error_message": f"Processing timed out after {timeout_seconds_for_job:.0f} seconds (checked on job list).",
+                    "process_ended_at": firestore.SERVER_TIMESTAMP,
+                    "updated_at": firestore.SERVER_TIMESTAMP
+                })
+                updates_count += 1
+                if updates_count >= 499: # Firestoreのバッチ書き込み上限に近い
+                    logger.info("Committing a batch of timed out job updates (reaching limit).")
+                    timed_out_jobs_batch.commit()
+                    timed_out_jobs_batch = db.batch() # 新しいバッチを開始
+                    updates_count = 0
+
+        except Exception as e:
+            logger.error(f"Error processing job {job_snap.id} for timeout check: {e}", exc_info=True)
+            continue # 次のジョブへ
+
+    if updates_count > 0:
+        logger.info(f"Committing final batch of {updates_count} timed out job updates.")
+        timed_out_jobs_batch.commit()
+    elif updates_count == 0 and timed_out_jobs_batch._document_references: # バッチに何かあるが updates_count が0 の場合（通常ないはず）
+        logger.info("Committing batch with no counted updates (edge case).")
+        timed_out_jobs_batch.commit()
+
+
 @router.get("/whisper/jobs")
 async def list_jobs(
     request: Request,
-    status: str | None = None,          # 例: queued,completed
-    tag: str | None = None,             # 例: "会議"
+    status: str | None = None,
+    tag: str | None = None,
     limit: int = 100,
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
-    """ログインユーザー自身のジョブを一覧取得"""
+    """ログインユーザー自身のジョブを一覧取得。取得前にタイムアウトジョブのステータスを更新する。"""
     try:
         request_info: Dict[str, Any] = await log_request(
             request, current_user, GENERAL_LOG_MAX_LENGTH
         )
 
         db = firestore.Client()
+
+        # --- タイムアウトジョブのチェックと更新 ---
+        # ここでは全ユーザーの processing ジョブをチェックする (必要に応じて current_user["uid"] で絞る)
+        # この処理は list_jobs のレスポンスに影響を与えるため、非同期にする場合は注意が必要
+        await check_and_update_timeout_jobs(db)
+        # --- タイムアウトジョブのチェックと更新 ここまで ---
+
         col = db.collection(WHISPER_JOBS_COLLECTION)
         q = col.where(filter=FieldFilter("user_id", "==", current_user["uid"]))
 
-        # ステータス絞り込み
         if status:
             allowed = set(status.split(",")).intersection(VALID_STATUSES)
             if allowed:
                 q = q.where(filter=FieldFilter("status", "in", list(allowed)))
-
-        # タグ絞り込み
         if tag:
             q = q.where(filter=FieldFilter("tags", "array_contains", tag))
 
-        # 更新日時 desc
         q = q.order_by("updated_at", direction=firestore.Query.DESCENDING).limit(limit)
-
-        docs = [d.to_dict() | {"id": d.id} for d in q.stream()]
+        docs_snapshot = q.stream()
+        
+        # to_dict() と id の追加
+        docs_list = []
+        for d in docs_snapshot:
+            doc_dict = d.to_dict()
+            if doc_dict: # ドキュメントが存在することを確認
+                doc_dict["id"] = d.id
+                docs_list.append(doc_dict)
         
         return create_dict_logger(
-            {"jobs": docs},
+            {"jobs": docs_list},
             meta_info={
                 k: request_info[k]
                 for k in ("X-Request-Id", "path", "email")
