@@ -6,6 +6,7 @@ from typing import Optional
 
 from fastapi import APIRouter, HTTPException, BackgroundTasks, Request
 from google.cloud import firestore, batch_v1
+from google.cloud.firestore import Transaction
 from google.cloud.batch_v1.types import (
     Job,
     TaskGroup,
@@ -184,56 +185,57 @@ async def trigger_whisper_batch_processing(job_id: str, background_tasks: Backgr
     """
     Fetches job data, checks capacity, updates status, and launches GCP Batch job.
     To be called by whisper.py after a new job is created.
+    トランザクションを使用して同時実行の競合を防止します。
     """
     whisper_jobs_collection = _get_env_var("WHISPER_JOBS_COLLECTION")
     job_ref = db.collection(whisper_jobs_collection).document(job_id)
-    
-    logger.info(f"Attempting to trigger batch processing for job_id: {job_id}")
-
-    job_doc = job_ref.get()
-    if not job_doc.exists:
-        logger.error(f"Job {job_id} not found in Firestore. Cannot trigger batch processing.")
-        raise HTTPException(status_code=404, detail=f"Job {job_id} not found.")
-
-    job_data_dict = job_doc.to_dict()
-    job_data_dict["job_id"] = job_id # Ensure job_id is part of the dict for Pydantic model
-    
-    try:
-        firestore_job_data = WhisperFirestoreData(**job_data_dict)
-    except Exception as e:
-        logger.error(f"Invalid job data for {job_id} from Firestore: {e}", exc_info=True)
-        job_ref.update({
-            "status": "failed",
-            "error_message": f"Invalid job data for batch submission: {str(e)}",
-            "updated_at": firestore.SERVER_TIMESTAMP
-        })
-        raise HTTPException(status_code=500, detail=f"Invalid job data for {job_id}.")
-
-    # Check if job is already in a final state or being processed
-    if firestore_job_data.status not in ["queued"]:
-        logger.info(f"Job {job_id} is not in 'queued' state (current: {firestore_job_data.status}). Skipping batch trigger.")
-        return
-
-    processing_count = _get_current_processing_job_count()
     max_processing_jobs = int(_get_env_var("MAX_PROCESSING_JOBS", "5"))
 
-    if processing_count >= max_processing_jobs:
-        logger.info(f"Max processing jobs ({max_processing_jobs}) reached. Job {job_id} will remain queued.")
-        # Do not change status if it's already queued and limit is reached.
-        return
+    @firestore.transactional
+    def _reserve_slot(tx: Transaction) -> Optional[WhisperFirestoreData]:
+        # ① 現在の処理中件数をカウント
+        processing_count = (
+            db.collection(whisper_jobs_collection)
+            .where("status", "==", "processing")
+            .count()
+            .get(transaction=tx)[0][0]
+            .value
+        )
 
-    # Firestore のステータスは backend では変更しない（whisper_batch が行う）
+        if processing_count >= max_processing_jobs:
+            return None  # キューのまま待機
+
+        snap = job_ref.get(transaction=tx)
+        if not snap.exists or snap.get("status") != "queued":
+            return None  # 競合で別スレッドが処理した
+
+        # ② status を processing へ更新
+        tx.update(
+            job_ref,
+            {
+                "status": "processing",
+                "process_started_at": firestore.SERVER_TIMESTAMP,
+                "updated_at": firestore.SERVER_TIMESTAMP,
+            },
+        )
+        data = snap.to_dict() | {"job_id": job_id, "status": "processing"}
+        return WhisperFirestoreData(**data)
+
     try:
-        
-        # Launching the batch job can take time, run in background
-        background_tasks.add_task(_execute_batch_job_creation, firestore_job_data, job_ref)
+        reserved_job = _reserve_slot(db.transaction())
+        if not reserved_job:
+            logger.info(f"Job {job_id} はまだ待機中（同時実行上限に達したか競合）。")
+            return  # queued のまま戻る
+
+        # ③ Batch ジョブ生成は別スレッドで
+        background_tasks.add_task(_execute_batch_job_creation, reserved_job, job_ref)
         logger.info(f"Scheduled GCP Batch job creation for {job_id} in background.")
 
     except Exception as e:
         logger.error(f"Failed to update job {job_id} status or schedule batch creation: {e}", exc_info=True)
-        # Attempt to revert status or mark as failed to prevent being stuck
+        # 失敗した場合はステータスを失敗に更新
         job_ref.update({
-            "status": "failed", # Or back to 'queued' if appropriate
+            "status": "failed",
             "error_message": f"Failed during pre-batch setup: {str(e)}",
             "updated_at": firestore.SERVER_TIMESTAMP
         })

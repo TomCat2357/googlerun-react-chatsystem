@@ -3,7 +3,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, BackgroundTasks
 from fastapi.responses import JSONResponse
 from typing import Dict, Any, List, Optional
-import os, json, io, base64, hashlib, math, datetime, uuid
+import os, json, io, base64, hashlib, math, datetime, uuid, subprocess, shlex, tempfile
 from pydub import AudioSegment
 from google.cloud import storage, pubsub_v1, firestore
 from google.cloud.firestore_v1 import FieldFilter
@@ -115,29 +115,28 @@ async def upload_audio(
         # 音声ファイルのサイズを取得 (バイト単位)
         audio_size: int = len(audio_content)
         
+        def _get_duration_ms_ffprobe(raw_bytes: bytes, mime_type: str) -> int:
+            """ffprobe で長さをミリ秒で取得（stdin 経由・無再エンコード）"""
+            # 拡張子推定（mime→ext の既存 dict を再利用）
+            ext = mime_mapping.get(mime_type, ".tmp")
+            with tempfile.NamedTemporaryFile(suffix=ext) as tmp:
+                tmp.write(raw_bytes)
+                tmp.flush()
+                cmd = f"ffprobe -v error -show_entries format=duration -of csv=p=0 {shlex.quote(tmp.name)}"
+                result = subprocess.run(
+                    shlex.split(cmd),
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                )
+                if result.returncode != 0:
+                    raise RuntimeError(f"ffprobe failed: {result.stderr.strip()}")
+                seconds = float(result.stdout.strip())
+                return int(seconds * 1000)
+
         try:
-            # メモリ上でファイルを処理
-            audio_file = io.BytesIO(audio_content)
-            
-            # MIMEタイプに応じて適切な形式でロード
-            if mime_type in ["audio/mp3", "audio/mpeg"]:
-                audio = AudioSegment.from_mp3(audio_file)
-            elif mime_type == "audio/wav":
-                audio = AudioSegment.from_wav(audio_file)
-            elif mime_type == "audio/ogg":
-                audio = AudioSegment.from_ogg(audio_file)
-            elif mime_type in ["audio/m4a", "audio/x-m4a"]:
-                audio = AudioSegment.from_file(audio_file, format="m4a")
-            elif mime_type == "audio/aac":
-                audio = AudioSegment.from_file(audio_file, format="aac")
-            elif mime_type == "audio/webm":
-                audio = AudioSegment.from_file(audio_file, format="webm")
-            else:
-                # 未知の形式の場合はデフォルトで処理
-                audio = AudioSegment.from_file(audio_file)
-            
-            # 長さをミリ秒単位で取得
-            audio_duration_ms = len(audio)  # ミリ秒単位で取得
+            # ffprobeを使用して長さを取得
+            audio_duration_ms = _get_duration_ms_ffprobe(audio_content, mime_type)
             logger.debug(f"音声長さ: {audio_duration_ms} ms")
             
             # 音声の長さチェック（秒単位に変換）
