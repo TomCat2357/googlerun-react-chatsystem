@@ -14,7 +14,7 @@ from common_utils.logger import logger, create_dict_logger, log_request
 from common_utils.class_types import WhisperUploadRequest, WhisperFirestoreData, WhisperPubSubMessageData, WhisperSegment, WhisperEditRequest
 
 # Import the new batch processing trigger function
-from app.api.batch import trigger_whisper_batch_processing
+from app.api.whisper_batch import trigger_whisper_batch_processing
 
 # 環境変数から設定を読み込み
 from dotenv import load_dotenv
@@ -157,13 +157,15 @@ async def upload_audio(
         # audio_file_extension is determined: e.g., .mp3
 
         gcs_path_prefix = f"whisper/{user_id}/{file_hash}"
-        original_audio_gcs_filename = f"origin{audio_file_extension}"
+        
+        # 環境変数からファイル名テンプレートを使用
+        file_ext = audio_file_extension.lstrip(".")
+        original_audio_gcs_filename = os.environ["WHISPER_AUDIO_BLOB"].format(file_hash=file_hash, ext=file_ext)
         audio_gcs_full_path = f"{gcs_path_prefix}/{original_audio_gcs_filename}"
         
         # Path for the final combined transcript from whisper_batch/app/main.py
-        # whisper_batch/app/main.py saves combine results as f"{file_hash}_combine.json"
-        # So the path relative to bucket root will be:
-        transcription_output_gcs_filename = f"{file_hash}_combine.json" # Name used by whisper_batch
+        # 環境変数からcombineファイル名テンプレートを使用
+        transcription_output_gcs_filename = os.environ["WHISPER_COMBINE_BLOB"].format(file_hash=file_hash)
         transcription_gcs_full_path = f"{gcs_path_prefix}/{transcription_output_gcs_filename}"
 
 

@@ -65,6 +65,12 @@ DEVICE: str = os.environ["DEVICE"].lower()  # 処理デバイス（"cuda"また�
 USE_GPU: bool = DEVICE == "cuda"  # GPUを使用するかどうか
 TMP_ROOT: Path = Path(os.environ["LOCAL_TMP_DIR"])  # 一時ファイル保存ディレクトリ
 
+# ファイル名テンプレート
+AUDIO_TEMPLATE = os.environ["WHISPER_AUDIO_BLOB"]
+TRANS_TEMPLATE = os.environ["WHISPER_TRANSCRIPT_BLOB"]
+DIAR_TEMPLATE = os.environ["WHISPER_DIARIZATION_BLOB"]
+COMBINE_TEMPLATE = os.environ["WHISPER_COMBINE_BLOB"]
+
 
 def _utcnow() -> datetime.datetime:
     """
@@ -249,12 +255,12 @@ def _process_job(db: firestore.Client, job: Dict[str, Any]) -> None:
             )
         return
 
-    # ファイル拡張子と GCS パスの組み立て
+    # ファイル拡張子と GCS パスの組み立て - テンプレートを使用
     ext = Path(filename).suffix.lstrip(".").lower()
-    audio_blob = f"{file_hash}_audio.{ext}"
-    transcript_blob = f"{file_hash}_transcript.json"
-    diarization_blob = f"{file_hash}_diarization.json"  # 話者分離結果用のファイル名
-    combine_blob = f"{file_hash}_combine.json"  # 結合結果用の別ファイル名
+    audio_blob = AUDIO_TEMPLATE.format(file_hash=file_hash, ext=ext)
+    transcript_blob = TRANS_TEMPLATE.format(file_hash=file_hash)
+    diarization_blob = DIAR_TEMPLATE.format(file_hash=file_hash)
+    combine_blob = COMBINE_TEMPLATE.format(file_hash=file_hash)
     audio_uri = f"gs://{bucket}/{audio_blob}"
     transcript_uri = f"gs://{bucket}/{transcript_blob}"
     diarization_uri = f"gs://{bucket}/{diarization_blob}"  # 話者分離結果用のURI
@@ -497,4 +503,41 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    # GCPのバッチジョブとして実行された場合はJOB_IDを環境変数から取得
+    job_id = os.environ.get("JOB_ID")
+    if job_id:
+        # バッチジョブとして実行された場合は直接処理を実行する
+        db = firestore.Client()
+        
+        # ステータスを"processing"に更新
+        doc_ref = db.collection(COLLECTION).document(job_id)
+        doc_ref.update({
+            "status": "processing",
+            "process_started_at": firestore.SERVER_TIMESTAMP,
+            "updated_at": firestore.SERVER_TIMESTAMP,
+        })
+        logger.info(f"JOB {job_id} ▶ Status updated to 'processing'")
+        
+        # Firestoreからジョブデータを取得
+        job_doc = doc_ref.get()
+        if job_doc.exists:
+            job_data = job_doc.to_dict()
+            job_data["job_id"] = job_id  # job_idをデータに追加
+            try:
+                # ジョブを処理
+                _process_job(db, job_data)
+            except Exception as e:
+                # 例外時はステータスを"failed"に更新
+                error_message = f"Exception in batch job: {str(e)}\n{traceback.format_exc()}"
+                logger.error(f"JOB {job_id} ✖ {error_message}")
+                doc_ref.update({
+                    "status": "failed",
+                    "error_message": str(e),
+                    "process_ended_at": firestore.SERVER_TIMESTAMP,
+                    "updated_at": firestore.SERVER_TIMESTAMP,
+                })
+        else:
+            logger.error(f"JOB {job_id} ✖ Job document not found in Firestore")
+    else:
+        # ワーカーモードとして実行
+        main()

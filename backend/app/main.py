@@ -18,7 +18,7 @@ from app.api.auth import router as auth_router
 from app.api.speech import router as speech_router
 from app.api.image import router as image_router
 from app.api.whisper import router as whisper_router
-from app.api.batch import router as batch_router # Import the new batch router
+from app.api.whisper_batch import router as whisper_batch_router # Import the new batch router
 
 # .envファイルを読み込み
 load_dotenv("./config/.env")
@@ -92,7 +92,7 @@ app.include_router(auth_router, prefix="/backend")
 app.include_router(speech_router, prefix="/backend")
 app.include_router(image_router, prefix="/backend")
 app.include_router(whisper_router, prefix="/backend", tags=["whisper"]) # Add tags for OpenAPI
-app.include_router(batch_router, prefix="/backend/batch", tags=["batch"]) # Add the new batch router
+app.include_router(whisper_batch_router, prefix="/backend/batch", tags=["batch"]) # Add the new batch router
 
 # 静的ファイル配信設定
 app.mount(
