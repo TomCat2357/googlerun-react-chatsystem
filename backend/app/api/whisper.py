@@ -1,10 +1,11 @@
 # API ルート: whisper.py - Whisper音声文字起こし関連のエンドポイント
 
-from fastapi import APIRouter, Depends, HTTPException, Request, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, Request, BackgroundTasks, Body
 from fastapi.responses import JSONResponse
 from typing import Dict, Any, List, Optional
 import os, json, io, base64, hashlib, math, datetime, uuid
 import subprocess, shlex, tempfile
+from pydantic import BaseModel
 from pydub import AudioSegment
 from google.cloud import storage, pubsub_v1, firestore
 from google.cloud.firestore_v1 import FieldFilter
@@ -14,8 +15,10 @@ from app.api.auth import get_current_user
 from common_utils.logger import logger, create_dict_logger, log_request
 from common_utils.class_types import WhisperUploadRequest, WhisperFirestoreData, WhisperPubSubMessageData, WhisperSegment, WhisperEditRequest
 
-# Import the new batch processing trigger function
+# Import the new batch processing trigger function and audio utils
 from app.api.whisper_batch import trigger_whisper_batch_processing
+from app.core.audio_utils import probe_duration
+from app.services.whisper_queue import enqueue_job_atomic, decrement_processing_counter
 
 # 環境変数から設定を読み込み
 from dotenv import load_dotenv
@@ -27,6 +30,7 @@ if os.path.exists(develop_env_path):
 # 設定値の読み込み
 GCP_PROJECT_ID = os.environ["GCP_PROJECT_ID"]
 GCS_BUCKET_NAME = os.environ["GCS_BUCKET_NAME"]
+GCS_BUCKET = GCS_BUCKET_NAME  # 変数名の統一（settings.GCS_BUCKETという参照用）
 PUBSUB_TOPIC = os.environ["PUBSUB_TOPIC"]
 WHISPER_JOBS_COLLECTION = os.environ["WHISPER_JOBS_COLLECTION"]
 GENERAL_LOG_MAX_LENGTH = int(os.environ["GENERAL_LOG_MAX_LENGTH"])
@@ -40,11 +44,44 @@ MAX_AUDIO_BASE64_CHARS = int(os.environ.get("MAX_AUDIO_BASE64_CHARS", int(WHISPE
 
 router = APIRouter()
 
+# 署名付きURL用のレスポンスモデル
+class UploadUrlResponse(BaseModel):
+    upload_url: str
+    object_name: str
+
 # 有効なステータス一覧
 VALID_STATUSES = {"queued", "processing", "completed", "failed", "canceled"}
 
 # 辞書ロガーのセットアップ
 create_dict_logger = partial(create_dict_logger, sensitive_keys=SENSITIVE_KEYS)
+
+@router.post("/whisper/upload_url", response_model=UploadUrlResponse)
+async def create_upload_url(
+    content_type: str = Body(..., embed=True),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """
+    音声ファイルをGCSに直接アップロードするための署名付きURLを生成
+    """
+    # 認証情報の確認
+    user_id = current_user["uid"]
+    
+    # 一意のオブジェクト名の生成
+    random_uuid = uuid.uuid4()
+    blob_name = f"whisper/{user_id}/{random_uuid}"
+    
+    # 署名付きURLの生成
+    bucket = storage.Client().bucket(GCS_BUCKET)
+    blob = bucket.blob(blob_name)
+    signed_url = blob.generate_signed_url(
+        version="v4",
+        expiration=datetime.timedelta(minutes=15),
+        method="PUT",
+        content_type=content_type,
+    )
+    
+    logger.info(f"Generated upload URL for user {user_id}, object: {blob_name}")
+    return {"upload_url": signed_url, "object_name": blob_name}
 
 @router.post("/whisper")
 async def upload_audio(
@@ -66,39 +103,33 @@ async def upload_audio(
         if "X-Request-Id" not in request_info:
             return JSONResponse(status_code=500, content={"detail": "X-Request-Idがリクエスト情報に含まれていません"})
 
-        # Base64データのバリデーション
-        if not whisper_request.audio_data:
-            return JSONResponse(status_code=400, content={"detail": "音声データが提供されていません"})
-
-        if not whisper_request.audio_data.startswith("data:"):
-            return JSONResponse(status_code=400, content={"detail": "無効な音声データ形式です"})
-
-        # MIMEタイプの取得
-        mime_parts: List[str] = whisper_request.audio_data.split(";")[0].split(":")
-        if len(mime_parts) < 2:
-            return JSONResponse(status_code=400, content={"detail": "無効なMIMEタイプ形式"})
-
-        mime_type: str = mime_parts[1]
-        if not mime_type.startswith("audio/"):
-            return JSONResponse(status_code=400, content={"detail": f"無効な音声フォーマット: {mime_type}"})
-
-            # Base64データのデコード前にサイズチェック
-        try:
-            base64_data = whisper_request.audio_data.split(",")[1]
-            if len(base64_data) > MAX_AUDIO_BASE64_CHARS:
-                return JSONResponse(status_code=413, content={"detail": f"音声データが大きすぎます（最大{MAX_AUDIO_BASE64_CHARS/1024/1024:.1f}MB）"})
-                
-            audio_content: bytes = base64.b64decode(base64_data)
+        # GCSオブジェクト名が必要
+        if not whisper_request.gcs_object:
+            return JSONResponse(status_code=400, content={"detail": "GCSオブジェクト名が提供されていません"})
             
-            # ファイルサイズチェック
-            if len(audio_content) > WHISPER_MAX_BYTES:
-                return JSONResponse(status_code=413, content={"detail": f"音声ファイルが大きすぎます（最大{WHISPER_MAX_BYTES/1024/1024:.1f}MB）"})
-        except Exception:
-            return JSONResponse(status_code=400, content={"detail": "Base64デコードに失敗しました"})
-
-        # より強力なハッシュアルゴリズムを使用
-        file_hash: str = hashlib.sha256(audio_content).hexdigest()
-
+        # GCSから音声データを取得して検証
+        storage_client_instance: storage.Client = storage.Client()
+        bucket = storage_client_instance.bucket(GCS_BUCKET_NAME)
+        blob = bucket.blob(whisper_request.gcs_object)
+        
+        # オブジェクトの存在確認
+        if not blob.exists():
+            return JSONResponse(status_code=404, content={"detail": "指定されたGCSオブジェクトが見つかりません"})
+        
+        # MIMEタイプとファイルサイズを取得
+        blob.reload()  # メタデータを確実に取得
+        mime_type = blob.content_type
+        if not mime_type or not mime_type.startswith("audio/"):
+            return JSONResponse(status_code=400, content={"detail": f"無効な音声フォーマット: {mime_type}"})
+            
+        # ファイルサイズのチェック
+        audio_size = blob.size
+        if audio_size > WHISPER_MAX_BYTES:
+            return JSONResponse(status_code=413, content={"detail": f"音声ファイルが大きすぎます（最大{WHISPER_MAX_BYTES/1024/1024:.1f}MB）"})
+            
+        # 音声データをメモリに読み込まずにハッシュを計算（ランダムなUUIDを代わりに使用）
+        file_hash = hashlib.sha256(f"{whisper_request.gcs_object}-{datetime.datetime.now().isoformat()}".encode()).hexdigest()
+        
         # MIMEタイプから拡張子を取得
         mime_mapping: Dict[str, str] = {
             "audio/wav": ".wav",
@@ -113,49 +144,31 @@ async def upload_audio(
         audio_file_extension: Optional[str] = mime_mapping.get(mime_type)
         if not audio_file_extension:
             return JSONResponse(status_code=400, content={"detail": f"サポートされていない音声フォーマット: {mime_type}"})
-        # 音声ファイルのサイズを取得 (バイト単位)
-        audio_size: int = len(audio_content)
         
-        def _get_duration_ms_ffprobe(raw_bytes: bytes, mime_type: str) -> int:
-            """ffprobe で長さをミリ秒で取得（stdin 経由・無再エンコード）"""
-            # 拡張子推定（mime→ext の既存 dict を再利用）
-            ext = mime_mapping.get(mime_type, ".tmp")
-            with tempfile.NamedTemporaryFile(suffix=ext) as tmp:
-                tmp.write(raw_bytes)
-                tmp.flush()
-                cmd = f"ffprobe -v error -show_entries format=duration -of csv=p=0 {shlex.quote(tmp.name)}"
-                result = subprocess.run(
-                    shlex.split(cmd),
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                )
-                if result.returncode != 0:
-                    raise RuntimeError(f"ffprobe failed: {result.stderr.strip()}")
-                seconds = float(result.stdout.strip())
-                return int(seconds * 1000)
-
         try:
-            # ffprobeで音声長さを取得（メモリ効率的）
-            audio_duration_ms = _get_duration_ms_ffprobe(audio_content, mime_type)
-            logger.debug(f"音声長さ: {audio_duration_ms} ms")
-            
-            # 音声の長さチェック（秒単位に変換）
-            if audio_duration_ms > WHISPER_MAX_SECONDS * 1000:
-                return JSONResponse(
-                    status_code=413, 
-                    content={"detail": f"音声の長さが制限を超えています（最大{WHISPER_MAX_SECONDS/60:.1f}分）"}
-                )
-            
+            # GCSから一時的にダウンロードせず、GCS上のファイルに対してffprobeを実行
+            with io.BytesIO() as temp_audio_buffer:
+                # 一時的なバッファにデータをダウンロード
+                blob.download_to_file(temp_audio_buffer)
+                temp_audio_buffer.seek(0)  # バッファの位置を先頭に戻す
+                
+                # ffprobeでストリームから音声の長さを取得
+                seconds = probe_duration(temp_audio_buffer)
+                audio_duration_ms = int(seconds * 1000)
+                logger.debug(f"音声長さ: {audio_duration_ms} ms")
+                
+                # 音声の長さチェック（秒単位に変換）
+                if audio_duration_ms > WHISPER_MAX_SECONDS * 1000:
+                    return JSONResponse(
+                        status_code=413, 
+                        content={"detail": f"音声の長さが制限を超えています（最大{WHISPER_MAX_SECONDS/60:.1f}分）"}
+                    )
         except Exception as e:
             logger.error("音声長さの取得に失敗しました: %s", str(e))
-            return JSONResponse(status_code=400, content={"detail": "音声長さの取得に失敗しました"})
+            return JSONResponse(status_code=400, content={"detail": f"音声長さの取得に失敗しました: {str(e)}"})
         
-        # Determine GCS paths
+        # GCS内でのパスを決定
         user_id: str = current_user["uid"]
-        # file_hash is already calculated: e.g., file_hash: str = hashlib.sha256(audio_content).hexdigest()
-        # audio_file_extension is determined: e.g., .mp3
-
         gcs_path_prefix = f"whisper/{user_id}/{file_hash}"
         
         # 環境変数からファイル名テンプレートを使用
@@ -163,35 +176,43 @@ async def upload_audio(
         original_audio_gcs_filename = os.environ["WHISPER_AUDIO_BLOB"].format(file_hash=file_hash, ext=file_ext)
         audio_gcs_full_path = f"{gcs_path_prefix}/{original_audio_gcs_filename}"
         
-        # Path for the final combined transcript from whisper_batch/app/main.py
-        # 環境変数からcombineファイル名テンプレートを使用
+        # 結合トランスクリプト出力用のパス
         transcription_output_gcs_filename = os.environ["WHISPER_COMBINE_BLOB"].format(file_hash=file_hash)
         transcription_gcs_full_path = f"{gcs_path_prefix}/{transcription_output_gcs_filename}"
 
-
-        # GCSクライアントの設定
-        storage_client_instance: storage.Client = storage.Client() # Renamed to avoid conflict if storage is imported module
+        # アップロード済みのオブジェクトを新しい場所にコピー
         bucket = storage_client_instance.bucket(GCS_BUCKET_NAME)
+        source_blob = bucket.blob(whisper_request.gcs_object)
+        destination_blob = bucket.blob(audio_gcs_full_path)
         
-        # 音声ファイルのアップロード (using audio_gcs_full_path)
-        blob = bucket.blob(audio_gcs_full_path) # Use the determined full path
-        blob.upload_from_string(audio_content, content_type=mime_type)
-        logger.info(f"Uploaded original audio to gs://{GCS_BUCKET_NAME}/{audio_gcs_full_path}")
+        # コピー処理
+        token = None
+        rewrite_token = source_blob.rewrite(destination_blob, token=token)
+        
+        # 大きなファイルの場合は複数回の呼び出しが必要
+        while token is not None:
+            token, bytes_rewritten, total_bytes = rewrite_token
+            logger.debug(f"GCS copy progress: {bytes_rewritten}/{total_bytes} bytes")
+            rewrite_token = source_blob.rewrite(destination_blob, token=token)
+            
+        # 元のアップロード用の一時オブジェクトを削除
+        source_blob.delete()
+        logger.info(f"Copied audio from temporary upload location to gs://{GCS_BUCKET_NAME}/{audio_gcs_full_path}")
 
-        # Firestoreにジョブ情報を記録
+        # Firestoreにジョブ情報を記録（トランザクション利用）
         job_id: str = str(uuid.uuid4()) # server-generated unique ID
         timestamp = firestore.SERVER_TIMESTAMP
 
         whisper_job_data = WhisperFirestoreData(
             job_id=job_id,
             user_id=user_id,
-            user_email=current_user.get("email", ""), # Ensure email is correctly fetched
-            filename=whisper_request.filename,
+            user_email=current_user.get("email", ""), 
+            filename=whisper_request.original_name or os.path.basename(whisper_request.gcs_object),
             description=whisper_request.description,
             recording_date=whisper_request.recording_date,
             gcs_bucket_name=GCS_BUCKET_NAME,
-            audio_duration_ms=audio_duration_ms, # Ensure this is populated
-            audio_size=audio_size, # Ensure this is populated
+            audio_duration_ms=audio_duration_ms, 
+            audio_size=audio_size, 
             file_hash=file_hash,
             language=whisper_request.language,
             initial_prompt=whisper_request.initial_prompt,
@@ -200,18 +221,17 @@ async def upload_audio(
             updated_at=timestamp,
             tags=whisper_request.tags or [],
             num_speakers=whisper_request.num_speakers,
-            min_speakers=whisper_request.min_speakers or 1, # Default if None
-            max_speakers=whisper_request.max_speakers or 1, # Default if None
-            # New GCS path fields
+            min_speakers=whisper_request.min_speakers or 1, 
+            max_speakers=whisper_request.max_speakers or 1, 
             audio_file_path=audio_gcs_full_path,
             transcription_file_path=transcription_gcs_full_path,
-            # segments, error_message, process_started_at, process_ended_at, gcp_batch_job_name are None initially
         )
 
-        db = firestore.Client()
-        job_doc_ref = db.collection(WHISPER_JOBS_COLLECTION).document(job_id)
-        job_doc_ref.set(whisper_job_data.model_dump())
-        logger.info(f"Whisper job {job_id} queued in Firestore.")
+        # トランザクションを使ってジョブを登録
+        job_dict = whisper_job_data.model_dump()
+        job_dict["id"] = job_id  # キーに追加
+        enqueue_job_atomic(job_dict)
+        logger.info(f"Whisper job {job_id} queued in Firestore with atomic transaction.")
 
         # Trigger batch processing (asynchronously)
         # This will check processing limits and then launch the GCP Batch Job

@@ -502,42 +502,69 @@ def main() -> None:
             time.sleep(POLL_INTERVAL_SECONDS)  # エラー時も一定時間待機
 
 
-if __name__ == "__main__":
+def run_batch_job():
+    """
+    バッチジョブとして実行する処理を集約した関数
+    
+    Returns:
+        bool: 処理が成功したかどうか
+    """
     # GCPのバッチジョブとして実行された場合はJOB_IDを環境変数から取得
     job_id = os.environ.get("JOB_ID")
-    if job_id:
-        # バッチジョブとして実行された場合は直接処理を実行する
-        db = firestore.Client()
+    if not job_id:
+        logger.error("JOB_ID 環境変数が設定されていません")
+        return False
         
-        # ステータスを"processing"に更新
-        doc_ref = db.collection(COLLECTION).document(job_id)
+    db = firestore.Client()
+    
+    # ステータスを"processing"に更新
+    doc_ref = db.collection(COLLECTION).document(job_id)
+    try:
         doc_ref.update({
             "status": "processing",
             "process_started_at": firestore.SERVER_TIMESTAMP,
             "updated_at": firestore.SERVER_TIMESTAMP,
         })
         logger.info(f"JOB {job_id} ▶ Status updated to 'processing'")
+    except Exception as e:
+        logger.error(f"JOB {job_id} ✖ Failed to update status: {str(e)}")
+        return False
+    
+    # Firestoreからジョブデータを取得
+    job_doc = doc_ref.get()
+    if not job_doc.exists:
+        logger.error(f"JOB {job_id} ✖ Job document not found in Firestore")
+        return False
         
-        # Firestoreからジョブデータを取得
-        job_doc = doc_ref.get()
-        if job_doc.exists:
-            job_data = job_doc.to_dict()
-            job_data["job_id"] = job_id  # job_idをデータに追加
-            try:
-                # ジョブを処理
-                _process_job(db, job_data)
-            except Exception as e:
-                # 例外時はステータスを"failed"に更新
-                error_message = f"Exception in batch job: {str(e)}\n{traceback.format_exc()}"
-                logger.error(f"JOB {job_id} ✖ {error_message}")
-                doc_ref.update({
-                    "status": "failed",
-                    "error_message": str(e),
-                    "process_ended_at": firestore.SERVER_TIMESTAMP,
-                    "updated_at": firestore.SERVER_TIMESTAMP,
-                })
-        else:
-            logger.error(f"JOB {job_id} ✖ Job document not found in Firestore")
+    job_data = job_doc.to_dict()
+    job_data["job_id"] = job_id  # job_idをデータに追加
+    try:
+        # ジョブを処理
+        _process_job(db, job_data)
+        return True
+    except Exception as e:
+        # 例外時はステータスを"failed"に更新
+        error_message = f"Exception in batch job: {str(e)}\n{traceback.format_exc()}"
+        logger.error(f"JOB {job_id} ✖ {error_message}")
+        doc_ref.update({
+            "status": "failed",
+            "error_message": str(e),
+            "process_ended_at": firestore.SERVER_TIMESTAMP,
+            "updated_at": firestore.SERVER_TIMESTAMP,
+        })
+        return False
+
+if __name__ == "__main__":
+    # バッチジョブかワーカーモードかを判断
+    if os.environ.get("JOB_ID"):
+        # バッチジョブとして実行
+        try:
+            success = run_batch_job()
+            if not success:
+                sys.exit(1)  # 処理失敗時は非ゼロで終了
+        except Exception as e:
+            logger.critical(f"Fatal error in batch job: {str(e)}", exc_info=True)
+            sys.exit(1)  # 例外発生時も非ゼロで終了
     else:
         # ワーカーモードとして実行
         main()

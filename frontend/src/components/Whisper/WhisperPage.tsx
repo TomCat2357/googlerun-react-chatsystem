@@ -45,12 +45,7 @@ const WhisperPage: React.FC = () => {
         window.clearInterval(intervalId.current);
       }
       
-      // 30秒ごとに自動更新する設定
-      intervalId.current = window.setInterval(() => {
-        if (view === "jobs" && !selectedJob) {
-          fetchJobs();
-        }
-      }, 30000); // 30秒ごと
+      // 自動更新を無効化（手動更新ボタンに置き換え）
       
       // コンポーネントのアンマウント時にインターバルをクリア
       return () => {
@@ -131,8 +126,8 @@ const WhisperPage: React.FC = () => {
 
       const requestId = generateRequestId();
       const requestData: WhisperUploadRequest = {
-        audio_data: audioData,
-        filename: audioInfo.fileName,
+        gcs_object: audioData.startsWith("gs://") ? audioData.substring(5) : audioData,
+        original_name: audioInfo.fileName,
         description: description,
         recording_date: recordingDate,
         tags: tags,

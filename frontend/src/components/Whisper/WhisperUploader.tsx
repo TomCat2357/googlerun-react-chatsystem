@@ -2,6 +2,7 @@
 import React, { useRef, useState, useEffect } from "react";
 import { toast } from "react-toastify";
 import * as Config from "../../config";
+import axios from "axios";
 
 export interface AudioInfo {
   duration: number;
@@ -56,7 +57,7 @@ const WhisperUploader: React.FC<WhisperUploaderProps> = ({
   // サーバー設定から最大ファイルサイズを取得 (デフォルトは10MB)
   const MAX_BYTES = Config.getServerConfig().WHISPER_MAX_BYTES || 10 * 1024 * 1024;
 
-  // ファイル処理関数
+  // ファイル処理関数（署名付きURLを使用）
   const processFile = async (file: File) => {
     if (!file.type.startsWith("audio/")) {
       alert("音声ファイル以外はアップロードできません");
@@ -69,45 +70,82 @@ const WhisperUploader: React.FC<WhisperUploaderProps> = ({
       return;
     }
     
+    // ファイルの長さをチェック
     const url = URL.createObjectURL(file);
     const audio = new Audio();
     audio.src = url;
     
-    audio.onloadedmetadata = () => {
-      onAudioInfoChange({
-        duration: audio.duration,
-        fileName: file.name,
-        fileSize: file.size,
-        mimeType: file.type,
+    try {
+      // 先に音声のメタデータを読み込む
+      await new Promise<void>((resolve, reject) => {
+        audio.onloadedmetadata = () => {
+          onAudioInfoChange({
+            duration: audio.duration,
+            fileName: file.name,
+            fileSize: file.size,
+            mimeType: file.type,
+          });
+          resolve();
+        };
+        
+        audio.onerror = () => {
+          reject(new Error("無効な音声データです"));
+        };
       });
-      URL.revokeObjectURL(url);
-    };
-    
-    audio.onerror = () => {
-      alert("無効な音声データです");
-      setFileBase64Data("");
-      onAudioInfoChange(null);
-      URL.revokeObjectURL(url);
-    };
-
-    const fileData = await new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        if (event.target?.result) {
-          resolve(event.target.result as string);
-        } else {
-          reject(new Error("ファイル読み込みエラー"));
+      
+      // 音声長さチェック
+      if (audio.duration > Config.getServerConfig().WHISPER_MAX_SECONDS) {
+        URL.revokeObjectURL(url);
+        toast.error(`音声の長さが制限を超えています(最大${Math.floor(Config.getServerConfig().WHISPER_MAX_SECONDS/60)}分)`);
+        return;
+      }
+      
+      // 署名付きURLを取得
+      const API_BASE_URL = Config.API_BASE_URL;
+      const token = localStorage.getItem("token");
+      
+      if (!token) {
+        toast.error("認証トークンがありません");
+        return;
+      }
+      
+      // 署名付きURLの取得
+      const uploadUrlResponse = await axios.post(
+        `${API_BASE_URL}/backend/whisper/upload_url`,
+        { content_type: file.type },
+        {
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${token}`
+          }
         }
-      };
-      reader.onerror = () => reject(new Error("ファイル読み込みエラー"));
-      reader.readAsDataURL(file);
-    });
-
-    setFileBase64Data(fileData);
-    setPastedBase64Data("");
-    onAudioDataChange(fileData);
-    onDescriptionChange(file.name);
-    onRecordingDateChange(formatDate(file.lastModified));
+      );
+      
+      // 署名付きURLを使って直接GCSにアップロード
+      await fetch(uploadUrlResponse.data.upload_url, {
+        method: "PUT",
+        headers: { "Content-Type": file.type },
+        body: file
+      });
+      
+      // Uploaderコンポーネント用の状態更新
+      setFileBase64Data("uploaded:/" + uploadUrlResponse.data.object_name);
+      setPastedBase64Data("");
+      onAudioDataChange("gs://" + uploadUrlResponse.data.object_name);
+      onDescriptionChange(file.name);
+      onRecordingDateChange(formatDate(file.lastModified));
+      
+      toast.success("ファイルのアップロードが完了しました");
+      
+    } catch (error) {
+      console.error("ファイル処理エラー:", error);
+      toast.error(error instanceof Error ? error.message : "ファイル処理中にエラーが発生しました");
+      setFileBase64Data("");
+      setPastedBase64Data("");
+      onAudioInfoChange(null);
+    } finally {
+      URL.revokeObjectURL(url);
+    }
   };
 
   // ファイル選択イベントハンドラ
