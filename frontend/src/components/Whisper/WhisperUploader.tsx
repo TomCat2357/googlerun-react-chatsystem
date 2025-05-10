@@ -29,7 +29,6 @@ const WhisperUploader: React.FC<WhisperUploaderProps> = ({
   onTagsChange
 }) => {
   // 基本的な状態管理
-  const [uploadMode, setUploadMode] = useState<"file" | "base64">("file");
   const [fileBase64Data, setFileBase64Data] = useState("");
   const [pastedBase64Data, setPastedBase64Data] = useState("");
   const [dragActive, setDragActive] = useState(false);
@@ -78,19 +77,27 @@ const WhisperUploader: React.FC<WhisperUploaderProps> = ({
     try {
       // 先に音声のメタデータを読み込む
       await new Promise<void>((resolve, reject) => {
-        audio.onloadedmetadata = () => {
-          onAudioInfoChange({
-            duration: audio.duration,
-            fileName: file.name,
-            fileSize: file.size,
-            mimeType: file.type,
+        // ブラウザ差異を考慮した安全版の音声長さ取得
+        const getDurationSafely = (file: File): Promise<number> => {
+          return new Promise<number>(resolve => {
+            const audio = new Audio();
+            audio.preload = "metadata";
+            audio.onloadedmetadata = () => resolve(audio.duration);
+            audio.onerror = () => resolve(Number.MAX_VALUE);  // 失敗時はbackend側で検証
+            audio.src = URL.createObjectURL(file);
           });
-          resolve();
         };
         
-        audio.onerror = () => {
-          reject(new Error("無効な音声データです"));
-        };
+        // 音声長さを取得
+        const duration = await getDurationSafely(file);
+        
+        onAudioInfoChange({
+          duration: duration,
+          fileName: file.name,
+          fileSize: file.size,
+          mimeType: file.type,
+        });
+        resolve();
       });
       
       // 音声長さチェック
@@ -129,7 +136,6 @@ const WhisperUploader: React.FC<WhisperUploaderProps> = ({
       });
       
       // Uploaderコンポーネント用の状態更新
-      setFileBase64Data("uploaded:/" + uploadUrlResponse.data.object_name);
       setPastedBase64Data("");
       onAudioDataChange("gs://" + uploadUrlResponse.data.object_name);
       onDescriptionChange(file.name);
@@ -241,21 +247,6 @@ const WhisperUploader: React.FC<WhisperUploaderProps> = ({
     }
   };
 
-  // アップロードモード切替ハンドラ
-  const handleModeChange = (mode: "file" | "base64") => {
-    if (mode === uploadMode) return;
-    
-    // モード切替時に状態をクリア
-    setFileBase64Data("");
-    setPastedBase64Data("");
-    if (fileInputRef.current) {
-      fileInputRef.current.value = "";
-    }
-    onAudioDataChange("");
-    onAudioInfoChange(null);
-    
-    setUploadMode(mode);
-  };
 
   // タグ追加ハンドラ
   const addTag = () => {
@@ -282,37 +273,11 @@ const WhisperUploader: React.FC<WhisperUploaderProps> = ({
           ※アップロードした音声はバッチ処理で文字起こしされます。処理完了後、メールで通知されます。
         </p>
         
-        {/* アップロードモード選択 */}
-        <div className="mb-4 flex gap-4">
-          <label className="flex items-center text-gray-200 cursor-pointer">
-            <input
-              type="radio"
-              name="uploadMode"
-              value="file"
-              checked={uploadMode === "file"}
-              onChange={() => handleModeChange("file")}
-              className="mr-2"
-            />
-            ファイル選択
-          </label>
-          <label className="flex items-center text-gray-200 cursor-pointer">
-            <input
-              type="radio"
-              name="uploadMode"
-              value="base64"
-              checked={uploadMode === "base64"}
-              onChange={() => handleModeChange("base64")}
-              className="mr-2"
-            />
-            Base64貼り付け
-          </label>
-        </div>
       </div>
 
       <div className="bg-gray-700 p-4 rounded-b">
         {/* ファイルアップロードUI */}
-        {uploadMode === "file" ? (
-          <div
+        <div
             onDragEnter={handleDrag}
             onDragLeave={handleDrag}
             onDragOver={handleDrag}
@@ -339,24 +304,6 @@ const WhisperUploader: React.FC<WhisperUploaderProps> = ({
               className="hidden"
             />
           </div>
-        ) : (
-          // Base64貼り付けUI
-          <div className="mb-4">
-            <label className="block mb-2 font-medium">
-              Base64エンコードされたデータを貼り付け
-            </label>
-            <textarea
-              placeholder="Base64データを貼り付けてください"
-              onChange={handleTextInputChange}
-              value={pastedBase64Data}
-              className="w-full p-3 text-black rounded"
-              rows={4}
-            />
-            <p className="text-sm text-gray-400 mt-1">
-              ※Base64形式の音声データを貼り付けてください
-            </p>
-          </div>
-        )}
 
         {/* アップロードデータのプレビュー */}
         {audioData && (

@@ -103,12 +103,14 @@ def _create_gcp_batch_job(job_data: WhisperFirestoreData) -> str:
         FULL_AUDIO_PATH=f"gs://{job_data.gcs_bucket_name}/{job_data.audio_file_path}",
         FULL_TRANSCRIPTION_PATH=f"gs://{job_data.gcs_bucket_name}/{job_data.transcription_file_path}",
         HF_AUTH_TOKEN=hf_auth_token,
-        NUM_SPEAKERS=str(job_data.num_speakers) if job_data.num_speakers is not None else "",
         MIN_SPEAKERS=str(job_data.min_speakers),
         MAX_SPEAKERS=str(job_data.max_speakers),
         LANGUAGE=job_data.language,
         INITIAL_PROMPT=job_data.initial_prompt,
     )
+    # NUM_SPEAKERS が None でない場合のみ設定
+    if job_data.num_speakers is not None:
+        batch_env_params.NUM_SPEAKERS = str(job_data.num_speakers)
 
     runnable_env = Environment()
     runnable_env.variables = {k: v for k, v in batch_env_params.model_dump().items() if v is not None}

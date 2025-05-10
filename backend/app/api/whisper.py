@@ -146,14 +146,14 @@ async def upload_audio(
             return JSONResponse(status_code=400, content={"detail": f"サポートされていない音声フォーマット: {mime_type}"})
         
         try:
-            # GCSから一時的にダウンロードせず、GCS上のファイルに対してffprobeを実行
-            with io.BytesIO() as temp_audio_buffer:
-                # 一時的なバッファにデータをダウンロード
-                blob.download_to_file(temp_audio_buffer)
-                temp_audio_buffer.seek(0)  # バッファの位置を先頭に戻す
+            # 一時ファイルにダウンロードし、ffprobeで確認してメモリ効率化
+            with tempfile.NamedTemporaryFile(
+                    suffix=os.path.splitext(filename)[1]) as tmp:
+                blob.download_to_file(tmp)
+                tmp.flush()
                 
-                # ffprobeでストリームから音声の長さを取得
-                seconds = probe_duration(temp_audio_buffer)
+                # ffprobeで音声の長さを取得
+                seconds = probe_duration(tmp.name)
                 audio_duration_ms = int(seconds * 1000)
                 logger.debug(f"音声長さ: {audio_duration_ms} ms")
                 

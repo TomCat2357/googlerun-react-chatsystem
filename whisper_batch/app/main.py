@@ -50,7 +50,13 @@ if str(BASE_DIR) not in os.environ["GOOGLE_APPLICATION_CREDENTIALS"]:
     )
 
 # ── 環境変数（未設定時は KeyError を発生させる） ───────────────────────────────────
-COLLECTION: str = os.environ["WHISPER_JOBS_COLLECTION"]  # Firestoreのコレクション名
+# COLLECTION 環境変数は必須。未設定なら起動時例外
+try:
+    COLLECTION = os.environ['COLLECTION']
+except KeyError:
+    raise RuntimeError(
+        'Environment variable COLLECTION is required for whisper_batch'
+    )
 PROCESS_TIMEOUT_SECONDS: int = int(
     os.environ["PROCESS_TIMEOUT_SECONDS"]
 )  # 処理タイムアウト時間（秒）
@@ -302,11 +308,12 @@ def _process_job(db: firestore.Client, job: Dict[str, Any]) -> None:
         logger.info(f"JOB {job_id} ✍ Transcribed → {transcript_local}")
 
         # 話者数をチェック（文字列型の可能性があるので整数に変換）
-        num_speakers = (
-            int(job.get("num_speakers"))
-            if job.get("num_speakers") is not None
-            else None
-        )
+        # NUM_SPEAKERS の安全パース
+        try:
+            num_speakers = int(os.getenv('NUM_SPEAKERS')) \
+                if os.getenv('NUM_SPEAKERS') else None
+        except ValueError:
+            num_speakers = None
         min_speakers = int(job.get("min_speakers", 1))
         max_speakers = int(job.get("max_speakers", 1))
 
