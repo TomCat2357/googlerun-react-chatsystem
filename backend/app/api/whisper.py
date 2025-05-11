@@ -17,7 +17,7 @@ from common_utils.logger import logger, create_dict_logger, log_request
 from common_utils.class_types import WhisperUploadRequest, WhisperFirestoreData, WhisperPubSubMessageData, WhisperSegment, WhisperEditRequest
 
 # Import the new batch processing trigger function and audio utils
-from app.api.whisper_batch import trigger_whisper_batch_processing
+from app.api.whisper_batch import trigger_whisper_batch_processing, _get_current_processing_job_count, _get_env_var # 必要な関数をインポート
 from app.core.audio_utils import probe_duration
 from app.services.whisper_queue import enqueue_job_atomic, decrement_processing_counter
 
@@ -364,6 +364,7 @@ async def check_and_update_timeout_jobs(db: firestore.Client, user_id_for_filter
 @router.get("/whisper/jobs")
 async def list_jobs(
     request: Request,
+    background_tasks: BackgroundTasks, # BackgroundTasks を依存性として追加
     status: str | None = None,
     tag: str | None = None,
     limit: int = 100,
@@ -382,6 +383,42 @@ async def list_jobs(
         # この処理は list_jobs のレスポンスに影響を与えるため、非同期にする場合は注意が必要
         await check_and_update_timeout_jobs(db)
         # --- タイムアウトジョブのチェックと更新 ここまで ---
+
+        # --- キューイングされているジョブの処理トリガー ---
+        try:
+            current_processing_count = _get_current_processing_job_count() # whisper_batch.py の関数を利用
+            max_processing_jobs = int(_get_env_var("MAX_PROCESSING_JOBS", "5")) # whisper_batch.py の関数を利用
+
+            if current_processing_count < max_processing_jobs:
+                logger.info(f"Processing slots available ({current_processing_count}/{max_processing_jobs}). Checking for queued jobs for user {current_user['uid']}.")
+                # 現在のユーザーのキューイングジョブを取得
+                # システム全体で空きがあれば他のユーザーのジョブも処理する方針の場合、
+                # user_id によるフィルタリングを外すか、別途システム全体のキューを確認するロジックを追加検討。
+                # ここでは、まず現在のユーザーのジョブから処理を試みる。
+                queued_jobs_query = (
+                    db.collection(WHISPER_JOBS_COLLECTION)
+                    .where(filter=FieldFilter("user_id", "==", current_user["uid"]))
+                    .where(filter=FieldFilter("status", "==", "queued"))
+                    .order_by("created_at") # 作成日時が古い順
+                    .limit(max_processing_jobs - current_processing_count) # 利用可能なスロット数分だけ取得
+                )
+                
+                queued_job_snapshots = list(queued_jobs_query.stream())
+
+                if queued_job_snapshots:
+                    for job_snap in queued_job_snapshots:
+                        job_id_to_trigger = job_snap.id
+                        logger.info(f"Attempting to trigger batch processing for queued job {job_id_to_trigger} via list_jobs API call.")
+                        # trigger_whisper_batch_processing は内部でジョブの現在のステータスを再確認し、
+                        # 必要であればステータスを 'processing' に更新してGCP Batchジョブの作成をスケジュールします。
+                        background_tasks.add_task(trigger_whisper_batch_processing, job_id_to_trigger, background_tasks)
+                else:
+                    logger.info(f"No queued jobs found for user {current_user['uid']} to trigger at this moment via list_jobs API call.")
+            else:
+                logger.info(f"Max processing jobs ({max_processing_jobs}) reached. No new jobs triggered via list_jobs API call for user {current_user['uid']}.")
+        except Exception as e:
+            logger.error(f"Error during queued job trigger in list_jobs API call for user {current_user['uid']}: {e}", exc_info=True)
+        # --- キューイングされているジョブの処理トリガー ここまで ---
 
         col = db.collection(WHISPER_JOBS_COLLECTION)
         q = col.where(filter=FieldFilter("user_id", "==", current_user["uid"]))
