@@ -93,11 +93,6 @@ class WhisperFirestoreData(BaseModel):
     error_message: Optional[str] = None
     segments: Optional[List[WhisperSegment]] = None # 文字起こし結果のセグメントを追加
 
-    # GCS file paths (relative to bucket root)
-    audio_file_path: Optional[str] = None # e.g., "whisper/user_id/file_hash/origin.mp3"
-    transcription_file_path: Optional[str] = None # e.g., "whisper/user_id/file_hash/file_hash_combine.json"
-    gcp_batch_job_name: Optional[str] = None # To store the name of the launched GCP Batch Job
-
     class Config:
         # 追加のフィールドを許可しない
         extra = "forbid"

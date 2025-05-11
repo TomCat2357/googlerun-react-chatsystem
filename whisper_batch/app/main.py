@@ -44,6 +44,10 @@ if str(BASE_DIR) not in os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", ""):
         BASE_DIR, os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", "")
     )
 
+# Environment variables passed from GCP Batch
+FULL_AUDIO_GCS_PATH_ENV = "FULL_AUDIO_PATH"
+FULL_TRANSCRIPTION_GCS_PATH_ENV = "FULL_TRANSCRIPTION_PATH"
+
 # ── 環境変数（未設定時は KeyError を発生させる） ───────────────────────────────────
 try:
     COLLECTION = os.environ['COLLECTION']
@@ -141,31 +145,33 @@ def _process_job(db: firestore.Client, job: Dict[str, Any]) -> None:
 
     ext = Path(filename).suffix.lstrip(".").lower()
     
-    # ENV テンプレートから直接パスを組み立て
-    audio_blob_filename = os.environ["WHISPER_AUDIO_BLOB"].format(file_hash=file_hash, ext=ext)
-    transcript_blob_filename = os.environ["WHISPER_TRANSCRIPTION_BLOB"].format(file_hash=file_hash)
-    diarization_blob_filename = os.environ["WHISPER_DIARIZATION_BLOB"].format(file_hash=file_hash)
-    combine_blob_filename = os.environ["WHISPER_COMBINE_BLOB"].format(file_hash=file_hash)
-    
-    audio_uri = f"gs://{batch_bucket}/{audio_blob_filename}"
-    transcript_uri = f"gs://{batch_bucket}/{transcript_blob_filename}"
-    diarization_uri = f"gs://{batch_bucket}/{diarization_blob_filename}"
-    combine_uri = f"gs://{batch_bucket}/{combine_blob_filename}"
+    # Get full GCS paths from environment variables set by the batch job submission
+    full_audio_gcs_path = os.environ[FULL_AUDIO_GCS_PATH_ENV]
+    full_transcription_gcs_path = os.environ[FULL_TRANSCRIPTION_GCS_PATH_ENV]
 
-    logger.info(f"JOB {job_id} ▶ Start (audio: {audio_uri})")
+    # Parse bucket and blob name from the full GCS path
+    def parse_gcs_path(gcs_path: str) -> tuple[str, str]:
+        if not gcs_path.startswith("gs://"):
+            raise ValueError(f"Invalid GCS path: {gcs_path}")
+        parts = gcs_path[5:].split("/", 1)
+        if len(parts) != 2:
+            raise ValueError(f"Cannot parse bucket and blob from GCS path: {gcs_path}")
+        return parts[0], parts[1]
+
+    audio_bucket_name, audio_blob_name = parse_gcs_path(full_audio_gcs_path)
+    transcription_bucket_name, transcription_blob_name = parse_gcs_path(full_transcription_gcs_path)
+
+    logger.info(f"JOB {job_id} ▶ Start (audio: {full_audio_gcs_path})")
 
     tmp_dir = TMP_ROOT / f"job_{job_id}_{int(time.time())}"
     tmp_dir.mkdir(parents=True, exist_ok=True)
     storage_client = storage.Client()
 
     try:
-        # Download: firestore_data.audio_file_path を使う
-        if not firestore_data.audio_file_path:
-            raise ValueError("audio_file_path is not set in Firestore data")
-        local_audio = tmp_dir / Path(firestore_data.audio_file_path).name # GCS上のファイル名をローカル名として使用
-
-        storage_client.bucket(bucket).blob(firestore_data.audio_file_path).download_to_filename(local_audio)
-        logger.info(f"JOB {job_id} ⤵ Downloaded → {local_audio} from gs://{bucket}/{firestore_data.audio_file_path}")
+        local_audio_filename = Path(audio_blob_name).name # Use the blob name for the local file
+        local_audio = tmp_dir / local_audio_filename
+        storage_client.bucket(audio_bucket_name).blob(audio_blob_name).download_to_filename(local_audio)
+        logger.info(f"JOB {job_id} ⤵ Downloaded → {local_audio} from {full_audio_gcs_path}")
 
         wav_path = tmp_dir / f"{file_hash}_16k_mono.wav"
         is_optimized_format = check_audio_format(str(local_audio))
@@ -176,8 +182,8 @@ def _process_job(db: firestore.Client, job: Dict[str, Any]) -> None:
             convert_audio(str(local_audio), str(wav_path), use_gpu=USE_GPU)
             logger.info(f"JOB {job_id} 🎧 Converted → {wav_path}")
 
-        # 文字起こし時に言語とプロンプトを渡す
-        transcript_local_filename = Path(transcript_blob).name
+        # Define local paths for intermediate files
+        transcript_local_filename = f"{file_hash}_transcription.json" # Consistent naming
         transcript_local = tmp_dir / transcript_local_filename
         transcribe_audio(
             str(wav_path), str(transcript_local),
@@ -186,8 +192,8 @@ def _process_job(db: firestore.Client, job: Dict[str, Any]) -> None:
         )
         logger.info(f"JOB {job_id} ✍ Transcribed → {transcript_local}")
 
-        diarization_local_filename = Path(diarization_blob).name
-        diarization_local = tmp_dir / diarization_local_filename # GCSにアップロードするファイル名と合わせる
+        diarization_local_filename = f"{file_hash}_diarization.json" # Consistent naming
+        diarization_local = tmp_dir / diarization_local_filename
 
         is_single_speaker = num_speakers == 1 or (
             num_speakers is None and max_speakers == 1 and min_speakers == 1 # min_speakersも考慮
@@ -209,21 +215,20 @@ def _process_job(db: firestore.Client, job: Dict[str, Any]) -> None:
             )
             logger.info(f"JOB {job_id} 👥 Diarized → {diarization_local}")
 
-        # 結合結果のローカルファイルパス
-        combine_local_filename = Path(combine_blob).name
-        combine_local = tmp_dir / combine_local_filename # GCSにアップロードするファイル名と合わせる
+        # The final combined output will be uploaded to the path specified by full_transcription_gcs_path
+        # So the local filename for the combined result should match the blob name part of full_transcription_gcs_path
+        combine_local_filename = Path(transcription_blob_name).name
+        combine_local = tmp_dir / combine_local_filename
         
         # combine_results に渡すパスを修正
         combine_results(str(transcript_local), str(diarization_local), str(combine_local))
         logger.info(f"JOB {job_id} 🔗 Combined → {combine_local}")
 
-        # Upload: firestore_data.transcription_file_path を使う
-        if not firestore_data.transcription_file_path:
-             raise ValueError("transcription_file_path is not set in Firestore data for combined results")
-        storage_client.bucket(bucket).blob(firestore_data.transcription_file_path).upload_from_filename(
+        # Upload the combined result
+        storage_client.bucket(transcription_bucket_name).blob(transcription_blob_name).upload_from_filename(
             combine_local
         )
-        logger.info(f"JOB {job_id} ⬆ Uploaded combined result → gs://{bucket}/{firestore_data.transcription_file_path}")
+        logger.info(f"JOB {job_id} ⬆ Uploaded combined result → {full_transcription_gcs_path}")
 
         # 個別の文字起こし結果と話者分離結果もアップロード（必要であれば）
         # storage_client.bucket(bucket).blob(transcript_blob).upload_from_filename(

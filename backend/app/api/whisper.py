@@ -224,9 +224,7 @@ async def upload_audio(
             tags=whisper_request.tags or [],
             num_speakers=whisper_request.num_speakers,
             min_speakers=whisper_request.min_speakers or 1, 
-            max_speakers=whisper_request.max_speakers or 1, 
-            audio_file_path=audio_gcs_full_path,
-            transcription_file_path=transcription_gcs_full_path,
+            max_speakers=whisper_request.max_speakers or 1
         )
 
         # トランザクションを使ってジョブを登録
@@ -669,8 +667,7 @@ async def retry_job(
             "updated_at": firestore.SERVER_TIMESTAMP,
             "error_message": None, # Clear previous error
             "process_started_at": None,
-            "process_ended_at": None,
-            "gcp_batch_job_name": None, # Clear previous batch job name
+            "process_ended_at": None
             # segments might be cleared or kept depending on desired retry behavior
         })
         logger.info(f"Job {job_id_to_retry} (hash: {file_hash}) status updated to 'queued' for retry.")

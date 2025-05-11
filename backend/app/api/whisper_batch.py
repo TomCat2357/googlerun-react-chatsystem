@@ -92,16 +92,27 @@ def _create_gcp_batch_job(job_data: WhisperFirestoreData) -> str:
     task_spec = TaskSpec()
     container = Runnable.Container()
     container.image_uri = batch_image_url
-    container.commands = ["python3", "/app/main.py"] # Command for whisper_batch/app/main.py
+    container.commands = ["python3", "/app/main.py"]
 
     # Prepare environment variables for the batch job container
-    if not job_data.audio_file_path or not job_data.transcription_file_path:
-        raise ValueError("audio_file_path or transcription_file_path is missing in job_data")
+    # Reconstruct audio and transcription paths using file_hash and naming conventions
+    # Ensure original_filename is available in job_data if needed for extension, or derive extension another way
+    # For now, assuming filename in job_data provides the original name with extension.
+    original_filename = job_data.filename # e.g., "myaudio.mp3"
+    audio_file_extension = os.path.splitext(original_filename)[1].lstrip(".")
+    if not audio_file_extension: # Fallback if original filename has no extension (should be rare)
+        # Determine extension based on a common default or add more logic
+        # This part might need adjustment based on how robust extension handling should be
+        logger.warning(f"Could not determine audio extension for job {job_data.job_id} from filename {original_filename}. Defaulting to mp3.")
+        audio_file_extension = "mp3" # A common default, adjust if necessary
+
+    audio_blob_name = _get_env_var("WHISPER_AUDIO_BLOB").format(file_hash=job_data.file_hash, ext=audio_file_extension)
+    transcription_blob_name = _get_env_var("WHISPER_COMBINE_BLOB").format(file_hash=job_data.file_hash)
 
     batch_env_params = WhisperBatchParameter(
         JOB_ID=job_data.job_id,
-        FULL_AUDIO_PATH=f"gs://{job_data.gcs_bucket_name}/{job_data.audio_file_path}",
-        FULL_TRANSCRIPTION_PATH=f"gs://{job_data.gcs_bucket_name}/{job_data.transcription_file_path}",
+        FULL_AUDIO_PATH=f"gs://{job_data.gcs_bucket_name}/{audio_blob_name}",
+        FULL_TRANSCRIPTION_PATH=f"gs://{job_data.gcs_bucket_name}/{transcription_blob_name}",
         HF_AUTH_TOKEN=hf_auth_token,
         NUM_SPEAKERS=str(job_data.num_speakers) if job_data.num_speakers is not None else "",
         MIN_SPEAKERS=str(job_data.min_speakers),
@@ -250,12 +261,10 @@ async def trigger_whisper_batch_processing(job_id: str, background_tasks: Backgr
 def _execute_batch_job_creation(job_data: WhisperFirestoreData, job_ref: firestore.DocumentReference):
     """Helper function to be run in a background task for creating the GCP Batch job."""
     try:
-        gcp_batch_job_name = _create_gcp_batch_job(job_data)
-        job_ref.update({
-            "gcp_batch_job_name": gcp_batch_job_name,
-            "updated_at": firestore.SERVER_TIMESTAMP
-        })
-        logger.info(f"Successfully launched GCP Batch job {gcp_batch_job_name} for Whisper job {job_data.job_id}")
+        _create_gcp_batch_job(job_data) # gcp_batch_job_name is no longer stored in Firestore
+        # If the gcp_batch_job_name itself (the return from _create_gcp_batch_job) is needed for anything else,
+        # it should be handled here, but not by updating Firestore.
+        logger.info(f"Successfully launched GCP Batch job for Whisper job {job_data.job_id}")
     except Exception as e:
         logger.error(f"Failed to create GCP Batch job for Whisper job {job_data.job_id} in background: {e}", exc_info=True)
         job_ref.update({
