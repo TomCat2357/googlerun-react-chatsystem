@@ -31,9 +31,74 @@ const WhisperPage: React.FC = () => {
   const [filterStatus, setFilterStatus] = useState<string>("all");
   const [sortOrder, setSortOrder] = useState<string>("date-desc");
   const [refreshInterval, setRefreshInterval] = useState<number | null>(null);
+  
+  // フロントエンドフィルタリング用の追加状態
+  const [searchKeyword, setSearchKeyword] = useState<string>("");
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [dateFrom, setDateFrom] = useState<string>("");
+  const [dateTo, setDateTo] = useState<string>("");
+  const [availableTags, setAvailableTags] = useState<string[]>([]);
 
   // インターバル参照用のrefを追加
   const intervalId = useRef<number | null>(null);
+  
+  // フロントエンドでジョブをフィルタリングする関数
+  const filterJobs = (allJobs: any[]) => {
+    if (!allJobs || allJobs.length === 0) return [];
+    
+    return allJobs.filter(job => {
+      // ステータスでフィルタリング（WhisperJobListコンポーネントでも行うが、両方で適用して確実にする）
+      if (filterStatus !== "all" && job.status !== filterStatus) {
+        return false;
+      }
+      
+      // キーワードでフィルタリング
+      if (searchKeyword && searchKeyword.trim() !== "") {
+        const keyword = searchKeyword.toLowerCase();
+        // ファイル名とタグでの検索
+        const matchesFilename = job.filename && job.filename.toLowerCase().includes(keyword);
+        const matchesTags = job.tags && job.tags.some((tag: string) => tag.toLowerCase().includes(keyword));
+        
+        if (!matchesFilename && !matchesTags) {
+          return false;
+        }
+      }
+      
+      // 日付範囲でフィルタリング
+      if (dateFrom) {
+        const fromDate = new Date(dateFrom);
+        const jobDate = new Date(job.created_at);
+        if (jobDate < fromDate) {
+          return false;
+        }
+      }
+      
+      if (dateTo) {
+        const toDate = new Date(dateTo);
+        toDate.setHours(23, 59, 59, 999); // その日の終わりにする
+        const jobDate = new Date(job.created_at);
+        if (jobDate > toDate) {
+          return false;
+        }
+      }
+      
+      // 選択されたタグでフィルタリング
+      if (selectedTags.length > 0) {
+        if (!job.tags) return false;
+        
+        // すべての選択されたタグを含む必要がある（AND検索）
+        const hasAllTags = selectedTags.every(selectedTag => 
+          job.tags.some((tag: string) => tag === selectedTag)
+        );
+        
+        if (!hasAllTags) {
+          return false;
+        }
+      }
+      
+      return true;
+    });
+  };
 
   // 初回読み込み時にジョブ一覧を取得
   useEffect(() => {
@@ -68,14 +133,8 @@ const WhisperPage: React.FC = () => {
     try {
       const requestId = generateRequestId();
       
-      // クエリパラメータの構築
-      const queryParams = new URLSearchParams();
-      if (filterStatus !== "all") {
-        queryParams.append("status", filterStatus);
-      }
-      // タグフィルターなどの追加があれば実装可能
-      
-      const response = await fetch(`${API_BASE_URL}/backend/whisper/jobs?${queryParams}`, {
+      // すべてのジョブを取得（フィルタリングはフロントエンドで行う）
+      const response = await fetch(`${API_BASE_URL}/backend/whisper/jobs`, {
         method: "GET",
         headers: {
           "Content-Type": "application/json",
@@ -89,7 +148,20 @@ const WhisperPage: React.FC = () => {
       }
 
       const data = await response.json();
-      setJobs(data.jobs || []);
+      const jobsList = data.jobs || [];
+      setJobs(jobsList);
+      
+      // 利用可能なタグのリストを抽出
+      const tagsSet = new Set<string>();
+      jobsList.forEach(job => {
+        if (job.tags && Array.isArray(job.tags)) {
+          job.tags.forEach((tag: string) => {
+            tagsSet.add(tag);
+          });
+        }
+      });
+      
+      setAvailableTags(Array.from(tagsSet).sort());
     } catch (error) {
       console.error("ジョブ一覧取得エラー:", error);
       setErrorMessage(error instanceof Error ? error.message : String(error));
@@ -410,18 +482,96 @@ const WhisperPage: React.FC = () => {
               )}
             </div>
           ) : (
-            // ジョブ一覧
-            <WhisperJobList
-              jobs={jobs}
-              onJobSelect={(jobId, fileHash) => fetchJobDetails(jobId, fileHash)}
-              onRefresh={fetchJobs}
-              onCancel={(jobId, fileHash) => cancelJob(jobId, fileHash)}
-              onRetry={(jobId, fileHash) => retryJob(jobId, fileHash)}
-              filterStatus={filterStatus}
-              onFilterChange={setFilterStatus}
-              sortOrder={sortOrder}
-              onSortChange={setSortOrder}
-            />
+            <>
+              {/* 追加フィルター UI */}
+              <div className="mb-4 bg-gray-800 p-4 rounded">
+                <h2 className="text-xl mb-2">詳細フィルター</h2>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                  {/* キーワード検索 */}
+                  <div>
+                    <label className="block text-sm font-medium mb-1">キーワード検索</label>
+                    <input
+                      type="text"
+                      value={searchKeyword}
+                      onChange={(e) => setSearchKeyword(e.target.value)}
+                      placeholder="ファイル名で検索..."
+                      className="w-full bg-gray-700 rounded px-3 py-2 text-white"
+                    />
+                  </div>
+                  
+                  {/* 日付範囲フィルター */}
+                  <div>
+                    <label className="block text-sm font-medium mb-1">開始日</label>
+                    <input
+                      type="date"
+                      value={dateFrom}
+                      onChange={(e) => setDateFrom(e.target.value)}
+                      className="w-full bg-gray-700 rounded px-3 py-2 text-white"
+                    />
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium mb-1">終了日</label>
+                    <input
+                      type="date"
+                      value={dateTo}
+                      onChange={(e) => setDateTo(e.target.value)}
+                      className="w-full bg-gray-700 rounded px-3 py-2 text-white"
+                    />
+                  </div>
+                  
+                  {/* タグフィルター */}
+                  <div>
+                    <label className="block text-sm font-medium mb-1">タグ</label>
+                    {availableTags.length > 0 ? (
+                      <select
+                        multiple
+                        value={selectedTags}
+                        onChange={(e) => {
+                          const options = Array.from(e.target.selectedOptions, option => option.value);
+                          setSelectedTags(options);
+                        }}
+                        className="w-full bg-gray-700 rounded px-3 py-2 text-white h-24"
+                      >
+                        {availableTags.map(tag => (
+                          <option key={tag} value={tag}>{tag}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <p className="text-gray-500 text-sm">利用可能なタグがありません</p>
+                    )}
+                  </div>
+                  
+                  {/* リセットボタン */}
+                  <div className="flex items-end">
+                    <button
+                      onClick={() => {
+                        setSearchKeyword("");
+                        setSelectedTags([]);
+                        setDateFrom("");
+                        setDateTo("");
+                      }}
+                      className="bg-gray-600 hover:bg-gray-700 text-white px-3 py-2 rounded"
+                    >
+                      フィルターをリセット
+                    </button>
+                  </div>
+                </div>
+              </div>
+              
+              {/* ジョブ一覧 */}
+              <WhisperJobList
+                jobs={filterJobs(jobs)}
+                onJobSelect={(jobId, fileHash) => fetchJobDetails(jobId, fileHash)}
+                onRefresh={fetchJobs}
+                onCancel={(jobId, fileHash) => cancelJob(jobId, fileHash)}
+                onRetry={(jobId, fileHash) => retryJob(jobId, fileHash)}
+                filterStatus={filterStatus}
+                onFilterChange={setFilterStatus}
+                sortOrder={sortOrder}
+                onSortChange={setSortOrder}
+              />
+            </>
           )}
         </div>
       )}
