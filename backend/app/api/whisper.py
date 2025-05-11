@@ -31,7 +31,7 @@ if os.path.exists(develop_env_path):
 # 設定値の読み込み
 GCP_PROJECT_ID = os.environ["GCP_PROJECT_ID"]
 GCS_BUCKET_NAME = os.environ["GCS_BUCKET_NAME"]
-GCS_BUCKET = GCS_BUCKET_NAME  # 変数名の統一（settings.GCS_BUCKETという参照用）
+GCS_BUCKET = os.environ["GCS_BUCKET"]  # バケット名
 PUBSUB_TOPIC = os.environ["PUBSUB_TOPIC"]
 WHISPER_JOBS_COLLECTION = os.environ["WHISPER_JOBS_COLLECTION"]
 GENERAL_LOG_MAX_LENGTH = int(os.environ["GENERAL_LOG_MAX_LENGTH"])
@@ -171,18 +171,16 @@ async def upload_audio(
             logger.error("音声長さの取得に失敗しました: %s", str(e))
             return JSONResponse(status_code=400, content={"detail": f"音声長さの取得に失敗しました: {str(e)}"})
         
-        # GCS内でのパスを決定
-        user_id: str = current_user["uid"]
-        gcs_path_prefix = f"whisper/{user_id}/{file_hash}"
-        
-        # 環境変数からファイル名テンプレートを使用
-        file_ext = audio_file_extension.lstrip(".")
-        original_audio_gcs_filename = os.environ["WHISPER_AUDIO_BLOB"].format(file_hash=file_hash, ext=file_ext)
-        audio_gcs_full_path = f"{gcs_path_prefix}/{original_audio_gcs_filename}"
+        # ENV テンプレートから直接フルパスを組み立て
+        audio_blob_filename = os.environ["WHISPER_AUDIO_BLOB"].format(
+            file_hash=file_hash,
+            ext=audio_file_extension.lstrip(".")
+        )
+        audio_uri = f"gs://{bucket}/{audio_blob_filename}"
         
         # 結合トランスクリプト出力用のパス
-        transcription_output_gcs_filename = os.environ["WHISPER_COMBINE_BLOB"].format(file_hash=file_hash)
-        transcription_gcs_full_path = f"{gcs_path_prefix}/{transcription_output_gcs_filename}"
+        combine_blob_filename = os.environ["WHISPER_COMBINE_BLOB"].format(file_hash=file_hash)
+        combine_uri = f"gs://{bucket}/{combine_blob_filename}"
 
         # アップロード済みのオブジェクトを新しい場所にコピー
         bucket = storage_client_instance.bucket(GCS_BUCKET_NAME)

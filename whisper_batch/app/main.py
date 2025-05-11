@@ -60,6 +60,7 @@ HF_AUTH_TOKEN: str = os.environ["HF_AUTH_TOKEN"]
 DEVICE: str = os.environ["DEVICE"].lower()
 USE_GPU: bool = DEVICE == "cuda"
 TMP_ROOT: Path = Path(os.environ["LOCAL_TMP_DIR"])
+batch_bucket = os.environ["GCS_BUCKET"]
 
 AUDIO_TEMPLATE = os.environ["WHISPER_AUDIO_BLOB"]
 TRANS_TEMPLATE = os.environ["WHISPER_TRANSCRIPT_BLOB"]
@@ -139,25 +140,17 @@ def _process_job(db: firestore.Client, job: Dict[str, Any]) -> None:
         return
 
     ext = Path(filename).suffix.lstrip(".").lower()
-    # audio_blobのファイル名に拡張子を含める
-    original_audio_filename = os.environ["WHISPER_AUDIO_BLOB"].format(file_hash=file_hash, ext=ext)
-    gcs_path_prefix = f"whisper/{firestore_data.user_id}/{file_hash}" # firestore_dataからuser_idを取得
-    audio_blob = f"{gcs_path_prefix}/{original_audio_filename}"
-
-    transcript_blob_filename = os.environ["WHISPER_TRANSCRIPT_BLOB"].format(file_hash=file_hash)
-    transcript_blob = f"{gcs_path_prefix}/{transcript_blob_filename}"
-
-    diarization_blob_filename = os.environ["WHISPER_DIARIZATION_BLOB"].format(file_hash=file_hash)
-    diarization_blob = f"{gcs_path_prefix}/{diarization_blob_filename}"
     
+    # ENV テンプレートから直接パスを組み立て
+    audio_blob_filename = os.environ["WHISPER_AUDIO_BLOB"].format(file_hash=file_hash, ext=ext)
+    transcript_blob_filename = os.environ["WHISPER_TRANSCRIPTION_BLOB"].format(file_hash=file_hash)
+    diarization_blob_filename = os.environ["WHISPER_DIARIZATION_BLOB"].format(file_hash=file_hash)
     combine_blob_filename = os.environ["WHISPER_COMBINE_BLOB"].format(file_hash=file_hash)
-    combine_blob = f"{gcs_path_prefix}/{combine_blob_filename}"
-
-
-    audio_uri = f"gs://{bucket}/{audio_blob}"
-    transcript_uri = f"gs://{bucket}/{transcript_blob}"
-    diarization_uri = f"gs://{bucket}/{diarization_blob}"
-    combine_uri = f"gs://{bucket}/{combine_blob}"
+    
+    audio_uri = f"gs://{batch_bucket}/{audio_blob_filename}"
+    transcript_uri = f"gs://{batch_bucket}/{transcript_blob_filename}"
+    diarization_uri = f"gs://{batch_bucket}/{diarization_blob_filename}"
+    combine_uri = f"gs://{batch_bucket}/{combine_blob_filename}"
 
     logger.info(f"JOB {job_id} ▶ Start (audio: {audio_uri})")
 
