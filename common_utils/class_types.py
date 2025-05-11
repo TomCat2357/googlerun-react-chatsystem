@@ -103,13 +103,15 @@ class WhisperFirestoreData(BaseModel):
         extra = "forbid"
 
     # 例：特定のフィールドのバリデーション
+    # クラス変数として有効なステータスを定義
+    _VALID_STATUSES = ["queued", "launched", "processing", "completed", "failed", "canceled"]
+    
     @field_validator("status")
     @classmethod
     def validate_status(cls, v):
-        valid_statuses = ["queued", "processing", "completed", "failed", "canceled"]
-        if v not in valid_statuses:
+        if v not in cls._VALID_STATUSES:
             raise ValueError(
-                f"無効なステータス: {v}. 有効なステータス: {valid_statuses}"
+                f"無効なステータス: {v}. 有効なステータス: {cls._VALID_STATUSES}"
             )
         return v
 

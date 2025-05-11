@@ -56,7 +56,7 @@ def _get_current_processing_job_count() -> int:
         whisper_jobs_collection = _get_env_var("WHISPER_JOBS_COLLECTION")
         processing_count_snapshot = (
             db.collection(whisper_jobs_collection)
-            .where("status", "==", "processing")
+            .where("status", "in", ["processing", "launched"]) # processing と launched をカウント
             .count()
             .get()
         )
@@ -222,16 +222,16 @@ async def trigger_whisper_batch_processing(job_id: str, background_tasks: Backgr
         # Do not change status if it's already queued and limit is reached.
         return
 
-    # Update status to 'processing' and launch batch job
+    # Update status to 'launched' and launch batch job
     # This should ideally be atomic or handled carefully for concurrency.
     # For now, we update status then launch. If launch fails, status is 'failed'.
     try:
         job_ref.update({
-            "status": "processing",
+            "status": "launched",
             "process_started_at": firestore.SERVER_TIMESTAMP,
             "updated_at": firestore.SERVER_TIMESTAMP
         })
-        logger.info(f"Updated job {job_id} status to 'processing'.")
+        logger.info(f"Updated job {job_id} status to 'launched'.")
         
         # Launching the batch job can take time, run in background
         background_tasks.add_task(_execute_batch_job_creation, firestore_job_data, job_ref)

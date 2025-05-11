@@ -5,7 +5,7 @@ interface Job {
   filename: string;
   created_at: string;
   updated_at?: string;
-  status: "queued" | "processing" | "completed" | "failed" | "error" | "canceled"; // statusの型定義更新
+  status: "queued" | "launched" | "processing" | "completed" | "failed" | "error" | "canceled"; // statusの型定義更新
   progress?: number;
   error_message?: string;
   tags?: string[];
@@ -49,10 +49,11 @@ const WhisperJobList: React.FC<WhisperJobListProps> = ({
         if (sortOrder === "date-asc") 
           return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
         if (sortOrder === "status") {
-          // ステータス順（処理中→待機中→完了→失敗）
+          // ステータス順（処理中→起動済み→待機中→完了→失敗）
           const statusOrder = {
             "processing": 0,
-            "queued": 1,
+            "launched": 1, // launched を processing と同じ優先度に
+            "queued": 2,
             "completed": 3,
             "failed": 4,
             "error": 5,
@@ -76,6 +77,7 @@ const WhisperJobList: React.FC<WhisperJobListProps> = ({
           >
             <option value="all">すべて</option>
             <option value="queued">待機中</option>
+            <option value="launched">起動済</option>
             <option value="processing">処理中</option>
             <option value="completed">完了</option>
             <option value="failed">失敗</option>
@@ -140,6 +142,11 @@ const WhisperJobList: React.FC<WhisperJobListProps> = ({
                     {job.status === "queued" && (
                       <span className="text-blue-400 flex items-center">
                         <span className="mr-2">⏳</span> 待機中
+                      </span>
+                    )}
+                    {job.status === "launched" && (
+                      <span className="text-cyan-400 flex items-center">
+                        <span className="animate-pulse mr-2">🚀</span> 起動済
                       </span>
                     )}
                     {job.status === "processing" && (

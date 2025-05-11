@@ -78,8 +78,8 @@ def _pick_next_job(db: firestore.Client) -> Optional[Dict[str, Any]]:
     def _txn(tx: firestore.Transaction) -> Optional[Dict[str, Any]]:
         col = db.collection(COLLECTION)
         docs = (
-            col.where("status", "==", "queued")
-            .order_by("created_at")
+            col.where("status", "in", ["queued", "launched"]) # queued または launched を対象
+            .order_by("upload_at")
             .limit(1)
             .stream(transaction=tx)
         )
@@ -98,7 +98,7 @@ def _pick_next_job(db: firestore.Client) -> Optional[Dict[str, Any]]:
         try:
             data = doc.to_dict()
             data["job_id"] = doc.id
-            data["status"] = "processing"
+            data["status"] = "processing" # ステータスを更新
             firestore_data = WhisperFirestoreData(**data)
             return dict(firestore_data.model_dump())
         except Exception as e:
@@ -241,9 +241,9 @@ def _process_job(db: firestore.Client, job: Dict[str, Any]) -> None:
             )
         else:
             current_status = job_doc.to_dict().get("status", "")
-            if current_status != "processing": # backend側でキャンセルされた場合などを考慮
+            if current_status not in ["processing", "launched"]: # backend側でキャンセルされた場合などを考慮
                 logger.warning(
-                    f"JOB {job_id} Current status is '{current_status}', not 'processing'. Skipping 'completed' update from worker."
+                    f"JOB {job_id} Current status is '{current_status}', not 'processing' or 'launched'. Skipping 'completed' update from worker."
                 )
             else:
                 # 処理成功。Firestoreに文字起こし結果のセグメントも保存
@@ -277,8 +277,8 @@ def _process_job(db: firestore.Client, job: Dict[str, Any]) -> None:
             )
         else:
             # current_status = job_doc.to_dict().get("status", "") # backend側でキャンセルされた場合などを考慮
-            # if current_status != "processing":
-            #    logger.warning(f"JOB {job_id} Current status is '{current_status}', not 'processing'. Skipping 'failed' update from worker.")
+            # if current_status not in ["processing", "launched"]:
+            #    logger.warning(f"JOB {job_id} Current status is '{current_status}', not 'processing' or 'launched'. Skipping 'failed' update from worker.")
             # else:
             db.collection(COLLECTION).document(job_id).update(
                 {
