@@ -8,7 +8,7 @@ import subprocess, shlex, tempfile
 from pydantic import BaseModel
 from pydub import AudioSegment
 from google.cloud import storage, pubsub_v1, firestore
-from google.cloud.firestore_v1 import FieldFilter, WriteBatch
+from google.cloud.firestore_v1 import FieldFilter, WriteBatch, Query
 from google.cloud.firestore_v1._helpers import Timestamp
 from functools import partial
 
@@ -45,6 +45,7 @@ MAX_AUDIO_BASE64_CHARS = int(os.environ.get("MAX_AUDIO_BASE64_CHARS", int(WHISPE
 # PROCESS_TIMEOUT_SECONDS と AUDIO_TIMEOUT_MULTIPLIER を .env から読み込む
 PROCESS_TIMEOUT_SECONDS = int(os.environ.get("PROCESS_TIMEOUT_SECONDS", "300"))
 AUDIO_TIMEOUT_MULTIPLIER = float(os.environ.get("AUDIO_TIMEOUT_MULTIPLIER", "2.0"))
+FIRESTORE_MAX_DAYS = int(os.environ.get("FIRESTORE_MAX_DAYS", "30")) # 追加：デフォルト30日
 
 router = APIRouter()
 
@@ -374,11 +375,18 @@ async def list_jobs(
             request, current_user, GENERAL_LOG_MAX_LENGTH
         )
 
+        user_email = current_user.get("email")
+        if not user_email:
+            logger.error(f"User email not found in current_user for user_id: {current_user.get('uid')}")
+            raise HTTPException(status_code=400, detail="User email not found.")
+
         db = firestore.Client()
 
+        # ② 時間経過しすぎたlauncedとprocessingについてfailedにする
         # --- タイムアウトジョブのチェックと更新 ---
         # ここでは全ユーザーの processing ジョブをチェックする (必要に応じて current_user["uid"] で絞る)
         # この処理は list_jobs のレスポンスに影響を与えるため、非同期にする場合は注意が必要
+        # ユーザーの指示に基づき、このステップは現在のユーザーに限定せず、システム全体で実行されるように見えます。
         await check_and_update_timeout_jobs(db)
         # --- タイムアウトジョブのチェックと更新 ここまで ---
 
@@ -388,16 +396,16 @@ async def list_jobs(
             max_processing_jobs = int(_get_env_var("MAX_PROCESSING_JOBS", "5")) # whisper_batch.py の関数を利用
 
             if current_processing_count < max_processing_jobs:
-                logger.info(f"Processing slots available ({current_processing_count}/{max_processing_jobs}). Checking for queued jobs for user {current_user['uid']}.")
+                logger.info(f"Processing slots available ({current_processing_count}/{max_processing_jobs}). Checking for queued jobs for user {user_email}.")
                 # 現在のユーザーのキューイングジョブを取得
                 # システム全体で空きがあれば他のユーザーのジョブも処理する方針の場合、
                 # user_id によるフィルタリングを外すか、別途システム全体のキューを確認するロジックを追加検討。
                 # ここでは、まず現在のユーザーの queued または launched ジョブから処理を試みる。
                 queued_jobs_query = (
                     db.collection(WHISPER_JOBS_COLLECTION)
-                    .where(filter=FieldFilter("user_id", "==", current_user["uid"]))
+                    .where(filter=FieldFilter("user_email", "==", user_email)) # user_id から user_email に変更
                     .where(filter=FieldFilter("status", "in", ["queued", "launched"]))
-                    .order_by("upload_at", direction=firestore.Query.ASCENDING) # アップロード日時が古い順
+                    .order_by("created_at", direction=Query.ASCENDING) # upload_at から created_at に変更 (FirestoreDataモデルに準拠)
                     .limit(max_processing_jobs - current_processing_count) # 利用可能なスロット数分だけ取得
                 )
                 
@@ -411,15 +419,23 @@ async def list_jobs(
                         # 必要であればステータスを 'launched' に更新してGCP Batchジョブの作成をスケジュールします。
                         background_tasks.add_task(trigger_whisper_batch_processing, job_id_to_trigger, background_tasks)
                 else:
-                    logger.info(f"No queued or launched jobs found for user {current_user['uid']} to trigger at this moment via list_jobs API call.")
+                    logger.info(f"No queued or launched jobs found for user {user_email} to trigger at this moment via list_jobs API call.")
             else:
-                logger.info(f"Max processing jobs ({max_processing_jobs}) reached. No new 'queued' or 'launched' jobs triggered via list_jobs API call for user {current_user['uid']}.")
+                logger.info(f"Max processing jobs ({max_processing_jobs}) reached. No new 'queued' or 'launched' jobs triggered via list_jobs API call for user {user_email}.")
         except Exception as e:
-            logger.error(f"Error during queued job trigger in list_jobs API call for user {current_user['uid']}: {e}", exc_info=True)
+            logger.error(f"Error during queued job trigger in list_jobs API call for user {user_email}: {e}", exc_info=True)
         # --- キューイングされているジョブの処理トリガー ここまで ---
 
+        # ④ ②又は③の処理があった場合は再度①と同様にデータを吸い出し、なければ①で得たデータ（一覧）について、一覧としてfrontendに返す。
+        # Firestoreからデータを取得 (①の処理)
         col = db.collection(WHISPER_JOBS_COLLECTION)
-        q = col.where(filter=FieldFilter("user_id", "==", current_user["uid"]))
+        
+        # 自分のemailに一致するもの
+        q = col.where(filter=FieldFilter("user_email", "==", user_email))
+        
+        # .envにある環境変数FIRESTORE_MAX_DAYS日前までにupdateしたデータ一覧を取得
+        min_update_date = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=FIRESTORE_MAX_DAYS)
+        q = q.where(filter=FieldFilter("updated_at", ">=", min_update_date))
 
         if status:
             allowed = set(status.split(",")).intersection(VALID_STATUSES)
@@ -427,7 +443,6 @@ async def list_jobs(
                 q = q.where(filter=FieldFilter("status", "in", list(allowed)))
         if tag:
             q = q.where(filter=FieldFilter("tags", "array_contains", tag))
-
         q = q.order_by("updated_at", direction=firestore.Query.DESCENDING).limit(limit)
         docs_snapshot = q.stream()
         
