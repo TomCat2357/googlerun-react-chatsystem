@@ -45,10 +45,20 @@ const WhisperTranscriptPlayer: React.FC<WhisperTranscriptPlayerProps> = ({
         const prevSpeaker = index > 0 ? segments[index - 1].speaker : null;
         const showSpeakerLabel = segment.speaker !== prevSpeaker;
         
-        // スピーカータグを含めたテキスト
+        let currentText = segment.text;
+        // currentTextが既に話者タグで始まっているかを確認 (例: "[Speaker01] ...")
+        const speakerTagRegex = /^\[(SPEAKER_\d+|Speaker\d+|[^\]]+)\]\s*/;
+        const match = currentText.match(speakerTagRegex);
+        
+        if (match) {
+          // テキストに既に話者タグが含まれている場合、一時的に除去
+          currentText = currentText.substring(match[0].length);
+        }
+        
+        // スピーカータグを含めたテキスト（話者が変わる場合のみ）
         return showSpeakerLabel 
-          ? `[${segment.speaker}] ${segment.text}`
-          : segment.text;
+          ? `[${segment.speaker}] ${currentText}`
+          : currentText;
       });
       
       setDisplayTexts(texts);
