@@ -18,7 +18,7 @@ from common_utils.class_types import WhisperUploadRequest, WhisperFirestoreData,
 
 # Import the new batch processing trigger function and audio utils
 from app.api.whisper_batch import trigger_whisper_batch_processing, _get_current_processing_job_count, _get_env_var # 必要な関数をインポート
-from app.core.audio_utils import probe_duration
+from app.core.audio_utils import probe_duration, convert_audio_to_wav_16k_mono
 from app.services.whisper_queue import enqueue_job_atomic, decrement_processing_counter
 
 # 環境変数から設定を読み込み
@@ -150,24 +150,38 @@ async def upload_audio(
         if not audio_file_extension:
             return JSONResponse(status_code=400, content={"detail": f"サポートされていない音声フォーマット: {mime_type}"})
         
+        audio_duration_ms = 0
+        converted_wav_path = ""
+        final_audio_size = audio_size
+        original_filename_for_probe = whisper_request.original_name or f"audio{audio_file_extension or '.tmp'}"
+
         try:
-            # 一時ファイルにダウンロードし、ffprobeで確認してメモリ効率化
-            with tempfile.NamedTemporaryFile(
-                    suffix=os.path.splitext(filename)[1]) as tmp:
-                blob.download_to_file(tmp)
-                tmp.flush()
-                
-                # ffprobeで音声の長さを取得
-                seconds = probe_duration(tmp.name)
+            # 一時ファイルにダウンロード
+            with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(original_filename_for_probe)[1]) as tmp_original_audio_file:
+                blob.download_to_filename(tmp_original_audio_file.name)
+                tmp_original_audio_file.flush()
+                original_local_path = tmp_original_audio_file.name
+
+                # ffprobeで元の音声の長さを取得
+                seconds = probe_duration(original_local_path)
                 audio_duration_ms = int(seconds * 1000)
-                logger.debug(f"音声長さ: {audio_duration_ms} ms")
-                
+                logger.debug(f"元の音声長さ: {audio_duration_ms} ms")
+
                 # 音声の長さチェック（秒単位に変換）
                 if audio_duration_ms > WHISPER_MAX_SECONDS * 1000:
                     return JSONResponse(
-                        status_code=413, 
+                        status_code=413,
                         content={"detail": f"音声の長さが制限を超えています（最大{WHISPER_MAX_SECONDS/60:.1f}分）"}
                     )
+                
+                # 固定ビットレートのWAVに変換
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp_converted_audio_file:
+                    converted_wav_path = tmp_converted_audio_file.name
+
+                convert_audio_to_wav_16k_mono(original_local_path, converted_wav_path)
+                logger.info(f"音声を16kHzモノラルWAVに変換しました: {converted_wav_path}")
+                final_audio_size = os.path.getsize(converted_wav_path)
+                audio_file_extension = ".wav" # 拡張子を.wavに固定
         except Exception as e:
             logger.error("音声長さの取得に失敗しました: %s", str(e))
             return JSONResponse(status_code=400, content={"detail": f"音声長さの取得に失敗しました: {str(e)}"})
@@ -175,32 +189,31 @@ async def upload_audio(
         # ENV テンプレートから直接フルパスを組み立て
         audio_blob_filename = os.environ["WHISPER_AUDIO_BLOB"].format(
             file_hash=file_hash,
-            ext=audio_file_extension.lstrip(".")
+            ext="wav" # 拡張子をwavに固定
         )
-        audio_uri = f"gs://{bucket}/{audio_blob_filename}"
+        audio_gcs_full_path = f"gs://{GCS_BUCKET_NAME}/{audio_blob_filename}"
         
         # 結合トランスクリプト出力用のパス
         combine_blob_filename = os.environ["WHISPER_COMBINE_BLOB"].format(file_hash=file_hash)
-        combine_uri = f"gs://{bucket}/{combine_blob_filename}"
+        # combine_uri = f"gs://{GCS_BUCKET_NAME}/{combine_blob_filename}" # この変数は直接使わない
 
-        # アップロード済みのオブジェクトを新しい場所にコピー
-        bucket = storage_client_instance.bucket(GCS_BUCKET_NAME)
-        source_blob = bucket.blob(whisper_request.gcs_object)
-        destination_blob = bucket.blob(audio_gcs_full_path)
-        
-        # コピー処理
-        token = None
-        rewrite_token = source_blob.rewrite(destination_blob, token=token)
-        
-        # 大きなファイルの場合は複数回の呼び出しが必要
-        while token is not None:
-            token, bytes_rewritten, total_bytes = rewrite_token
-            logger.debug(f"GCS copy progress: {bytes_rewritten}/{total_bytes} bytes")
-            rewrite_token = source_blob.rewrite(destination_blob, token=token)
+        # 変換されたWAVファイルをGCSの最終的な場所にアップロード
+        destination_bucket = storage_client_instance.bucket(GCS_BUCKET_NAME)
+        destination_blob = destination_bucket.blob(audio_blob_filename)
+        destination_blob.upload_from_filename(converted_wav_path)
+        logger.info(f"変換された音声をアップロードしました: {audio_gcs_full_path}")
+
+        # 元のアップロード用の一時GCSオブジェクトを削除
+        temp_gcs_blob = storage_client_instance.bucket(GCS_BUCKET_NAME).blob(whisper_request.gcs_object)
+        if temp_gcs_blob.exists():
+            temp_gcs_blob.delete()
+            logger.info(f"一時GCSオブジェクトを削除しました: gs://{GCS_BUCKET_NAME}/{whisper_request.gcs_object}")
             
-        # 元のアップロード用の一時オブジェクトを削除
-        source_blob.delete()
-        logger.info(f"Copied audio from temporary upload location to gs://{GCS_BUCKET_NAME}/{audio_gcs_full_path}")
+        # ローカル一時ファイルを削除
+        if os.path.exists(original_local_path):
+            os.remove(original_local_path)
+        if os.path.exists(converted_wav_path):
+            os.remove(converted_wav_path)
 
         # Firestoreにジョブ情報を記録（トランザクション利用）
         job_id: str = str(uuid.uuid4()) # server-generated unique ID
@@ -215,7 +228,7 @@ async def upload_audio(
             recording_date=whisper_request.recording_date,
             gcs_bucket_name=GCS_BUCKET_NAME,
             audio_duration_ms=audio_duration_ms, 
-            audio_size=audio_size, 
+            audio_size=final_audio_size, # 変換後のファイルサイズを使用
             file_hash=file_hash,
             language=whisper_request.language,
             initial_prompt=whisper_request.initial_prompt,

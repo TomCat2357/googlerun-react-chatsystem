@@ -14,6 +14,8 @@ interface WhisperTranscriptPlayerProps {
     filename: string;
     gcs_audio_url: string;
     segments: Segment[];
+    audio_duration_ms?: number; // 音声全体の長さ（ミリ秒）
+    audio_size?: number; // 音声全体のサイズ（バイト）
   };
   onSaveEdit: (editedSegments: any[]) => void;
 }
@@ -32,6 +34,8 @@ const WhisperTranscriptPlayer: React.FC<WhisperTranscriptPlayerProps> = ({
   const [hasEdits, setHasEdits] = useState(false);
   
   const audioRef = useRef<HTMLAudioElement>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const currentSegmentSourceRef = useRef<AudioBufferSourceNode | null>(null);
   
   // 初期データのロード
   useEffect(() => {
@@ -64,6 +68,25 @@ const WhisperTranscriptPlayer: React.FC<WhisperTranscriptPlayerProps> = ({
       setDisplayTexts(texts);
     }
   }, [jobData]);
+
+  // AudioContextの初期化
+  useEffect(() => {
+    // AudioContext APIの初期化
+    audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+    
+    // クリーンアップ関数
+    return () => {
+      // コンポーネントのアンマウント時にAudioContextを閉じ、再生中の音声を停止
+      if (currentSegmentSourceRef.current) {
+        currentSegmentSourceRef.current.stop();
+        currentSegmentSourceRef.current.disconnect();
+      }
+      
+      if (audioContextRef.current) {
+        audioContextRef.current.close();
+      }
+    };
+  }, []);
 
   // 再生時間の更新
   const handleTimeUpdate = () => {
@@ -116,13 +139,90 @@ const WhisperTranscriptPlayer: React.FC<WhisperTranscriptPlayerProps> = ({
     }
   };
 
-  // セグメントダブルクリック時の処理（再生開始）
-  const handleSegmentDoubleClick = (start: number) => {
-    if (audioRef.current) {
-      audioRef.current.currentTime = start;
-      setCurrentTime(start);
-      audioRef.current.play();
-      setIsPlaying(true);
+  // セグメントダブルクリック時の処理（HTTP Range Requestを使って部分再生）
+  const handleSegmentDoubleClick = async (index: number) => {
+    if (!audioContextRef.current || !jobData || !jobData.segments[index]) {
+      console.error("AudioContextまたはジョブデータが利用できません");
+      return;
+    }
+
+    const segment = jobData.segments[index];
+    const { gcs_audio_url, audio_duration_ms, audio_size } = jobData;
+
+    // オーディオのサイズと長さの確認
+    if (!audio_duration_ms || !audio_size || audio_duration_ms <= 0 || audio_size <= 0) {
+      console.error("音声長さまたはサイズのデータが不正です。フォールバック処理を実行します。");
+      // 通常の再生処理にフォールバック
+      if (audioRef.current) {
+        audioRef.current.currentTime = segment.start;
+        setCurrentTime(segment.start);
+        audioRef.current.play();
+        setIsPlaying(true);
+      }
+      return;
+    }
+
+    // 以前の再生を停止
+    if (currentSegmentSourceRef.current) {
+      currentSegmentSourceRef.current.stop();
+      currentSegmentSourceRef.current.disconnect();
+      currentSegmentSourceRef.current = null;
+    }
+    
+    // メインの<audio>要素が再生中なら一時停止
+    if (audioRef.current && !audioRef.current.paused) {
+      audioRef.current.pause();
+      setIsPlaying(false);
+    }
+
+    // バイト/秒 の計算（固定ビットレートのWAVを想定）
+    const bytesPerSecond = audio_size / (audio_duration_ms / 1000);
+    
+    // セグメントの開始/終了時間からバイト範囲を計算
+    const startByte = Math.floor(segment.start * bytesPerSecond);
+    // 終了バイトはファイルサイズを超えないように制限
+    const endByte = Math.min(audio_size - 1, Math.floor(segment.end * bytesPerSecond));
+
+    // バイト範囲の検証
+    if (startByte >= endByte) {
+      console.warn("計算された開始バイトが終了バイト以上です。セグメント再生をスキップします:", segment);
+      return;
+    }
+
+    try {
+      // HTTP Range Requestを使って部分的なデータを取得
+      const response = await fetch(gcs_audio_url, {
+        headers: {
+          Range: `bytes=${startByte}-${endByte}`,
+        },
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP Range Requestが失敗しました: ${response.status}`);
+      }
+      
+      // 音声データの取得とデコード
+      const audioData = await response.arrayBuffer();
+      const audioBuffer = await audioContextRef.current.decodeAudioData(audioData);
+      
+      // 音声ソースの作成と再生
+      const source = audioContextRef.current.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(audioContextRef.current.destination);
+      source.start(0);
+      
+      // 参照を保持して後で停止できるようにする
+      currentSegmentSourceRef.current = source;
+      
+      // 再生状態の更新
+      setCurrentTime(segment.start);
+    } catch (error) {
+      console.error("HTTP Range Requestによるセグメント再生中にエラーが発生しました:", error);
+      // エラー時はメインの<audio>要素にフォールバック
+      if (audioRef.current) {
+        audioRef.current.currentTime = segment.start;
+        setCurrentTime(segment.start);
+      }
     }
   };
 
@@ -278,7 +378,7 @@ const WhisperTranscriptPlayer: React.FC<WhisperTranscriptPlayerProps> = ({
                 borderLeft: "3px solid #ccc"
               }}
               onClick={() => handleSegmentClick(segment.start)}
-              onDoubleClick={() => handleSegmentDoubleClick(segment.start)}
+              onDoubleClick={() => handleSegmentDoubleClick(index)}
             >
               {/* 編集モードか通常表示か */}
               {isEditMode ? (

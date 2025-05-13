@@ -18,10 +18,7 @@ from common_utils.class_types import WhisperFirestoreData
 from common_utils.logger import logger
 
 # ── 外部ユーティリティ ─────────────────────────────
-from whisper_batch.app.convert_audio import (
-    convert_audio,
-    check_audio_format,
-)
+# convert_audio と check_audio_format は必要なくなりました
 from whisper_batch.app.transcribe import transcribe_audio
 from whisper_batch.app.diarize import diarize_audio
 from whisper_batch.app.combine_results import (
@@ -173,14 +170,9 @@ def _process_job(db: firestore.Client, job: Dict[str, Any]) -> None:
         storage_client.bucket(audio_bucket_name).blob(audio_blob_name).download_to_filename(local_audio)
         logger.info(f"JOB {job_id} ⤵ Downloaded → {local_audio} from {full_audio_gcs_path}")
 
-        wav_path = tmp_dir / f"{file_hash}_16k_mono.wav"
-        is_optimized_format = check_audio_format(str(local_audio))
-        if is_optimized_format:
-            shutil.copy2(str(local_audio), str(wav_path))
-            logger.info(f"JOB {job_id} 🎧 Format already 16kHz mono WAV → {wav_path}")
-        else:
-            convert_audio(str(local_audio), str(wav_path), use_gpu=USE_GPU)
-            logger.info(f"JOB {job_id} 🎧 Converted → {wav_path}")
+        # 音声はすでに16kHzモノラルWAV形式になっているはずなので、変換は不要
+        wav_path = local_audio
+        logger.info(f"JOB {job_id} 🎧 すでに変換済みの音声ファイルを使用 → {wav_path}")
 
         # Define local paths for intermediate files
         transcript_local_filename = f"{file_hash}_transcription.json" # Consistent naming
