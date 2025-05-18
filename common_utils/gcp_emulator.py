@@ -125,7 +125,7 @@ class GCSEmulator(EmulatorManager):
     def __init__(self,
                  host='localhost',
                  port=9000, # Default port for fake-gcs-server
-                 project_id='test-project',
+                 project_id='test-project', # [cite: 164]
                  executable_path='fake-gcs-server', # ローカル実行時の実行ファイルパス
                  use_docker=True, # Dockerを使用するかどうかのフラグ
                  docker_image='fsouza/fake-gcs-server:latest', # 使用するDockerイメージ
@@ -135,7 +135,7 @@ class GCSEmulator(EmulatorManager):
                  container_name_prefix='fake-gcs-pytest-'):
 
         super().__init__(host, port, project_id) # [cite: 165]
-        self.executable_path = executable_path
+        # self.executable_path = executable_path # Local binary mode removed
         self.use_docker = use_docker
         self.docker_image = docker_image
         # Ensure host_data_path is absolute
@@ -153,12 +153,12 @@ class GCSEmulator(EmulatorManager):
     def start(self):
         if self.is_running():
             logger.info(f"GCS emulator already running on {self.emulator_host_env}")
-            self._set_env_vars() # [cite: 167]
+            self._set_env_vars()
             return
 
-        if self.use_docker:
-            if not shutil.which("docker"):
-                raise RuntimeError("Docker client not found. Please install Docker or set use_docker=False.")
+        # Always use Docker as local binary mode is removed
+        if not shutil.which("docker"):
+            raise RuntimeError("Docker client not found. Please install Docker.") # [cite: 168]
             logger.info(f"Starting GCS emulator using Docker image {self.docker_image} on port {self.port}...")
             logger.info(f"Host data directory (for GCS data): {self.host_data_path} will be mounted to {self.container_data_path} in container {self.container_name}")
 
@@ -187,77 +187,77 @@ class GCSEmulator(EmulatorManager):
                 "-data", self.container_data_path,
                 "-public-host", self.host, # How clients should reach it (e.g., localhost)
             ] # [cite: 170, 171, 172]
-            self.process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            # For Docker detached mode, Popen returns immediately. We don't store this process.
+            subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE) # [cite: 173]
             time.sleep(3) # Give Docker container time to start
 
             # Check if docker run was successful (process still running means CLI call finished)
             # We need to check container logs or `docker ps` for actual status
             # For simplicity, we assume Popen was for the `docker run -d` command itself.
             # A more robust check would be `docker ps -f name=self.container_name`
-            # or check `self.is_running()` which pings the http endpoint.
-
-        else: # Use local binary
-            logger.info(f"Starting GCS emulator (local binary: {self.executable_path}) on port {self.port}...")
-            logger.info(f"Data for GCS will be stored in: {self.host_data_path}") # For local binary, data path is specified differently
-            command = [
-                self.executable_path,
-                "-scheme", "http",
-                "-host", self.host,
-                "-port", str(self.port),
-                "-data", self.host_data_path, # For local binary, it directly uses this path
-                "-public-host", self.host, # [cite: 176]
-            ]
-            self.process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            time.sleep(2) # Give emulator time to start
+            # or check `self.is_running()` which pings the http endpoint. # [cite: 174]
+        # else: # Use local binary - REMOVED
+            # logger.info(f"Starting GCS emulator (local binary: {self.executable_path}) on port {self.port}...")
+            # logger.info(f"Data for GCS will be stored in: {self.host_data_path}") # For local binary, data path is specified differently
+            # command = [
+            #     self.executable_path,
+            #     "-scheme", "http",
+            #     "-host", self.host, # [cite: 176]
+            #     "-port", str(self.port),
+            #     "-data", self.host_data_path, # For local binary, it directly uses this path
+            #     "-public-host", self.host, # [cite: 176]
+            # ]
+            # self.process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE) # [cite: 177]
+            # time.sleep(2) # Give emulator time to start
 
         # Common checks after attempting to start
-        if self.process and self.process.poll() is not None and not self.use_docker: # Check for local binary failure
-            stdout, stderr = self.process.communicate()
-            logger.error(f"GCS emulator (local binary) failed to start. Return code: {self.process.returncode}")
-            logger.error(f"Stdout: {stdout.decode(errors='ignore')}")
-            logger.error(f"Stderr: {stderr.decode(errors='ignore')}")
-            raise RuntimeError("Failed to start GCS emulator (local binary).")
+        # if self.process and self.process.poll() is not None and not self.use_docker: # Check for local binary failure - REMOVED
+            # stdout, stderr = self.process.communicate()
+            # logger.error(f"GCS emulator (local binary) failed to start. Return code: {self.process.returncode}") # [cite: 178]
+            # logger.error(f"Stdout: {stdout.decode(errors='ignore')}") # [cite: 178]
+            # logger.error(f"Stderr: {stderr.decode(errors='ignore')}") # [cite: 178]
+            # raise RuntimeError("Failed to start GCS emulator (local binary).")
 
         # Wait a bit more and then check if it's actually listening
         time.sleep(2)
         if not self.is_running():
-            if self.use_docker:
+            # Always use_docker now
+            # if self.use_docker:
                 # Fetch Docker logs for more insight
-                logs_command = ["docker", "logs", self.container_name]
-                try:
-                    logs_result = subprocess.run(logs_command, capture_output=True, text=True, timeout=5) # [cite: 179]
-                    logger.error(f"Docker container {self.container_name} logs:\nSTDOUT:\n{logs_result.stdout}\nSTDERR:\n{logs_result.stderr}")
-                except Exception as e:
-                    logger.error(f"Failed to get logs for Docker container {self.container_name}: {e}")
-                # Attempt to stop/remove the potentially failed container if not using --rm (though we are)
-                # subprocess.run(["docker", "stop", self.container_name], capture_output=True, check=False)
-                # subprocess.run(["docker", "rm", self.container_name], capture_output=True, check=False)
+            logs_command = ["docker", "logs", self.container_name] # [cite: 179]
+            try:
+                logs_result = subprocess.run(logs_command, capture_output=True, text=True, timeout=5)
+                logger.error(f"Docker container {self.container_name} logs:\nSTDOUT:\n{logs_result.stdout}\nSTDERR:\n{logs_result.stderr}") # [cite: 180]
+            except Exception as e:
+                logger.error(f"Failed to get logs for Docker container {self.container_name}: {e}")
+                
+            # Attempt to stop/remove the potentially failed container if not using --rm (though we are)
+            subprocess.run(["docker", "stop", self.container_name], capture_output=True, check=False) # [cite: 181]
 
             raise RuntimeError(f"GCS emulator failed to become ready on {self.emulator_host_env} after starting.")
 
         self._set_env_vars()
-        logger.info(f"GCS emulator started and accessible at {self.emulator_host_env}. Data dir: {self.host_data_path if not self.use_docker else f'container:{self.container_data_path} (host:{self.host_data_path})'}")
- # [cite: 181]
+        logger.info(f"GCS emulator started and accessible at {self.emulator_host_env}. Data dir: container:{self.container_data_path} (host:{self.host_data_path})") # [cite: 182]
 
 
     def stop(self):
-        if self.use_docker:
-            if hasattr(self, 'container_name') and self.container_name:
+        # Always use_docker now
+        if hasattr(self, 'container_name') and self.container_name:
                 logger.info(f"Stopping GCS emulator Docker container {self.container_name}...")
                 try:
                     # `docker run --rm` がコンテナ終了時に自動削除するが、明示的な停止も行う
-                    subprocess.run(["docker", "stop", self.container_name], capture_output=True, timeout=10, check=False)
+                    subprocess.run(["docker", "stop", self.container_name], capture_output=True, timeout=10, check=False) # [cite: 183]
                     logger.info(f"GCS emulator Docker container {self.container_name} stopped.")
                 except FileNotFoundError:
                     logger.error("Docker command not found. Cannot stop container.")
-                except subprocess.TimeoutExpired: # [cite: 184]
-                    logger.warning(f"Timeout trying to stop container {self.container_name}. It might have already stopped or may need manual removal.")
+                except subprocess.TimeoutExpired:
+                    logger.warning(f"Timeout trying to stop container {self.container_name}. It might have already stopped or may need manual removal.") # [cite: 184]
                 except Exception as e:
                     logger.error(f"Error stopping/removing Docker container {self.container_name}: {e}")
-                self.process = None # Popen object was for `docker run`, not the daemon
-        else: # Local binary
-            if self.process:
-                super().stop() # Call EmulatorManager's stop for local process
+                # self.process = None # Popen object was for `docker run`, not the daemon # [cite: 185]
+        # else: # Local binary - REMOVED
+            # if self.process:
+                # super().stop() # Call EmulatorManager's stop for local process
 
         self._unset_env_vars()
 
@@ -298,21 +298,21 @@ class GCSEmulator(EmulatorManager):
 
     def is_running(self):
         # fake-gcs-server serves a / (root) endpoint that returns 200 OK by default
-        # or specific health check endpoint if available.
-        # For fake-gcs-server, the base URL itself should work.
-        if self.use_docker:
-             # Check if container is running and then if service is responsive
-            if not hasattr(self, 'container_name') or not self.container_name:
+        # or specific health check endpoint if available. # [cite: 191]
+        # For fake-gcs-server, the base URL itself should work. # [cite: 192]
+        # Always use_docker now
+        # Check if container is running and then if service is responsive
+        if not hasattr(self, 'container_name') or not self.container_name:
+            return False
+        try:
+            result = subprocess.run(
+                ["docker", "ps", "-q", "-f", f"name={self.container_name}"],
+                capture_output=True, text=True, check=True
+            )
+            if not result.stdout.strip(): # コンテナが見つからない
                 return False
-            try:
-                result = subprocess.run(
-                    ["docker", "ps", "-q", "-f", f"name={self.container_name}"],
-                    capture_output=True, text=True, check=True
-                )
-                if not result.stdout.strip(): # コンテナが見つからない
-                    return False
-            except (subprocess.CalledProcessError, FileNotFoundError):
-                return False # Dockerコマンド失敗またはコンテナが見つからない
+        except (subprocess.CalledProcessError, FileNotFoundError): # [cite: 194]
+            return False # Dockerコマンド失敗またはコンテナが見つからない
 
         # Now check HTTP endpoint for both Docker and local binary
         try:
@@ -342,10 +342,11 @@ def firestore_emulator_context(host='localhost', port=8081, project_id='test-pro
 
 @contextmanager
 def gcs_emulator_context(host='localhost', port=9000, project_id='test-project',
-                         executable_path='fake-gcs-server', use_docker=True,
-                         docker_image='fsouza/fake-gcs-server:latest',
+                         # executable_path='fake-gcs-server', # Removed
+                         use_docker=True, # Remains for compatibility, but effectively always True
+                         docker_image='fsouza/fake-gcs-server:latest', # [cite: 199]
                          host_data_path=os.path.join(os.path.dirname(__file__), 'data')):
-    emulator = GCSEmulator(host, port, project_id, executable_path, use_docker, docker_image, host_data_path)
+    emulator = GCSEmulator(host, port, project_id, use_docker=True, docker_image=docker_image, host_data_path=host_data_path)
     try:
         emulator.start()
         yield emulator
@@ -378,30 +379,30 @@ if __name__ == '__main__':
 
     logger.info("\n" + "="*30 + "\n")
 
-    # Test GCS Emulator (Local Binary)
-    try:
-        with gcs_emulator_context(port=9091, use_docker=False, host_data_path=os.path.join(os.path.dirname(__file__), 'gcs_data_local')) as gcs_emulator_local:
-            logger.info(f"GCS Emulator (Local) Host: {os.getenv('STORAGE_EMULATOR_HOST')}")
-            from google.cloud import storage
-            try:
-                storage_client = storage.Client(project=gcs_emulator_local.project_id)
-                bucket_name = f"{gcs_emulator_local.project_id}-my-bucket-local"
-                bucket = storage_client.create_bucket(bucket_name)
-                logger.info(f"Bucket {bucket.name} created (local).")
-                blob = bucket.blob("test_local.txt")
-                blob.upload_from_string("Hello from local GCS emulator!")
-                logger.info(f"Blob {blob.name} uploaded (local).")
-                logger.info(f"Blob content: {blob.download_as_text()} (local).")
-                blob.delete()
-                bucket.delete()
-                logger.info("Cleaned up bucket and blob (local).")
-                gcs_emulator_local.clear_data()
-            except Exception as e:
-                logger.error(f"Error interacting with GCS emulator (local): {e}")
-    except RuntimeError as e:
-        logger.error(f"Failed to run GCS emulator (local): {e}")
-    except ImportError:
-        logger.warning("google-cloud-storage library not installed. Skipping GCS local example.")
+    # Test GCS Emulator (Local Binary) - REMOVED
+    # try:
+        # with gcs_emulator_context(port=9091, use_docker=False, host_data_path=os.path.join(os.path.dirname(__file__), 'gcs_data_local')) as gcs_emulator_local:
+            # logger.info(f"GCS Emulator (Local) Host: {os.getenv('STORAGE_EMULATOR_HOST')}")
+            # from google.cloud import storage
+            # try:
+                # storage_client = storage.Client(project=gcs_emulator_local.project_id) # [cite: 204]
+                # bucket_name = f"{gcs_emulator_local.project_id}-my-bucket-local" # [cite: 204]
+                # bucket = storage_client.create_bucket(bucket_name) # [cite: 204]
+                # logger.info(f"Bucket {bucket.name} created (local).") # [cite: 204]
+                # blob = bucket.blob("test_local.txt") # [cite: 204]
+                # blob.upload_from_string("Hello from local GCS emulator!") # [cite: 204]
+                # logger.info(f"Blob {blob.name} uploaded (local).")
+                # logger.info(f"Blob content: {blob.download_as_text()} (local).")
+                # blob.delete()
+                # bucket.delete()
+                # logger.info("Cleaned up bucket and blob (local).")
+                # gcs_emulator_local.clear_data()
+            # except Exception as e:
+                # logger.error(f"Error interacting with GCS emulator (local): {e}")
+    # except RuntimeError as e:
+        # logger.error(f"Failed to run GCS emulator (local): {e}")
+    # except ImportError:
+        # logger.warning("google-cloud-storage library not installed. Skipping GCS local example.")
 
 
     logger.info("\n" + "="*30 + "\n")
