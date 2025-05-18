@@ -71,8 +71,7 @@ def run_emulators(init_data=False): # use_docker 引数を削除
             executable_path='gcloud'
         ) as fs_emulator_client:
             logger.info(f"Firestore Emulator Host: {os.getenv('FIRESTORE_EMULATOR_HOST')}")
-            logger.info(f"Firestore Emulator Project ID: {fs_emulator_client.project}")
-
+            logger.info(f"Firestore Emulator Project ID: {fs_emulator_client.project_id}")
             # GCSエミュレータの起動 (常にDockerを使用)
             host_data_path = GCS_DATA_PATH_DOCKER
             logger.info(f"GCS Emulator: Docker モードで起動します")
