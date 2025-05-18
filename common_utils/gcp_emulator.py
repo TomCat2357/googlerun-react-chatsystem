@@ -186,10 +186,23 @@ class GCSEmulator(EmulatorManager):
                 "-port", str(self.port),
                 "-data", self.container_data_path,
                 "-public-host", self.host, # How clients should reach it (e.g., localhost)
-            ] # [cite: 170, 171, 172]
-            # For Docker detached mode, Popen returns immediately. We don't store this process.
-            subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE) # [cite: 173]
-            time.sleep(3) # Give Docker container time to start
+            ]
+
+            logger.info(f"Executing Docker command: {' '.join(command)}") # 実行するコマンドをログに出力
+            process = subprocess.run(command, capture_output=True, text=True, timeout=30) # Popenをrunに変更し、出力をキャプチャ
+
+            if process.returncode != 0:
+                logger.error(f"Docker run command failed with exit code {process.returncode}")
+                logger.error(f"Docker run STDOUT: {process.stdout.strip()}")
+                logger.error(f"Docker run STDERR: {process.stderr.strip()}")
+                # Docker run コマンド自体が失敗した場合、コンテナは起動していない可能性が高い
+                raise RuntimeError(f"Docker run command failed. STDERR: {process.stderr.strip()}")
+            else:
+                # docker run -d が成功すると、コンテナIDが標準出力に表示される
+                logger.info(f"Docker run command successful. Container ID (from stdout): {process.stdout.strip()}")
+
+            # 元のコードでは time.sleep(3) と time.sleep(2) があったので、合計5秒の待機
+            time.sleep(5) # コンテナ起動のための待機時間
 
             # Check if docker run was successful (process still running means CLI call finished)
             # We need to check container logs or `docker ps` for actual status
