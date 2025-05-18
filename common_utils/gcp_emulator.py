@@ -131,7 +131,7 @@ class GCSEmulator(EmulatorManager):
                  docker_image='fsouza/fake-gcs-server:latest', # 使用するDockerイメージ
                  # データ保存先のホストパス。プロジェクトルートからの相対パスを想定。
                  # (project_root)/common_utils/data に対応。
-                 host_data_path=os.path.join(os.path.dirname(__file__), 'data'),
+                 host_data_path="/root/onedrive/working/googlerun-react-chatsystem",
                  container_name_prefix='fake-gcs-pytest-'):
 
         super().__init__(host, port, project_id) # [cite: 165]

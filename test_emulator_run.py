@@ -11,6 +11,7 @@ import os
 import logging
 import argparse
 import time
+from pathlib import Path
 
 # ロガーの設定
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -21,9 +22,10 @@ PROJECT_ID = "supportaisystem20250412"
 FIRESTORE_PORT = 8081
 GCS_PORT = 9000
 
+# プロジェクトルートの推定
+PROJECT_ROOT = Path("/root/onedrive/working/googlerun-react-chatsystem").resolve()
 # GCSエミュレータのデータ保存先 (Dockerモード専用)
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-GCS_DATA_PATH_DOCKER = os.path.join(BASE_DIR, 'gcs_data_docker')
+GCS_DATA_PATH_DOCKER = "/root/onedrive/working/googlerun-react-chatsystem/.gcs_data"
 # GCS_DATA_PATH_LOCAL = os.path.join(BASE_DIR, 'gcs_data_local') # ローカルバイナリモード用パスは削除
 
 def create_initial_data(fs_client, gcs_client):
