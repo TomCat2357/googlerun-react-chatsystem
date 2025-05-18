@@ -95,7 +95,7 @@ def run_emulators(init_data=False): # use_docker 引数を削除
 def _run_with_emulators(fs_client, gcs_client, init_data):
     """エミュレータが起動した後の処理"""
     logger.info(f"GCS Emulator Host: {os.getenv('STORAGE_EMULATOR_HOST')}")
-    logger.info(f"GCS Emulator Project ID: {gcs_client.project}")
+    logger.info(f"GCS Emulator Project ID: {gcs_client.project_id}")
     
     # 初期データの作成（オプション）
     if init_data:
