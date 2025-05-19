@@ -12,6 +12,10 @@ import logging
 import argparse
 import time
 from pathlib import Path
+# Firestore および GCS のクライアントライブラリをインポート
+from google.cloud import firestore
+from google.cloud import storage
+
 
 # ロガーの設定
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -28,10 +32,18 @@ PROJECT_ROOT = Path("/root/onedrive/working/googlerun-react-chatsystem").resolve
 GCS_DATA_PATH_DOCKER = "/root/onedrive/working/googlerun-react-chatsystem/.gcs_data"
 # GCS_DATA_PATH_LOCAL = os.path.join(BASE_DIR, 'gcs_data_local') # ローカルバイナリモード用パスは削除
 
-def create_initial_data(fs_client, gcs_client):
+def create_initial_data(fs_emulator_instance, gcs_emulator_instance):
     """初期データの作成（必要に応じて）"""
     logger.info("初期データの設定を行います...")
-    
+
+    try:
+        # エミュレータのプロジェクトIDを使用してクライアントを初期化
+        fs_client = firestore.Client(project=fs_emulator_instance.project_id)
+        gcs_client = storage.Client(project=gcs_emulator_instance.project_id)
+    except Exception as e:
+        logger.error(f"GCPクライアントの初期化に失敗しました: {e}")
+        return
+
     # GCSバケットの作成例（Whisper用）
     try:
         bucket_name = "whisper-audio-storage"
@@ -52,7 +64,7 @@ def create_initial_data(fs_client, gcs_client):
         # サンプルドキュメント
         coll_ref.document("sample_job").set({
             "status": "pending",
-            "created_at": time.time(),
+            "created_at": firestore.SERVER_TIMESTAMP, # Firestoreサーバーのタイムスタンプを使用
             "audio_file": "sample.mp3",
             "result_file": ""
         })
@@ -92,14 +104,14 @@ def run_emulators(init_data=False): # use_docker 引数を削除
     finally:
         logger.info("エミュレータの実行を終了します。")
 
-def _run_with_emulators(fs_client, gcs_client, init_data):
+def _run_with_emulators(fs_emulator_instance, gcs_emulator_instance, init_data):
     """エミュレータが起動した後の処理"""
     logger.info(f"GCS Emulator Host: {os.getenv('STORAGE_EMULATOR_HOST')}")
-    logger.info(f"GCS Emulator Project ID: {gcs_client.project_id}")
+    logger.info(f"GCS Emulator Project ID: {gcs_emulator_instance.project_id}")
     
     # 初期データの作成（オプション）
     if init_data:
-        create_initial_data(fs_client, gcs_client)
+        create_initial_data(fs_emulator_instance, gcs_emulator_instance)
     
     logger.info("---------------------------------------------")
     logger.info("両方のエミュレータが起動しました。Ctrl+Cで停止します。")
