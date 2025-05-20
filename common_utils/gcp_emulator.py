@@ -150,6 +150,7 @@ class GCSEmulator(EmulatorManager):
                  container_name_prefix='fake-gcs-pytest-'):
 
         super().__init__(host, port, project_id)
+        logger.info(f"GCSEmulator __init__: Initial host_data_path arg: {host_data_path}")
         self.use_docker = use_docker # Though it's always True now
         self.docker_image = docker_image
         self.host_data_path = os.path.abspath(host_data_path)
@@ -157,6 +158,7 @@ class GCSEmulator(EmulatorManager):
         self.container_name = f"{container_name_prefix}{uuid.uuid4().hex[:8]}" # Unique container name
 
         # ホストデータディレクトリが存在しない場合は作成
+        logger.info(f"GCSEmulator instance configured with host_data_path: {self.host_data_path}")
         if not os.path.exists(self.host_data_path):
             os.makedirs(self.host_data_path, exist_ok=True)
             logger.info(f"Created host data directory: {self.host_data_path}")
@@ -168,6 +170,7 @@ class GCSEmulator(EmulatorManager):
             logger.info(f"GCS emulator already running on {self.emulator_host_env}")
             self._set_env_vars()
             return
+        logger.info(f"GCSEmulator.start() called. Using host_data_path: {self.host_data_path} for volume mount.")
 
         # Always use Docker as local binary mode is removed
         if not shutil.which("docker"):
@@ -247,6 +250,7 @@ class GCSEmulator(EmulatorManager):
         self._unset_env_vars()
 
     def clear_data(self):
+        logger.info(f"GCSEmulator.clear_data() called. Host data path to be cleared: {self.host_data_path}")
         logger.info(f"Attempting to clear GCS emulator data in host directory: {self.host_data_path}")
         if os.path.exists(self.host_data_path):
             for item_name in os.listdir(self.host_data_path):

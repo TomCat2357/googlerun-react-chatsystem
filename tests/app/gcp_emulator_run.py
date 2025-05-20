@@ -29,7 +29,8 @@ GCS_PORT = 9000
 # プロジェクトルートの推定
 PROJECT_ROOT = Path("/root/onedrive/working/googlerun-react-chatsystem").resolve()
 # GCSエミュレータのデータ保存先 (Dockerモード専用)
-GCS_DATA_PATH_DOCKER = "/root/onedrive/working/googlerun-react-chatsystem/.gcs_data"
+# GCS_DATA_PATH_DOCKER = "/root/onedrive/working/googlerun-react-chatsystem/.gcs_data" # 元のパス
+GCS_DATA_PATH_DOCKER = "/tmp/.gcs_data_emulator_test" # OneDriveの影響を受けないパスに変更
 # GCS_DATA_PATH_LOCAL = os.path.join(BASE_DIR, 'gcs_data_local') # ローカルバイナリモード用パスは削除
 
 def create_initial_data(fs_emulator_instance, gcs_emulator_instance):
@@ -108,9 +109,13 @@ def _run_with_emulators(fs_emulator_instance, gcs_emulator_instance, init_data):
     """エミュレータが起動した後の処理"""
     logger.info(f"GCS Emulator Host: {os.getenv('STORAGE_EMULATOR_HOST')}")
     logger.info(f"GCS Emulator Project ID: {gcs_emulator_instance.project_id}")
+    logger.info(f"Inside _run_with_emulators. init_data flag is: {init_data}")
     if init_data:
+        logger.info("Condition for clearing GCS data is TRUE (init_data=True). Calling gcs_emulator_instance.clear_data().")
         logger.info("Clearing GCS data because --init-data was specified.")
         gcs_emulator_instance.clear_data() # ★ --init-data が指定された場合のみGCSデータをクリア
+    else:
+        logger.info("Condition for clearing GCS data is FALSE (init_data=False). Skipping gcs_emulator_instance.clear_data().")
     
     # 初期データの作成（オプション）
     if init_data:
