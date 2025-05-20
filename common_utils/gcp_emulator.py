@@ -6,6 +6,7 @@ import requests
 from contextlib import contextmanager
 import logging
 import uuid # For unique container names
+from typing import Optional
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -56,9 +57,15 @@ class EmulatorManager:
             return False
 
 class FirestoreEmulator(EmulatorManager):
-    def __init__(self, host='localhost', port=8081, project_id='test-project', executable_path='gcloud'):
+    def __init__(self, host='localhost', port=8081, project_id='test-project', executable_path='gcloud', data_dir: Optional[str] = None):
         super().__init__(host, port, project_id)
         self.executable_path = executable_path
+        self.data_dir = data_dir
+        if self.data_dir:
+            # Ensure data_dir is absolute as gcloud might have CWD issues
+            self.data_dir = os.path.abspath(self.data_dir)
+            os.makedirs(self.data_dir, exist_ok=True)
+            logger.info(f"Firestore emulator data will be stored in: {self.data_dir}")
         self.emulator_host_env = f"{self.host}:{self.port}"
 
     def start(self):
@@ -77,6 +84,8 @@ class FirestoreEmulator(EmulatorManager):
             f"--host-port={self.emulator_host_env}",
             f"--project={self.project_id}",
         ]
+        if self.data_dir:
+            command.append(f"--data-dir={self.data_dir}")
         self.process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         time.sleep(5) # Give emulator time to start
         if self.process.poll() is not None: # Process terminated unexpectedly
@@ -86,7 +95,10 @@ class FirestoreEmulator(EmulatorManager):
             logger.error(f"Stderr: {stderr.decode()}")
             raise RuntimeError("Failed to start Firestore emulator.")
         self._set_env_vars()
-        logger.info("Firestore emulator started.")
+        if self.data_dir:
+            logger.info(f"Firestore emulator started. Data directory: {self.data_dir}")
+        else:
+            logger.info("Firestore emulator started (in-memory).")
 
     def clear_data(self):
         logger.info("Clearing Firestore emulator data...")
@@ -102,11 +114,16 @@ class FirestoreEmulator(EmulatorManager):
             # For testing, typically you'd re-initialize the client or restart the emulator.
             # Here, we'll try a common (but not always available) clear endpoint.
             # A more direct way is to use the admin API if available and configured.
-            # clear_url = f"http://{self.host}:{self.port}/emulator/v1/projects/{self.project_id}/databases/(default)/documents"
+            if self.data_dir and os.path.exists(self.data_dir):
+                logger.info(f"Attempting to clear Firestore data from data directory: {self.data_dir}")
+                # This is a destructive operation. For Firestore, the data is usually within a subdirectory or specific files.
+                # The gcloud emulator stores data in a 'persistence.db' file or similar within the data_dir.
+                # For simplicity, we might remove the known file or the entire directory if that's acceptable.
+                # However, simply deleting the directory might be too aggressive if other things are stored there.
+                # For now, we'll log that manual removal of contents of data_dir is needed for full clear if using --data-dir.
+                logger.warning(f"Persistent Firestore data at {self.data_dir} is not automatically cleared by this method. Manual removal may be needed.")
             # This needs to be a DELETE request to each document, or a special endpoint.
-            # The simplest way for many tests is to rely on a fresh emulator instance.
-            # For now, we'll just log it. Proper clearing depends on specific emulator features.
-            logger.info(f"Data clearing for Firestore emulator is typically handled by restarting or specific client actions.")
+            logger.info(f"Data clearing for Firestore emulator (especially persistent) typically requires more specific actions or manual intervention if a data_dir is used.")
             # Example for clearing (requires project_id and may need auth/specific setup):
             # requests.delete(f"http://{self.emulator_host_env}/emulator/v1/projects/{self.project_id}/databases/(default)/documents")
         except Exception as e:
@@ -292,8 +309,8 @@ class GCSEmulator(EmulatorManager):
             return False
 
 @contextmanager
-def firestore_emulator_context(host='localhost', port=8081, project_id='test-project', executable_path='gcloud'):
-    emulator = FirestoreEmulator(host, port, project_id, executable_path)
+def firestore_emulator_context(host='localhost', port=8081, project_id='test-project', executable_path='gcloud', data_dir: Optional[str] = None):
+    emulator = FirestoreEmulator(host, port, project_id, executable_path, data_dir=data_dir)
     try:
         emulator.start()
         # Firestore client should be initialized by the caller using os.environ['FIRESTORE_EMULATOR_HOST']
