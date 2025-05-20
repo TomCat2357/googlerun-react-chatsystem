@@ -108,6 +108,9 @@ def _run_with_emulators(fs_emulator_instance, gcs_emulator_instance, init_data):
     """エミュレータが起動した後の処理"""
     logger.info(f"GCS Emulator Host: {os.getenv('STORAGE_EMULATOR_HOST')}")
     logger.info(f"GCS Emulator Project ID: {gcs_emulator_instance.project_id}")
+    if init_data:
+        logger.info("Clearing GCS data because --init-data was specified.")
+        gcs_emulator_instance.clear_data() # ★ --init-data が指定された場合のみGCSデータをクリア
     
     # 初期データの作成（オプション）
     if init_data:
