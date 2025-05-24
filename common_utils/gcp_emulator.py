@@ -146,14 +146,21 @@ class GCSEmulator(EmulatorManager):
                  executable_path='fake-gcs-server', # ローカル実行時の実行ファイルパス (現在は未使用)
                  use_docker=True, # Dockerを使用するかどうかのフラグ (現在は常にTrueとして動作)
                  docker_image='fsouza/fake-gcs-server:latest', # 使用するDockerイメージ
-                 host_data_path="/root/onedrive/working/googlerun-react-chatsystem", # データ保存先のホストパス
+                 host_data_path="/tmp/.gcs_data_emulator", # データ保存先のホストパス
                  container_name_prefix='fake-gcs-pytest-'):
 
         super().__init__(host, port, project_id)
         logger.info(f"GCSEmulator __init__: Initial host_data_path arg: {host_data_path}")
         self.use_docker = use_docker # Though it's always True now
         self.docker_image = docker_image
-        self.host_data_path = os.path.abspath(host_data_path)
+        
+        # ホストデータパスが絶対パスでない場合は絶対パスに変換
+        if os.path.isabs(host_data_path):
+            self.host_data_path = host_data_path
+        else:
+            self.host_data_path = os.path.abspath(host_data_path)
+        
+        logger.info(f"GCSEmulator __init__: Resolved host_data_path: {self.host_data_path}")
         self.container_data_path = "/data" # Standard mount point inside the container
         self.container_name = f"{container_name_prefix}{uuid.uuid4().hex[:8]}" # Unique container name
 
@@ -186,6 +193,29 @@ class GCSEmulator(EmulatorManager):
             logger.error("Docker command not found. Make sure Docker is installed and in PATH.")
             raise
 
+        # ホストデータパスを確認して権限を修正
+        logger.info(f"Checking host data path: {self.host_data_path}")
+        try:
+            # ディレクトリが存在しない場合は作成
+            if not os.path.exists(self.host_data_path):
+                os.makedirs(self.host_data_path, exist_ok=True)
+                logger.info(f"Created host data directory: {self.host_data_path}")
+            
+            # 権限を確認
+            import stat
+            st = os.stat(self.host_data_path)
+            mode = st.st_mode
+            logger.info(f"Host data path permissions: {mode & 0o777:o}")
+            
+            # 全ユーザーに読み書き実行権限を付与
+            try:
+                os.chmod(self.host_data_path, 0o777)
+                logger.info(f"Set permissions to 777 for {self.host_data_path}")
+            except Exception as e:
+                logger.warning(f"Cannot set permissions: {e}")
+        except Exception as e:
+            logger.error(f"Error checking/creating host data path: {e}")
+        
         # Docker run command
         command = [
             "docker", "run",
@@ -252,19 +282,45 @@ class GCSEmulator(EmulatorManager):
     def clear_data(self):
         logger.info(f"GCSEmulator.clear_data() called. Host data path to be cleared: {self.host_data_path}")
         logger.info(f"Attempting to clear GCS emulator data in host directory: {self.host_data_path}")
-        if os.path.exists(self.host_data_path):
-            for item_name in os.listdir(self.host_data_path):
+        
+        # ディレクトリの存在確認
+        if not os.path.exists(self.host_data_path):
+            logger.warning(f"Host data directory {self.host_data_path} does not exist, creating it...")
+            try:
+                os.makedirs(self.host_data_path, exist_ok=True)
+                logger.info(f"Created host data directory: {self.host_data_path}")
+            except Exception as e:
+                logger.error(f"Failed to create data directory {self.host_data_path}: {e}")
+                return
+        
+        # ディレクトリ内容の確認とログ出力
+        try:
+            items = os.listdir(self.host_data_path)
+            logger.info(f"Found {len(items)} items in {self.host_data_path}: {items}")
+            
+            # 各アイテムを削除
+            for item_name in items:
                 item_path = os.path.join(self.host_data_path, item_name)
                 try:
                     if os.path.isfile(item_path) or os.path.islink(item_path):
+                        logger.info(f"Removing file: {item_path}")
                         os.unlink(item_path)
+                        logger.info(f"Removed file: {item_path}")
                     elif os.path.isdir(item_path):
+                        logger.info(f"Removing directory: {item_path}")
                         shutil.rmtree(item_path)
+                        logger.info(f"Removed directory: {item_path}")
                 except Exception as e:
                     logger.error(f"Failed to delete {item_path} during data clear: {e}")
-            logger.info(f"GCS emulator data cleared from host directory: {self.host_data_path}")
-        else:
-            logger.info(f"Host data directory {self.host_data_path} does not exist, nothing to clear.")
+            
+            # 削除後の確認
+            remaining = os.listdir(self.host_data_path)
+            if remaining:
+                logger.warning(f"After clearing, {len(remaining)} items still remain in {self.host_data_path}: {remaining}")
+            else:
+                logger.info(f"GCS emulator data cleared successfully from host directory: {self.host_data_path}")
+        except Exception as e:
+            logger.error(f"Error during directory clearing: {e}")
 
     def _set_env_vars(self):
         os.environ['STORAGE_EMULATOR_HOST'] = self.emulator_host_env
@@ -326,7 +382,14 @@ def firestore_emulator_context(host='localhost', port=8081, project_id='test-pro
 def gcs_emulator_context(host='localhost', port=9000, project_id='test-project',
                          use_docker=True, # Remains for compatibility, but effectively always True
                          docker_image='fsouza/fake-gcs-server:latest',
-                         host_data_path=os.path.join(os.path.dirname(__file__), 'data')): # Default path if not overridden
+                         host_data_path=None): # ホストデータパスをNoneをデフォルトに
+    
+    # host_data_pathがNoneの場合、デフォルトパスを設定
+    if host_data_path is None:
+        host_data_path = os.path.join(os.path.dirname(__file__), 'data')
+        logger.info(f"No host_data_path provided, using default: {host_data_path}")
+    else:
+        logger.info(f"Using provided host_data_path: {host_data_path}")
     emulator = GCSEmulator(host=host, port=port, project_id=project_id,
                            use_docker=True, docker_image=docker_image, host_data_path=host_data_path)
     try:
