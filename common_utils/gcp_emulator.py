@@ -211,34 +211,42 @@ class GCSEmulator(EmulatorManager):
         except Exception as e:
             logger.error(f"Error checking/creating host data path: {e}")
         
-        # Docker run command
-        command = [
-            "docker", "run",
-            "-d", # デタッチモードで実行
-            "--name", self.container_name,
-            "--rm", # Automatically remove the container when it exits
-            "-p", f"{self.port}:{self.port}", # ポートマッピング
-            "-v", f"{self.host_data_path}:{self.container_data_path}", # ホストのデータパスをコンテナの/dataにマウント
-            self.docker_image,
-            "-scheme", "http", # fake-gcs-server specific args
-            "-host", "0.0.0.0", # Listen on all interfaces inside the container
-            "-port", str(self.port),
-            "-data", self.container_data_path,
-            "-public-host", self.host, # How clients should reach it (e.g., localhost)
-        ]
-
-        logger.info(f"Executing Docker command: {' '.join(command)}")
-        process = subprocess.run(command, capture_output=True, text=True, timeout=30)
-
-        if process.returncode != 0:
-            logger.error(f"Docker run command failed with exit code {process.returncode}")
-            logger.error(f"Docker run STDOUT: {process.stdout.strip()}")
-            logger.error(f"Docker run STDERR: {process.stderr.strip()}")
-            raise RuntimeError(f"Docker run command failed. STDERR: {process.stderr.strip()}")
+        # 既存コンテナの確認と再利用
+        existing_container = self._check_existing_container()
+        if existing_container:
+            logger.info(f"Reusing existing container: {self.container_name}")
+            if existing_container != "running":
+                logger.info(f"Starting existing container: {self.container_name}")
+                subprocess.run(["docker", "start", self.container_name], capture_output=True, check=True, text=True)
         else:
-            logger.info(f"Docker run command successful. Container ID (from stdout): {process.stdout.strip()}")
+            # Docker run command (--rmオプションを削除)
+            command = [
+                "docker", "run",
+                "-d", # デタッチモードで実行
+                "--name", self.container_name,
+                # "--rm"オプションを削除してコンテナを永続化
+                "-p", f"{self.port}:{self.port}", # ポートマッピング
+                "-v", f"{self.host_data_path}:{self.container_data_path}", # ホストのデータパスをコンテナの/dataにマウント
+                self.docker_image,
+                "-scheme", "http", # fake-gcs-server specific args
+                "-host", "0.0.0.0", # Listen on all interfaces inside the container
+                "-port", str(self.port),
+                "-data", self.container_data_path,
+                "-public-host", self.host, # How clients should reach it (e.g., localhost)
+            ]
 
-        time.sleep(5) # コンテナ起動のための待機時間
+            logger.info(f"Executing Docker command: {' '.join(command)}")
+            process = subprocess.run(command, capture_output=True, text=True, timeout=30)
+
+            if process.returncode != 0:
+                logger.error(f"Docker run command failed with exit code {process.returncode}")
+                logger.error(f"Docker run STDOUT: {process.stdout.strip()}")
+                logger.error(f"Docker run STDERR: {process.stderr.strip()}")
+                raise RuntimeError(f"Docker run command failed. STDERR: {process.stderr.strip()}")
+            else:
+                logger.info(f"Docker run command successful. Container ID (from stdout): {process.stdout.strip()}")
+
+        time.sleep(3) # コンテナ起動のための待機時間
 
         # Wait a bit more and then check if it's actually listening
         time.sleep(2)
@@ -263,16 +271,36 @@ class GCSEmulator(EmulatorManager):
         if hasattr(self, 'container_name') and self.container_name:
             logger.info(f"Stopping GCS emulator Docker container {self.container_name}...")
             try:
-                # `docker run --rm` がコンテナ終了時に自動削除するが、明示的な停止も行う
+                # コンテナを停止するが削除はしない（データ永続化のため）
                 subprocess.run(["docker", "stop", self.container_name], capture_output=True, timeout=10, check=False, text=True)
-                logger.info(f"GCS emulator Docker container {self.container_name} stopped.")
+                logger.info(f"GCS emulator Docker container {self.container_name} stopped (not removed for data persistence).")
             except FileNotFoundError:
                 logger.error("Docker command not found. Cannot stop container.")
             except subprocess.TimeoutExpired:
-                logger.warning(f"Timeout trying to stop container {self.container_name}. It might have already stopped or may need manual removal.")
+                logger.warning(f"Timeout trying to stop container {self.container_name}. It might have already stopped.")
             except Exception as e:
-                logger.error(f"Error stopping/removing Docker container {self.container_name}: {e}")
+                logger.error(f"Error stopping Docker container {self.container_name}: {e}")
         self._unset_env_vars()
+
+    def _check_existing_container(self):
+        """既存コンテナの状態をチェック"""
+        try:
+            result = subprocess.run(
+                ["docker", "ps", "-a", "--format", "{{.Names}}\t{{.State}}", "--filter", f"name={self.container_name}"],
+                capture_output=True, text=True, check=False
+            )
+            
+            if result.stdout.strip():
+                lines = result.stdout.strip().split('\n')
+                for line in lines:
+                    if '\t' in line:
+                        name, state = line.split('\t', 1)
+                        if name == self.container_name:
+                            return state
+            return None
+        except Exception as e:
+            logger.warning(f"Error checking existing container: {e}")
+            return None
 
     def clear_data(self):
         logger.info(f"GCSEmulator.clear_data() called. Host data path to be cleared: {self.host_data_path}")
@@ -332,14 +360,30 @@ class GCSEmulator(EmulatorManager):
                 logger.info(f"Unset {var}")
 
     def _stop_existing_containers(self):
-        """既存のGCSエミュレータコンテナを停止・削除する"""
+        """既存のGCSエミュレータコンテナを停止する（削除はしない）"""
         try:
-            # 同名のコンテナを停止・削除
-            logger.info(f"Stopping and removing existing container: {self.container_name}")
-            subprocess.run(["docker", "rm", "-f", self.container_name], capture_output=True, check=False, text=True)
+            # 同名のコンテナをチェック
+            logger.info(f"Checking for existing container: {self.container_name}")
+            result = subprocess.run(
+                ["docker", "ps", "-a", "--format", "{{.Names}}\t{{.State}}", "--filter", f"name={self.container_name}"],
+                capture_output=True, text=True, check=False
+            )
             
-            # ポートを使用しているコンテナを検索して停止
-            logger.info(f"Checking for containers using port {self.port}")
+            if result.stdout.strip():
+                lines = result.stdout.strip().split('\n')
+                for line in lines:
+                    if '\t' in line:
+                        name, state = line.split('\t', 1)
+                        if name == self.container_name:
+                            if state == "running":
+                                logger.info(f"Stopping running container: {self.container_name}")
+                                subprocess.run(["docker", "stop", self.container_name], capture_output=True, check=False, text=True)
+                            else:
+                                logger.info(f"Container {self.container_name} exists but is not running (state: {state})")
+                            return  # コンテナが見つかったので処理終了
+            
+            # ポートを使用している他のコンテナを検索して停止
+            logger.info(f"Checking for other containers using port {self.port}")
             result = subprocess.run(
                 ["docker", "ps", "--format", "{{.Names}}\t{{.Ports}}", "--filter", f"publish={self.port}"],
                 capture_output=True, text=True, check=False
@@ -353,7 +397,6 @@ class GCSEmulator(EmulatorManager):
                         if f":{self.port}->" in ports or f"0.0.0.0:{self.port}" in ports:
                             logger.info(f"Stopping container {container_name} using port {self.port}")
                             subprocess.run(["docker", "stop", container_name], capture_output=True, check=False, text=True)
-                            subprocess.run(["docker", "rm", "-f", container_name], capture_output=True, check=False, text=True)
             
             # 短い待機時間を設ける
             time.sleep(1)
