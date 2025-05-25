@@ -30,21 +30,8 @@ GCS_PORT = 9000
 PROJECT_ROOT = Path(__file__).parent.parent.parent.resolve()
 logger.info(f"Detected PROJECT_ROOT: {PROJECT_ROOT}")
 
-# GCSエミュレータのデータ保存先 (Dockerモード専用)
-GCS_DATA_PATH_DOCKER = "/tmp/.gcs_data_emulator_test" # OneDriveの影響を受けないパスに変更
-
-# パスが存在するかチェックし、存在しない場合は作成
-logger.info(f"データ保存先パス: {GCS_DATA_PATH_DOCKER}")
-if not os.path.exists(GCS_DATA_PATH_DOCKER):
-    try:
-        os.makedirs(GCS_DATA_PATH_DOCKER, exist_ok=True)
-        logger.info(f"データ保存先パスを作成しました: {GCS_DATA_PATH_DOCKER}")
-    except Exception as e:
-        logger.error(f"データ保存先パスの作成に失敗しました: {e}")
-        # エラーが発生したら、ユーザーが書き込み可能な別のパスを試してみる
-        GCS_DATA_PATH_DOCKER = os.path.join(os.path.expanduser("~"), ".gcs_data_emulator_test")
-        logger.info(f"別のデータ保存先パスを試みます: {GCS_DATA_PATH_DOCKER}")
-        os.makedirs(GCS_DATA_PATH_DOCKER, exist_ok=True)
+# 注意: GCSエミュレータはin-memoryで動作し、データは永続化されません
+logger.info("GCSエミュレータはin-memoryで動作し、データは永続化されません")
 
 def create_initial_data(fs_emulator_instance, gcs_emulator_instance):
     """初期データの作成（必要に応じて）"""
@@ -86,30 +73,9 @@ def create_initial_data(fs_emulator_instance, gcs_emulator_instance):
     except Exception as e:
         logger.warning(f"Firestore初期データ作成でエラーが発生しました: {e}")
 
-def run_emulators(init_data=False): # use_docker 引数を削除
+def run_emulators(init_data=False):
     """FirestoreとGCSエミュレータを起動する関数"""
-    global GCS_DATA_PATH_DOCKER  # グローバル変数を変更するための宣言
-    
     logger.info("エミュレータを起動します...")
-    
-    # GCS_DATA_PATH_DOCKERが存在することを確認し、権限を設定
-    try:
-        # ディレクトリの作成と権限設定
-        os.makedirs(GCS_DATA_PATH_DOCKER, exist_ok=True)
-        os.chmod(GCS_DATA_PATH_DOCKER, 0o777)  # 全ユーザーに読み書き実行権限を付与
-        logger.info(f"GCS_DATA_PATH_DOCKER: {GCS_DATA_PATH_DOCKER} - ディレクトリ作成/権限設定完了")
-        
-        # テストファイルを作成して書き込み権限を確認
-        test_file = os.path.join(GCS_DATA_PATH_DOCKER, "startup_test.txt")
-        with open(test_file, "w") as f:
-            f.write(f"Startup test - {time.time()}")
-        logger.info(f"テストファイル作成成功: {test_file}")
-    except Exception as e:
-        logger.error(f"GCS_DATA_PATH_DOCKER の準備中にエラーが発生しました: {e}")
-        # 別のパスを試す（グローバル変数を更新）
-        GCS_DATA_PATH_DOCKER = os.path.join(os.path.expanduser("~"), ".gcs_data_emulator_test")
-        logger.info(f"別のパスを試みます: {GCS_DATA_PATH_DOCKER}")
-        os.makedirs(GCS_DATA_PATH_DOCKER, exist_ok=True)
     
     try:
         # Firestoreエミュレータの起動
@@ -124,13 +90,13 @@ def run_emulators(init_data=False): # use_docker 引数を削除
             
             # GCSエミュレータの起動 (常にDockerを使用)
             logger.info(f"GCS Emulator: Docker モードで起動します")
-            logger.info(f"GCS Emulator Host Data Path: {GCS_DATA_PATH_DOCKER}")
+            logger.info(f"注意: GCSエミュレータはin-memoryで動作し、データは永続化されません")
             
             with gcs_emulator_context(
                 project_id=PROJECT_ID, 
                 port=GCS_PORT, 
                 use_docker=True, # 明示的にTrueを指定 (元々デフォルトだがより明確に)
-                host_data_path=GCS_DATA_PATH_DOCKER
+                host_data_path=None  # データ永続化なし
             ) as gcs_emulator:
                 _run_with_emulators(fs_emulator, gcs_emulator, init_data)
 
@@ -145,33 +111,18 @@ def _run_with_emulators(fs_emulator_instance, gcs_emulator_instance, init_data):
     """エミュレータが起動した後の処理"""
     logger.info(f"GCS Emulator Host: {os.getenv('STORAGE_EMULATOR_HOST')}")
     logger.info(f"GCS Emulator Project ID: {gcs_emulator_instance.project_id}")
-    logger.info(f"GCS Emulator Host Data Path: {gcs_emulator_instance.host_data_path}")
+    logger.info(f"GCS Emulator Container Name: {gcs_emulator_instance.container_name}")
     logger.info(f"Inside _run_with_emulators. init_data flag is: {init_data}")
     
-    # エミュレータが実際に使用するパスを取得して統一
-    actual_data_path = gcs_emulator_instance.host_data_path
-    logger.info(f"実際のGCSデータパス: {actual_data_path}")
-    
-    # テスト用ファイルを作成して永続化のチェック（実際のパスを使用）
-    try:
-        test_file_path = os.path.join(actual_data_path, "test_persistence.txt")
-        with open(test_file_path, "w") as f:
-            f.write(f"Test file created at {time.time()}")
-        logger.info(f"テスト用ファイルを作成しました: {test_file_path}")
-    except Exception as e:
-        logger.error(f"テスト用ファイル作成に失敗しました: {e}")
+    # GCSエミュレータはDockerコンテナ内でin-memoryで動作するため、
+    # ホスト側のファイルシステムパスは使用しない
+    logger.info("GCSエミュレータはコンテナ内でin-memoryで動作します")
     
     if init_data:
         logger.info("Condition for clearing GCS data is TRUE (init_data=True). Calling gcs_emulator_instance.clear_data().")
         logger.info("Clearing GCS data because --init-data was specified.")
         gcs_emulator_instance.clear_data() # ★ --init-data が指定された場合のみGCSデータをクリア
-        
-        # ディレクトリ内容の確認（実際のデータパスを使用）
-        try:
-            items = os.listdir(actual_data_path)
-            logger.info(f"データクリア後、{len(items)} 件のアイテムが {actual_data_path} にあります: {items}")
-        except Exception as e:
-            logger.error(f"ディレクトリ内容の確認に失敗しました: {e}")
+        logger.info("GCSデータクリア完了")
     else:
         logger.info("Condition for clearing GCS data is FALSE (init_data=False). Skipping gcs_emulator_instance.clear_data().")
     
@@ -198,13 +149,8 @@ def _run_with_emulators(fs_emulator_instance, gcs_emulator_instance, init_data):
 if __name__ == '__main__':
     # コマンドライン引数の解析
     parser = argparse.ArgumentParser(description='FirestoreとGCSエミュレータを起動します (Dockerモード専用)')
-    # parser.add_argument('--no-docker', action='store_true', help='Dockerを使用せずにローカルバイナリを使用') # --no-docker オプションを削除
     parser.add_argument('--init-data', action='store_true', help='初期データを作成')
     args = parser.parse_args()
     
-    # ディレクトリの作成 (Dockerモード用のみ)
-    os.makedirs(GCS_DATA_PATH_DOCKER, exist_ok=True)
-    # os.makedirs(GCS_DATA_PATH_LOCAL, exist_ok=True) # ローカルバイナリモード用パスは削除
-    
-    # エミュレータの起動 (use_dockerは常にTrueとして扱われる)
+    # エミュレータの起動
     run_emulators(init_data=args.init_data)
