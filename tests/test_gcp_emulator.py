@@ -7,7 +7,7 @@ from google.cloud.exceptions import NotFound
 from google.cloud import firestore as google_firestore # Explicit import for type hints
 from google.cloud import storage as google_storage     # Explicit import for type hints
 
-from .gcp_emulator import FirestoreEmulator, GCSEmulator, firestore_emulator_context, gcs_emulator_context
+from common_utils.gcp_emulator import FirestoreEmulator, GCSEmulator, firestore_emulator_context, gcs_emulator_context
 
 TEST_PROJECT_ID = "pytest-emulator-project"
 

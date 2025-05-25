@@ -12,8 +12,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN python3.10 -m pip install --upgrade pip
 
 # 必要なパッケージをインストール
-COPY ./whisper_batch/app/config/requirements.txt config/requirements.txt
-RUN pip install --no-cache-dir -r config/requirements.txt
+COPY ./requirements.txt ./requirements.txt
+RUN pip install --no-cache-dir -r ./requirements.txt
 
 ARG MODE=production
 

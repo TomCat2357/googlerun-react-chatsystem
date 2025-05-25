@@ -24,18 +24,16 @@ RUN echo "Using PORT: $PORT"
 RUN echo "Using CONFIG_MODE: $MODE"
 
 # バックエンドのコードをコピー
-COPY ./config/ ./backend/config/
-COPY ./utils/ ./backend/utils/
-COPY ./backend/app.py ./backend/app.py
-COPY ./backend/config_${MODE} ./backend/config_${MODE}
-
+COPY ./app/ ./app/
+COPY ./config/ ./config/
+COPY ./config_${MODE} ./config_${MODE}
 
 # フロントエンドのビルド済みファイルをコピー
 COPY ./frontend/dist/ ./frontend/dist/
 
 # 作業ディレクトリを変更
-WORKDIR /app/backend
+WORKDIR /backend
 
 # スクリプトを実行
 
-CMD ["python", "app.py"]
+CMD ["python", "-m", "app.main"]
