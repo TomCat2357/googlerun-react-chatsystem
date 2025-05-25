@@ -1,0 +1,38 @@
+# ── CUDA 12.1 対応 PyTorch ホイール ─────────────────────
+-f https://download.pytorch.org/whl/cu121/torch_stable.html
+--extra-index-url https://pypi.org/simple
+
+# ---------- PyTorch（CUDA 12.1 対応版） ----------
+torch==2.2.0+cu121
+torchvision==0.17.0+cu121
+torchaudio==2.2.0+cu121
+
+# ---------- 配列計算・データ処理 ----------
+numpy==2.2.5               # 配列計算基盤
+pandas==2.2.3              # 表・時系列処理
+tqdm==4.67.1               # 進捗バー
+
+# ---------- 音声認識 ────────────────────────────────────────
+faster-whisper==1.1.1      # CTranslate2 実装（高速）
+openai-whisper==20240930   # 公式 Whisper 実装（モデル DL 用）
+ffmpeg-python==0.2.0       # FFmpeg バインディング
+pydub==0.25.1              # フォーマット変換ユーティリティ
+librosa==0.11.0            # 波形処理・特徴量抽出
+
+# ---------- 話者ダイアリゼーション ───────────────────────────
+pyannote.audio==3.3.2      # 話者分離パイプライン
+
+# ---------- Google Cloud ────────────────────────────────────
+google-cloud-storage==3.1.0    # GCS API クライアント
+google-cloud-firestore==2.20.2 # Firestore API クライアント
+google-cloud-pubsub==2.29.0    # Pub/Sub API クライアント
+
+# ---------- 開発・運用ユーティリティ ─────────────────────────
+python-dotenv==1.1.0       # .env 取込
+requests==2.32.3           # HTTP クライアント
+PyYAML==6.0.2              # YAML 読み書き
+loguru==0.7.3              # 高機能ロガー
+joblib==1.4.2              # 並列処理ユーティリティ
+
+# ---------- フレームワーク（logger.py が依存） ─────────────────
+fastapi==0.115.12          # Request 型参照用

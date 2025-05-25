@@ -11,6 +11,7 @@ interface ChatSidebarProps {
   onRestoreHistory: (history: ChatHistory) => void;
   onDownloadHistory: () => void;
   onUploadHistory: (event: ChangeEvent<HTMLInputElement>) => void;
+  onDeleteHistory?: (historyId: number) => void; // 新規追加：履歴削除関数
 }
 
 const ChatSidebar: React.FC<ChatSidebarProps> = ({
@@ -22,7 +23,21 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
   onRestoreHistory,
   onDownloadHistory,
   onUploadHistory,
+  onDeleteHistory, // 新規追加
 }) => {
+  // 削除ボタンのクリック時にイベントの伝播を止める
+  const handleDeleteClick = (
+    e: React.MouseEvent<HTMLButtonElement>,
+    historyId: number
+  ) => {
+    e.stopPropagation(); // 重要：これがないとチャット履歴の選択も同時に実行されてしまう
+    if (onDeleteHistory) {
+      if (window.confirm("この履歴を削除してもよろしいですか？")) {
+        onDeleteHistory(historyId);
+      }
+    }
+  };
+
   return (
     <div className="w-64 bg-gray-800 shadow-lg p-4 overflow-y-auto">
       <div className="mb-6">
@@ -75,12 +90,22 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
             <div
               key={history.id}
               onClick={() => onRestoreHistory(history)}
-              className="p-2 hover:bg-gray-700 text-gray-100 rounded cursor-pointer transition-colors"
+              className="p-2 hover:bg-gray-700 text-gray-100 rounded cursor-pointer transition-colors relative"
             >
-              <div className="font-medium">{history.title}</div>
+              <div className="font-medium pr-6">{history.title}</div>
               <div className="text-sm text-gray-400">
                 {new Date(history.lastPromptDate).toLocaleString()}
               </div>
+              {/* 削除ボタン（バツ印） */}
+              {onDeleteHistory && (
+                <button
+                  onClick={(e) => handleDeleteClick(e, history.id)}
+                  className="absolute top-2 right-2 w-5 h-5 flex items-center justify-center text-gray-400 hover:text-red-500 hover:bg-gray-600 rounded-full"
+                  title="この履歴を削除"
+                >
+                  ×
+                </button>
+              )}
             </div>
           ))}
         </div>

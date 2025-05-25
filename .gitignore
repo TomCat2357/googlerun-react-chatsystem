@@ -1,6 +1,7 @@
-*test*
 *.git*
+*.csv
 .env
+*.json
 *key*.json
 *.key
 .env.local
@@ -25,3 +26,21 @@ public
 *.png
 !requirements.txt
 node_modules
+
+# 例外ルール: dummy、placeholder、mock、templateを含む名前のファイルは追跡対象にする
+!*dummy*
+!*placeholder*
+!*mock*
+!*template*
+!*dummy*.json
+!*placeholder*.json
+!*mock*.json
+!*template*.json
+!*dummy*.env
+!*placeholder*.env
+!*mock*.env
+!*template*.env
+!*dummy*.key
+!*placeholder*.key
+!*mock*.key
+!*template*.key

@@ -1,0 +1,32 @@
+# 主要な依存関係
+python-dotenv==1.0.1
+firebase-admin==6.6.0
+Pillow==11.0.0
+
+# Google Cloud関連
+google-cloud-aiplatform==1.82.0
+google-cloud-speech==2.31.0
+google-cloud-secret-manager==2.23.1
+google-cloud-pubsub==2.29.0
+google-cloud-storage==2.19.0
+google-cloud-batch==0.17.35
+google-cloud-tasks==2.19.2
+
+# APIおよびHTTP
+fastapi==0.115.11
+starlette==0.46.0
+requests==2.32.3
+asgiref==3.8.1
+websockets==15.0
+
+# ファイル処理
+docx2txt==0.8
+
+# 本番サーバー用
+hypercorn==0.17.3
+priority==2.0.0
+wsproto==1.2.0
+h11==0.14.0
+
+#音声データ処理用
+pydub==0.25.1

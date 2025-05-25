@@ -219,6 +219,40 @@ const ChatPage: React.FC = () => {
   };
 
   // ==========================
+  //  履歴削除機能
+  // ==========================
+  const deleteHistory = async (historyId: number) => {
+    try {
+      const db = await openChatHistoryDB();
+      const transaction = db.transaction(["chatHistory"], "readwrite");
+      const store = transaction.objectStore("chatHistory");
+      
+      // 履歴を削除
+      const request = store.delete(historyId);
+      
+      request.onsuccess = () => {
+        // 現在表示中の履歴が削除された場合、新規チャットに戻す
+        if (currentChatId === historyId) {
+          clearChat();
+        }
+        
+        // ローカルの履歴リストを更新
+        setChatHistories(prevHistories => 
+          prevHistories.filter(history => history.id !== historyId)
+        );
+      };
+      
+      request.onerror = (error) => {
+        console.error("履歴削除エラー:", error);
+        setErrorMessage("履歴の削除に失敗しました");
+      };
+    } catch (error) {
+      console.error("履歴削除処理エラー:", error);
+      setErrorMessage("履歴の削除に失敗しました");
+    }
+  };
+
+  // ==========================
   //  エディットモード関連の処理
   // ==========================
   const handleEditPrompt = (index: number) => {
@@ -466,6 +500,7 @@ const ChatPage: React.FC = () => {
         onRestoreHistory={restoreHistory}
         onDownloadHistory={downloadHistory}
         onUploadHistory={uploadHistory}
+        onDeleteHistory={deleteHistory}
       />
 
       {/* メインチャットエリア */}

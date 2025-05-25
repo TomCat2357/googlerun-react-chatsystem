@@ -40,3 +40,27 @@ export interface Config {
   MODELS: string;
   [key: string]: any;
 }
+
+// WhisperのAPIリクエスト用の型
+export interface WhisperUploadRequest {
+  audio_data?: string;  // 旧方式ではBase64データ
+  gcs_object?: string;  // 新方式ではGCSオブジェクト名
+  original_name?: string; // 元のファイル名
+  filename?: string;    // 互換性のために残す
+  description?: string;
+  recording_date?: string;
+  tags?: string[];
+  language?: string;
+  initial_prompt?: string;
+  num_speakers?: number;
+  min_speakers?: number;
+  max_speakers?: number;
+}
+
+// Whisperのセグメント型
+export interface WhisperSegment {
+  start: number;
+  end: number;
+  text: string;
+  speaker: string;
+}
