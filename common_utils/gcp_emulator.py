@@ -5,7 +5,6 @@ import shutil
 import requests
 from contextlib import contextmanager
 import logging
-import uuid # For unique container names
 from typing import Optional
 
 # Configure logging
@@ -162,7 +161,8 @@ class GCSEmulator(EmulatorManager):
         
         logger.info(f"GCSEmulator __init__: Resolved host_data_path: {self.host_data_path}")
         self.container_data_path = "/data" # Standard mount point inside the container
-        self.container_name = f"{container_name_prefix}{uuid.uuid4().hex[:8]}" # Unique container name
+        # 固定のコンテナ名を使用してデータ永続化を可能にする
+        self.container_name = f"{container_name_prefix}{project_id}-{str(port)}"
 
         # ホストデータディレクトリが存在しない場合は作成
         logger.info(f"GCSEmulator instance configured with host_data_path: {self.host_data_path}")
@@ -185,13 +185,8 @@ class GCSEmulator(EmulatorManager):
         logger.info(f"Starting GCS emulator using Docker image {self.docker_image} on port {self.port}...")
         logger.info(f"Host data directory (for GCS data): {self.host_data_path} will be mounted to {self.container_data_path} in container {self.container_name}")
 
-        # Ensure previous container with the same name is removed (if any, though unlikely with UUID)
-        try:
-            # 古いコンテナが残っていれば削除
-            subprocess.run(["docker", "rm", "-f", self.container_name], capture_output=True, check=False, text=True)
-        except FileNotFoundError:
-            logger.error("Docker command not found. Make sure Docker is installed and in PATH.")
-            raise
+        # 既存コンテナの停止・削除処理を改善
+        self._stop_existing_containers()
 
         # ホストデータパスを確認して権限を修正
         logger.info(f"Checking host data path: {self.host_data_path}")
@@ -335,6 +330,39 @@ class GCSEmulator(EmulatorManager):
             if var in os.environ:
                 del os.environ[var]
                 logger.info(f"Unset {var}")
+
+    def _stop_existing_containers(self):
+        """既存のGCSエミュレータコンテナを停止・削除する"""
+        try:
+            # 同名のコンテナを停止・削除
+            logger.info(f"Stopping and removing existing container: {self.container_name}")
+            subprocess.run(["docker", "rm", "-f", self.container_name], capture_output=True, check=False, text=True)
+            
+            # ポートを使用しているコンテナを検索して停止
+            logger.info(f"Checking for containers using port {self.port}")
+            result = subprocess.run(
+                ["docker", "ps", "--format", "{{.Names}}\t{{.Ports}}", "--filter", f"publish={self.port}"],
+                capture_output=True, text=True, check=False
+            )
+            
+            if result.stdout.strip():
+                lines = result.stdout.strip().split('\n')
+                for line in lines:
+                    if '\t' in line:
+                        container_name, ports = line.split('\t', 1)
+                        if f":{self.port}->" in ports or f"0.0.0.0:{self.port}" in ports:
+                            logger.info(f"Stopping container {container_name} using port {self.port}")
+                            subprocess.run(["docker", "stop", container_name], capture_output=True, check=False, text=True)
+                            subprocess.run(["docker", "rm", "-f", container_name], capture_output=True, check=False, text=True)
+            
+            # 短い待機時間を設ける
+            time.sleep(1)
+            
+        except FileNotFoundError:
+            logger.error("Docker command not found. Make sure Docker is installed and in PATH.")
+            raise
+        except Exception as e:
+            logger.warning(f"Error during container cleanup: {e}")
 
     def is_running(self):
         # Check if container is running first
