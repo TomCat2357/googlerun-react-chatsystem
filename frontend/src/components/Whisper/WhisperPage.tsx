@@ -258,7 +258,7 @@ const WhisperPage: React.FC = () => {
       setErrorMessage("");
 
       const requestId = generateRequestId();
-      // ハッシュ値をパラメータとして使用
+      // ハッシュ値をパラメータとして使用してFirestoreからジョブ詳細を取得
       const response = await fetch(`${API_BASE_URL}/backend/whisper/jobs/${fileHash}`, {
         method: "GET",
         headers: {
@@ -272,8 +272,57 @@ const WhisperPage: React.FC = () => {
         throw new Error(`ジョブ詳細の取得に失敗しました (${response.status})`);
       }
 
-      const data = await response.json();
-      setJobData(data);
+      const firestoreData = await response.json();
+      
+      // ジョブが完了状態の場合のみ、GCSから文字起こし結果を取得
+      let segments: any[] = [];
+      if (firestoreData.status === "completed") {
+        try {
+          // まず編集済みファイル（edited_transcript.json）があるかチェック
+          const editedTranscriptUrl = `${API_BASE_URL}/backend/whisper/transcript/${fileHash}/edited`;
+          const editedResponse = await fetch(editedTranscriptUrl, {
+            method: "GET",
+            headers: {
+              "Authorization": `Bearer ${token}`,
+              "X-Request-Id": generateRequestId()
+            }
+          });
+
+          if (editedResponse.ok) {
+            // 編集済みファイルが存在する場合
+            segments = await editedResponse.json();
+            console.log("編集済み文字起こし結果を読み込みました");
+          } else {
+            // 編集済みファイルがない場合は、元のcombine.jsonを取得
+            const originalTranscriptUrl = `${API_BASE_URL}/backend/whisper/transcript/${fileHash}/original`;
+            const originalResponse = await fetch(originalTranscriptUrl, {
+              method: "GET",
+              headers: {
+                "Authorization": `Bearer ${token}`,
+                "X-Request-Id": generateRequestId()
+              }
+            });
+
+            if (originalResponse.ok) {
+              segments = await originalResponse.json();
+              console.log("元の文字起こし結果を読み込みました");
+            } else {
+              console.warn("文字起こし結果の取得に失敗しました");
+            }
+          }
+        } catch (segmentError) {
+          console.error("文字起こし結果の取得中にエラー:", segmentError);
+          // segmentsは空配列のまま
+        }
+      }
+
+      // FirestoreデータとGCSのsegmentsデータを結合
+      const combinedJobData = {
+        ...firestoreData,
+        segments: segments
+      };
+
+      setJobData(combinedJobData);
       setSelectedJob(jobId);
       setSelectedHash(fileHash);
     } catch (error) {

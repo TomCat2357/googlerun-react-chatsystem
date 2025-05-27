@@ -91,7 +91,6 @@ class WhisperFirestoreData(BaseModel):
     max_speakers: Optional[int] = 1  # 最大話者数（範囲指定の場合）
 
     error_message: Optional[str] = None
-    segments: Optional[List[WhisperSegment]] = None # 文字起こし結果のセグメントを追加
 
     class Config:
         # 追加のフィールドを許可しない

@@ -603,7 +603,7 @@ async def edit_job_transcript(
     edit_request: WhisperEditRequest, # リクエストボディを受け取る
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
-    """特定ジョブの文字起こし結果を編集する"""
+    """特定ジョブの文字起こし結果を編集してGCSに保存する"""
     try:
         request_info: Dict[str, Any] = await log_request(
             request, current_user, GENERAL_LOG_MAX_LENGTH
@@ -626,15 +626,36 @@ async def edit_job_transcript(
         job_doc_ref = docs[0].reference
         job_id = docs[0].id # ログ出力用
         
-        # Firestoreドキュメントを更新
-        update_data = {
-            "segments": [segment.model_dump() for segment in edit_request.segments], # Pydanticモデルを辞書に変換
+        # 編集された文字起こし結果をGCSに保存
+        segments_data = [segment.model_dump() for segment in edit_request.segments]
+        
+        # GCSへの保存パスを生成 ({file_hash}/edited_transcript.json)
+        edited_transcript_blob_name = f"{file_hash}/edited_transcript.json"
+        
+        # GCSに保存
+        storage_client = storage.Client()
+        bucket = storage_client.bucket(GCS_BUCKET_NAME)
+        blob = bucket.blob(edited_transcript_blob_name)
+        
+        # JSONとして保存
+        json_content = json.dumps(segments_data, ensure_ascii=False, indent=2)
+        blob.upload_from_string(json_content, content_type='application/json')
+        
+        logger.info(f"編集された文字起こし結果をGCSに保存しました: gs://{GCS_BUCKET_NAME}/{edited_transcript_blob_name}")
+        
+        # Firestoreのupdated_atのみ更新（segmentsは保存しない）
+        job_doc_ref.update({
             "updated_at": firestore.SERVER_TIMESTAMP,
-        }
-        job_doc_ref.update(update_data)
+        })
         
         logger.info(f"ジョブ {job_id} (hash: {file_hash}) の文字起こしを更新しました。")
-        response_data = {"status": "success", "message": "文字起こし結果を更新しました", "file_hash": file_hash, "job_id": job_id}
+        response_data = {
+            "status": "success", 
+            "message": "文字起こし結果を更新しました", 
+            "file_hash": file_hash, 
+            "job_id": job_id,
+            "gcs_path": f"gs://{GCS_BUCKET_NAME}/{edited_transcript_blob_name}"
+        }
         
         return create_dict_logger(
             response_data,
@@ -719,3 +740,97 @@ async def retry_job(
     except Exception as e:
         logger.exception(f"ジョブ再キューエラー: {file_hash}")
         return JSONResponse(status_code=500, content={"detail": f"ジョブ再キューエラー: {str(e)}"})
+
+@router.get("/whisper/transcript/{file_hash}/original")
+async def get_original_transcript(
+    request: Request,
+    file_hash: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """元の文字起こし結果（combine.json）をGCSから取得"""
+    try:
+        request_info: Dict[str, Any] = await log_request(
+            request, current_user, GENERAL_LOG_MAX_LENGTH
+        )
+        user_id = current_user["uid"]
+
+        # ユーザーの権限確認：file_hashに対応するジョブが存在し、そのユーザーのものかチェック
+        db = firestore.Client()
+        col = db.collection(WHISPER_JOBS_COLLECTION)
+        q = col.where(filter=FieldFilter("file_hash", "==", file_hash)).where(
+            filter=FieldFilter("user_id", "==", user_id)
+        )
+        doc = next(iter(q.stream()), None)
+        
+        if not doc:
+            raise HTTPException(status_code=404, detail="ジョブが見つかりません")
+
+        # GCSから元の文字起こし結果を取得
+        combine_blob_name = f"{file_hash}/combine.json"
+        
+        storage_client = storage.Client()
+        bucket = storage_client.bucket(GCS_BUCKET_NAME)
+        blob = bucket.blob(combine_blob_name)
+        
+        if not blob.exists():
+            raise HTTPException(status_code=404, detail="文字起こし結果が見つかりません")
+        
+        # JSONデータを取得
+        json_content = blob.download_as_text()
+        segments_data = json.loads(json_content)
+        
+        logger.info(f"元の文字起こし結果を返しました: {file_hash}")
+        return segments_data
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"元の文字起こし結果取得エラー: {file_hash}")
+        return JSONResponse(status_code=500, content={"detail": f"文字起こし結果取得エラー: {str(e)}"})
+
+@router.get("/whisper/transcript/{file_hash}/edited")
+async def get_edited_transcript(
+    request: Request,
+    file_hash: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """編集済み文字起こし結果（edited_transcript.json）をGCSから取得"""
+    try:
+        request_info: Dict[str, Any] = await log_request(
+            request, current_user, GENERAL_LOG_MAX_LENGTH
+        )
+        user_id = current_user["uid"]
+
+        # ユーザーの権限確認：file_hashに対応するジョブが存在し、そのユーザーのものかチェック
+        db = firestore.Client()
+        col = db.collection(WHISPER_JOBS_COLLECTION)
+        q = col.where(filter=FieldFilter("file_hash", "==", file_hash)).where(
+            filter=FieldFilter("user_id", "==", user_id)
+        )
+        doc = next(iter(q.stream()), None)
+        
+        if not doc:
+            raise HTTPException(status_code=404, detail="ジョブが見つかりません")
+
+        # GCSから編集済み文字起こし結果を取得
+        edited_blob_name = f"{file_hash}/edited_transcript.json"
+        
+        storage_client = storage.Client()
+        bucket = storage_client.bucket(GCS_BUCKET_NAME)
+        blob = bucket.blob(edited_blob_name)
+        
+        if not blob.exists():
+            raise HTTPException(status_code=404, detail="編集済み文字起こし結果が見つかりません")
+        
+        # JSONデータを取得
+        json_content = blob.download_as_text()
+        segments_data = json.loads(json_content)
+        
+        logger.info(f"編集済み文字起こし結果を返しました: {file_hash}")
+        return segments_data
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"編集済み文字起こし結果取得エラー: {file_hash}")
+        return JSONResponse(status_code=500, content={"detail": f"文字起こし結果取得エラー: {str(e)}"})

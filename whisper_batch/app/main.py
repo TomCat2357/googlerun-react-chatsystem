@@ -243,26 +243,16 @@ def _process_job(db: firestore.Client, job: Dict[str, Any]) -> None:
                     f"JOB {job_id} Current status is '{current_status}', not 'processing' or 'launched'. Skipping 'completed' update from worker."
                 )
             else:
-                # 処理成功。Firestoreに文字起こし結果のセグメントも保存
-                segments_data = []
-                if os.path.exists(combine_local):
-                    with open(combine_local, 'r', encoding='utf-8') as f:
-                        combined_json_data = json.load(f)
-                        if isinstance(combined_json_data, list): # ルートがリストであることを期待
-                             segments_data = combined_json_data
-                        elif isinstance(combined_json_data, dict) and "segments" in combined_json_data: # "segments"キーを持つ辞書の場合
-                             segments_data = combined_json_data["segments"]
-
+                # 処理成功。Firestoreのステータスのみ更新（segmentsは保存しない）
                 db.collection(COLLECTION).document(job_id).update(
                     {
                         "status": "completed",
-                        "segments": segments_data, # 結合された文字起こし結果のセグメントを保存
                         "process_ended_at": firestore.SERVER_TIMESTAMP,
                         "updated_at": firestore.SERVER_TIMESTAMP,
                         "error_message": None # 成功時はエラーメッセージをクリア
                     }
                 )
-                logger.info(f"JOB {job_id} ✔ Completed and segments saved to Firestore.")
+                logger.info(f"JOB {job_id} ✔ Completed.")
 
     except Exception as e:
         err = str(e)

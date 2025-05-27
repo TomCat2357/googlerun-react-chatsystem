@@ -75,7 +75,7 @@ def save_dataframe(df, output_path):
     else:
         save_dataframe_to_local(df, output_path)
 
-def transcribe_audio(audio_path, output_json, device="cuda", job_id=None):
+def transcribe_audio(audio_path, output_json, device="cuda", job_id=None, language="ja", initial_prompt=""):
     """音声ファイルの文字起こしを実行してJSONに保存する"""
     now = time.time()
     log_prefix = f"JOB {job_id} " if job_id else ""
@@ -83,10 +83,21 @@ def transcribe_audio(audio_path, output_json, device="cuda", job_id=None):
     # グローバルモデルを取得（初回時は初期化される）
     model = _get_whisper_model(device)
     
-    logger.info(f"{log_prefix}文字起こし開始: {audio_path}")
+    logger.info(f"{log_prefix}文字起こし開始: {audio_path} (言語: {language})")
+    
+    # 文字起こしオプションの準備
+    transcribe_options = {
+        "beam_size": 5,
+        "language": language if language and language != "auto" else None,
+    }
+    
+    # initial_promptが指定されている場合は追加
+    if initial_prompt and initial_prompt.strip():
+        transcribe_options["initial_prompt"] = initial_prompt.strip()
+        logger.info(f"{log_prefix}初期プロンプトを使用: {initial_prompt.strip()}")
     
     # 文字起こしの実行
-    segments, info = model.transcribe(audio_path, beam_size=5)
+    segments, info = model.transcribe(audio_path, **transcribe_options)
     
     # 結果をデータフレームに変換
     data = []
@@ -99,7 +110,7 @@ def transcribe_audio(audio_path, output_json, device="cuda", job_id=None):
     
     transcription_time = time.time()
     elapsed = transcription_time - now
-    logger.info(f"{log_prefix}文字起こし処理完了: {elapsed:.2f}秒")
+    logger.info(f"{log_prefix}文字起こし処理完了: {elapsed:.2f}秒 (検出言語: {info.language if hasattr(info, 'language') else 'N/A'})")
     
     # Pandasデータフレームに変換
     df = pd.DataFrame(data)
@@ -119,9 +130,17 @@ def main():
     parser.add_argument('output_json', help='出力JSONファイルのパス')
     parser.add_argument('--device', choices=['cpu', 'cuda'], default='cuda', 
                         help='使用するデバイス (CPU または CUDA GPU)')
+    parser.add_argument('--language', default='ja', help='音声の言語 (デフォルト: ja)')
+    parser.add_argument('--initial-prompt', default='', help='Whisperの初期プロンプト')
     args = parser.parse_args()
     
-    transcribe_audio(args.audio_path, args.output_json, device=args.device)
+    transcribe_audio(
+        args.audio_path, 
+        args.output_json, 
+        device=args.device, 
+        language=args.language, 
+        initial_prompt=args.initial_prompt
+    )
 
 if __name__ == "__main__":
     main()
