@@ -319,7 +319,8 @@ const WhisperPage: React.FC = () => {
       // FirestoreデータとGCSのsegmentsデータを結合
       const combinedJobData = {
         ...firestoreData,
-        segments: segments
+        segments: segments,
+        file_hash: fileHash // file_hashを明示的に追加
       };
 
       setJobData(combinedJobData);

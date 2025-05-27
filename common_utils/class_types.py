@@ -114,6 +114,20 @@ class WhisperFirestoreData(BaseModel):
 class WhisperEditRequest(BaseModel):
     segments: List[WhisperSegment]
 
+# スピーカー設定の型
+class SpeakerConfigItem(BaseModel):
+    name: str
+    color: str
+
+    class Config:
+        extra = "forbid"
+
+class WhisperSpeakerConfigRequest(BaseModel):
+    speaker_config: Dict[str, SpeakerConfigItem]
+
+    class Config:
+        extra = "forbid"
+
 # whisper関係のpub/subメッセージの型
 # whisper関係のpub/subメッセージの型 (GCP Batchからの通知を想定)
 class WhisperPubSubMessageData(BaseModel):

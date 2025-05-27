@@ -14,7 +14,7 @@ from functools import partial
 
 from app.api.auth import get_current_user
 from common_utils.logger import logger, create_dict_logger, log_request
-from common_utils.class_types import WhisperUploadRequest, WhisperFirestoreData, WhisperPubSubMessageData, WhisperSegment, WhisperEditRequest
+from common_utils.class_types import WhisperUploadRequest, WhisperFirestoreData, WhisperPubSubMessageData, WhisperSegment, WhisperEditRequest, WhisperSpeakerConfigRequest
 
 # Import the new batch processing trigger function and audio utils
 from app.api.whisper_batch import trigger_whisper_batch_processing, _get_current_processing_job_count, _get_env_var # 必要な関数をインポート
@@ -834,3 +834,134 @@ async def get_edited_transcript(
     except Exception as e:
         logger.exception(f"編集済み文字起こし結果取得エラー: {file_hash}")
         return JSONResponse(status_code=500, content={"detail": f"文字起こし結果取得エラー: {str(e)}"})
+
+@router.post("/whisper/jobs/{file_hash}/speaker_config")
+async def save_speaker_config(
+    request: Request,
+    file_hash: str,
+    speaker_config_request: WhisperSpeakerConfigRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """スピーカー設定をGCSに保存する"""
+    try:
+        request_info: Dict[str, Any] = await log_request(
+            request, current_user, GENERAL_LOG_MAX_LENGTH
+        )
+        user_id = current_user["uid"]
+
+        # ユーザーの権限確認：file_hashに対応するジョブが存在し、そのユーザーのものかチェック
+        db = firestore.Client()
+        col = db.collection(WHISPER_JOBS_COLLECTION)
+        q = col.where(filter=FieldFilter("file_hash", "==", file_hash)).where(
+            filter=FieldFilter("user_id", "==", user_id)
+        )
+        doc = next(iter(q.stream()), None)
+        
+        if not doc:
+            raise HTTPException(status_code=404, detail="ジョブが見つかりません")
+
+        job_doc_ref = doc.reference
+        job_id = doc.id
+        
+        # スピーカー設定をGCSに保存
+        speaker_config_data = {
+            speaker_id: {
+                "name": config.name,
+                "color": config.color
+            }
+            for speaker_id, config in speaker_config_request.speaker_config.items()
+        }
+        
+        # GCSへの保存パスを生成 ({file_hash}/speaker_config.json)
+        speaker_config_blob_name = f"{file_hash}/speaker_config.json"
+        
+        # GCSに保存
+        storage_client = storage.Client()
+        bucket = storage_client.bucket(GCS_BUCKET_NAME)
+        blob = bucket.blob(speaker_config_blob_name)
+        
+        # JSONとして保存
+        json_content = json.dumps(speaker_config_data, ensure_ascii=False, indent=2)
+        blob.upload_from_string(json_content, content_type='application/json')
+        
+        logger.info(f"スピーカー設定をGCSに保存しました: gs://{GCS_BUCKET_NAME}/{speaker_config_blob_name}")
+        
+        # Firestoreのupdated_atを更新
+        job_doc_ref.update({
+            "updated_at": firestore.SERVER_TIMESTAMP,
+        })
+        
+        logger.info(f"ジョブ {job_id} (hash: {file_hash}) のスピーカー設定を更新しました。")
+        response_data = {
+            "status": "success", 
+            "message": "スピーカー設定を保存しました", 
+            "file_hash": file_hash, 
+            "job_id": job_id,
+            "gcs_path": f"gs://{GCS_BUCKET_NAME}/{speaker_config_blob_name}"
+        }
+        
+        return create_dict_logger(
+            response_data,
+            meta_info={
+                k: request_info[k]
+                for k in ("X-Request-Id", "path", "email")
+                if k in request_info
+            },
+            max_length=GENERAL_LOG_MAX_LENGTH,
+        )
+
+    except HTTPException as he:
+        logger.error(f"スピーカー設定保存HTTPエラー ({he.status_code}): {he.detail} for file_hash={file_hash}", exc_info=True)
+        raise he
+    except Exception as e:
+        logger.exception(f"スピーカー設定保存中の予期せぬエラー: file_hash={file_hash}")
+        return JSONResponse(status_code=500, content={"detail": f"スピーカー設定保存エラー: {str(e)}"})
+
+@router.get("/whisper/jobs/{file_hash}/speaker_config")
+async def get_speaker_config(
+    request: Request,
+    file_hash: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """スピーカー設定をGCSから取得"""
+    try:
+        request_info: Dict[str, Any] = await log_request(
+            request, current_user, GENERAL_LOG_MAX_LENGTH
+        )
+        user_id = current_user["uid"]
+
+        # ユーザーの権限確認：file_hashに対応するジョブが存在し、そのユーザーのものかチェック
+        db = firestore.Client()
+        col = db.collection(WHISPER_JOBS_COLLECTION)
+        q = col.where(filter=FieldFilter("file_hash", "==", file_hash)).where(
+            filter=FieldFilter("user_id", "==", user_id)
+        )
+        doc = next(iter(q.stream()), None)
+        
+        if not doc:
+            raise HTTPException(status_code=404, detail="ジョブが見つかりません")
+
+        # GCSからスピーカー設定を取得
+        speaker_config_blob_name = f"{file_hash}/speaker_config.json"
+        
+        storage_client = storage.Client()
+        bucket = storage_client.bucket(GCS_BUCKET_NAME)
+        blob = bucket.blob(speaker_config_blob_name)
+        
+        if not blob.exists():
+            # スピーカー設定がない場合は空のオブジェクトを返す
+            logger.info(f"スピーカー設定が見つかりません（デフォルトを返します）: {file_hash}")
+            return {}
+        
+        # JSONデータを取得
+        json_content = blob.download_as_text()
+        speaker_config_data = json.loads(json_content)
+        
+        logger.info(f"スピーカー設定を返しました: {file_hash}")
+        return speaker_config_data
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"スピーカー設定取得エラー: {file_hash}")
+        return JSONResponse(status_code=500, content={"detail": f"スピーカー設定取得エラー: {str(e)}"})

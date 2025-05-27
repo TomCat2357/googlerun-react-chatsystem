@@ -64,3 +64,25 @@ export interface WhisperSegment {
   text: string;
   speaker: string;
 }
+
+// スピーカー設定の型
+export interface SpeakerConfig {
+  [speakerId: string]: {
+    name: string;
+    color: string;
+  };
+}
+
+// スピーカー設定保存用のリクエスト型
+export interface WhisperSpeakerConfigRequest {
+  speakerConfig: SpeakerConfig;
+}
+
+// スピーカー統計情報の型
+export interface SpeakerStats {
+  [speakerId: string]: {
+    totalDuration: number;
+    segmentCount: number;
+    percentage: number;
+  };
+}
