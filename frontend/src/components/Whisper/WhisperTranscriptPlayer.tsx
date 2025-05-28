@@ -62,6 +62,15 @@ const WhisperTranscriptPlayer: React.FC<WhisperTranscriptPlayerProps> = ({
   const [hasSpeakerConfigEdits, setHasSpeakerConfigEdits] = useState(false);
   const [selectedSpeakers, setSelectedSpeakers] = useState<Set<string>>(new Set());
   
+  // 新しい機能のためのstate
+  const [isColorDisplayMode, setIsColorDisplayMode] = useState(true); // true: 色分け, false: 文字表示
+  const [selectedText, setSelectedText] = useState<{
+    startIndex: number;
+    endIndex: number;
+    text: string;
+  } | null>(null);
+  const [showSpeakerSelector, setShowSpeakerSelector] = useState(false);
+  
   const audioRef = useRef<HTMLAudioElement>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const currentSegmentSourceRef = useRef<AudioBufferSourceNode | null>(null);
@@ -395,6 +404,90 @@ const WhisperTranscriptPlayer: React.FC<WhisperTranscriptPlayerProps> = ({
     return editedSegments.filter(segment => selectedSpeakers.has(segment.speaker));
   }, [editedSegments, selectedSpeakers]);
 
+  // テキスト選択処理
+  const handleTextSelection = () => {
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0) {
+      setSelectedText(null);
+      setShowSpeakerSelector(false);
+      return;
+    }
+
+    const range = selection.getRangeAt(0);
+    const selectedContent = range.toString().trim();
+    
+    if (selectedContent.length === 0) {
+      setSelectedText(null);
+      setShowSpeakerSelector(false);
+      return;
+    }
+
+    // 選択されたテキストがどのセグメントに属するかを特定
+    const container = range.commonAncestorContainer;
+    let segmentElement = container.nodeType === Node.TEXT_NODE ? container.parentElement : container;
+    
+    // セグメント要素を見つけるまで上に遡る
+    while (segmentElement && !segmentElement.getAttribute('data-segment-index')) {
+      segmentElement = segmentElement.parentElement;
+    }
+
+    if (segmentElement) {
+      const segmentIndex = parseInt(segmentElement.getAttribute('data-segment-index') || '0');
+      setSelectedText({
+        startIndex: segmentIndex,
+        endIndex: segmentIndex,
+        text: selectedContent
+      });
+      setShowSpeakerSelector(true);
+    }
+  };
+
+  // 選択されたテキストの話者を変更
+  const changeSelectedSpeaker = (newSpeaker: string) => {
+    if (!selectedText) return;
+
+    const newSegments = [...editedSegments];
+    for (let i = selectedText.startIndex; i <= selectedText.endIndex; i++) {
+      if (newSegments[i]) {
+        newSegments[i] = {
+          ...newSegments[i],
+          speaker: newSpeaker
+        };
+      }
+    }
+
+    setEditedSegments(newSegments);
+    setHasEdits(true);
+    setSelectedText(null);
+    setShowSpeakerSelector(false);
+    
+    // 統計を再計算
+    const stats = calculateSpeakerStats(newSegments);
+    setSpeakerStats(stats);
+
+    // 選択をクリア
+    window.getSelection()?.removeAllRanges();
+  };
+
+  // 文字表示モード用のセグメント処理
+  const getTextDisplaySegments = React.useMemo(() => {
+    if (isColorDisplayMode) return filteredSegments;
+
+    const result: Array<Segment & { showSpeaker: boolean }> = [];
+    let lastSpeaker = '';
+
+    filteredSegments.forEach((segment) => {
+      const showSpeaker = segment.speaker !== lastSpeaker;
+      result.push({
+        ...segment,
+        showSpeaker
+      });
+      lastSpeaker = segment.speaker;
+    });
+
+    return result;
+  }, [filteredSegments, isColorDisplayMode]);
+
   // エクスポート機能
   const exportTranscript = (format: 'txt' | 'srt' | 'json') => {
     let content = '';
@@ -475,12 +568,31 @@ const WhisperTranscriptPlayer: React.FC<WhisperTranscriptPlayerProps> = ({
           e.preventDefault();
           setShowSpeakerPanel(!showSpeakerPanel);
           break;
+        case 'm': // Ctrl/Cmd + M で表示モード切り替え
+          e.preventDefault();
+          setIsColorDisplayMode(!isColorDisplayMode);
+          break;
+      }
+    };
+
+    // Escapeキーでポップアップを閉じる
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (showSpeakerSelector) {
+          setSelectedText(null);
+          setShowSpeakerSelector(false);
+          window.getSelection()?.removeAllRanges();
+        }
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isEditMode, showSpeakerPanel, hasEdits, hasSpeakerConfigEdits]);
+    window.addEventListener('keyup', handleKeyUp);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+    };
+  }, [isEditMode, showSpeakerPanel, hasEdits, hasSpeakerConfigEdits, isColorDisplayMode, showSpeakerSelector]);
 
   return (
     <div className="flex gap-4">
@@ -531,6 +643,16 @@ const WhisperTranscriptPlayer: React.FC<WhisperTranscriptPlayerProps> = ({
                 className="mr-2"
               />
               編集モード
+            </label>
+            
+            <label className="flex items-center text-gray-300">
+              <input
+                type="checkbox"
+                checked={isColorDisplayMode}
+                onChange={(e) => setIsColorDisplayMode(e.target.checked)}
+                className="mr-2"
+              />
+              色分けモード
             </label>
             
             <button
@@ -602,87 +724,202 @@ const WhisperTranscriptPlayer: React.FC<WhisperTranscriptPlayerProps> = ({
           </div>
         </div>
         
-        {/* 編集モードの説明とキーボードショートカット */}
+        {/* 機能説明とキーボードショートカット */}
         <div className="bg-gray-800 p-3 rounded mb-4 text-sm">
+          <div className="mb-3">
+            <p><strong>表示モード:</strong></p>
+            <ul className="list-disc ml-5 mt-1">
+              <li><strong>色分けモード:</strong> 各話者の発言を色付きのタグで表示</li>
+              <li><strong>文字表示モード:</strong> 話者が切り替わったタイミングのみ名前を表示</li>
+            </ul>
+          </div>
+          
           {isEditMode && (
             <div className="mb-3">
               <p><strong>編集方法:</strong></p>
               <ul className="list-disc ml-5 mt-1">
                 <li>テキストをクリックして編集できます</li>
                 <li>話者タグは [SPEAKER_XX] の形式で編集できます</li>
+                <li>テキストをドラッグして選択し、ポップアップから話者を変更できます</li>
                 <li>スピーカー設定パネルで話者名と色をカスタマイズできます</li>
                 <li>変更後は対応する保存ボタンをクリックしてください</li>
               </ul>
             </div>
           )}
+          
           <div>
             <p><strong>キーボードショートカット:</strong></p>
             <div className="grid grid-cols-2 gap-2 mt-1 text-xs">
               <div><kbd className="bg-gray-700 px-1 rounded">Ctrl+Space</kbd> 再生/一時停止</div>
               <div><kbd className="bg-gray-700 px-1 rounded">Ctrl+E</kbd> 編集モード切り替え</div>
+              <div><kbd className="bg-gray-700 px-1 rounded">Ctrl+M</kbd> 表示モード切り替え</div>
               <div><kbd className="bg-gray-700 px-1 rounded">Ctrl+S</kbd> 保存</div>
               <div><kbd className="bg-gray-700 px-1 rounded">Ctrl+P</kbd> スピーカー設定</div>
+              <div><kbd className="bg-gray-700 px-1 rounded">Escape</kbd> 選択解除</div>
             </div>
           </div>
         </div>
         
         {/* 文字起こし結果 */}
-        <div className="bg-white text-black p-4 rounded max-h-[500px] overflow-y-auto">
-          {filteredSegments.map((segment, originalIndex) => {
-            const actualIndex = editedSegments.findIndex(s => s === segment);
-            const isActive = currentTime >= segment.start && currentTime < segment.end;
-            const speakerInfo = speakerConfig[segment.speaker] || { 
-              name: segment.speaker, 
-              color: DEFAULT_SPEAKER_COLORS[0] 
-            };
-            
-            return (
-              <div
-                key={actualIndex}
-                style={{
-                  backgroundColor: isActive ? "#ffd700" : "#f8f9fa",
-                  padding: "8px",
-                  margin: "4px 0",
-                  borderRadius: "4px",
-                  cursor: "pointer",
-                  borderLeft: `4px solid ${speakerInfo.color}`
-                }}
-                onClick={() => handleSegmentClick(segment.start)}
-                onDoubleClick={() => handleSegmentDoubleClick(actualIndex)}
-              >
-                <div className="flex items-start gap-2">
-                  {/* スピーカータグ */}
-                  <span
-                    className="inline-block px-2 py-1 rounded text-xs font-semibold text-white flex-shrink-0"
-                    style={{ backgroundColor: speakerInfo.color }}
-                  >
-                    {speakerInfo.name}
-                  </span>
-                  
-                  {/* テキスト部分 */}
-                  <div className="flex-1">
-                    {isEditMode ? (
-                      <span
-                        contentEditable
-                        suppressContentEditableWarning
-                        onBlur={(e) => handleSegmentEdit(actualIndex, `[${segment.speaker}] ${e.currentTarget.textContent || ""}`)}
-                        className="block min-w-[50px] p-1 border border-gray-300 rounded"
-                      >
-                        {segment.text}
-                      </span>
-                    ) : (
-                      <span>{segment.text}</span>
-                    )}
-                  </div>
-                </div>
+        <div className="relative">
+          <div 
+            className="bg-white text-black p-4 rounded max-h-[500px] overflow-y-auto"
+            onMouseUp={handleTextSelection}
+          >
+            {isColorDisplayMode ? (
+              // 色分けモード
+              filteredSegments.map((segment, originalIndex) => {
+                const actualIndex = editedSegments.findIndex(s => s === segment);
+                const isActive = currentTime >= segment.start && currentTime < segment.end;
+                const speakerInfo = speakerConfig[segment.speaker] || { 
+                  name: segment.speaker, 
+                  color: DEFAULT_SPEAKER_COLORS[0] 
+                };
                 
-                {/* 時間情報 */}
-                <div className="text-xs text-gray-500 mt-1 ml-2">
-                  {formatTime(segment.start)} - {formatTime(segment.end)}
-                </div>
+                return (
+                  <div
+                    key={actualIndex}
+                    data-segment-index={actualIndex}
+                    style={{
+                      backgroundColor: isActive ? "#ffd700" : "#f8f9fa",
+                      padding: "8px",
+                      margin: "4px 0",
+                      borderRadius: "4px",
+                      cursor: "pointer",
+                      borderLeft: `4px solid ${speakerInfo.color}`
+                    }}
+                    onClick={() => handleSegmentClick(segment.start)}
+                    onDoubleClick={() => handleSegmentDoubleClick(actualIndex)}
+                  >
+                    <div className="flex items-start gap-2">
+                      {/* スピーカータグ */}
+                      <span
+                        className="inline-block px-2 py-1 rounded text-xs font-semibold text-white flex-shrink-0"
+                        style={{ backgroundColor: speakerInfo.color }}
+                      >
+                        {speakerInfo.name}
+                      </span>
+                      
+                      {/* テキスト部分 */}
+                      <div className="flex-1">
+                        {isEditMode ? (
+                          <span
+                            contentEditable
+                            suppressContentEditableWarning
+                            onBlur={(e) => handleSegmentEdit(actualIndex, `[${segment.speaker}] ${e.currentTarget.textContent || ""}`)}
+                            className="block min-w-[50px] p-1 border border-gray-300 rounded"
+                          >
+                            {segment.text}
+                          </span>
+                        ) : (
+                          <span>{segment.text}</span>
+                        )}
+                      </div>
+                    </div>
+                    
+                    {/* 時間情報 */}
+                    <div className="text-xs text-gray-500 mt-1 ml-2">
+                      {formatTime(segment.start)} - {formatTime(segment.end)}
+                    </div>
+                  </div>
+                );
+              })
+            ) : (
+              // 文字表示モード
+              <div className="leading-relaxed">
+                {getTextDisplaySegments.map((segment, originalIndex) => {
+                  const actualIndex = editedSegments.findIndex(s => s === segment);
+                  const isActive = currentTime >= segment.start && currentTime < segment.end;
+                  const speakerInfo = speakerConfig[segment.speaker] || { 
+                    name: segment.speaker, 
+                    color: DEFAULT_SPEAKER_COLORS[0] 
+                  };
+                  
+                  return (
+                    <span key={actualIndex}>
+                      {segment.showSpeaker && (
+                        <span
+                          className="inline-block mx-1 px-2 py-1 rounded text-xs font-semibold text-white"
+                          style={{ backgroundColor: speakerInfo.color }}
+                          title={`${formatTime(segment.start)} - ${formatTime(segment.end)}`}
+                        >
+                          ({speakerInfo.name})
+                        </span>
+                      )}
+                      <span
+                        data-segment-index={actualIndex}
+                        className={`cursor-pointer ${isActive ? 'bg-yellow-300' : ''}`}
+                        onClick={() => handleSegmentClick(segment.start)}
+                        onDoubleClick={() => handleSegmentDoubleClick(actualIndex)}
+                        title={`${formatTime(segment.start)} - ${formatTime(segment.end)}`}
+                      >
+                        {isEditMode ? (
+                          <span
+                            contentEditable
+                            suppressContentEditableWarning
+                            onBlur={(e) => handleSegmentEdit(actualIndex, `[${segment.speaker}] ${e.currentTarget.textContent || ""}`)}
+                            className="inline-block min-w-[50px] p-1 border border-gray-300 rounded mx-1"
+                          >
+                            {segment.text}
+                          </span>
+                        ) : (
+                          segment.text
+                        )}
+                      </span>
+                    </span>
+                  );
+                })}
               </div>
-            );
-          })}
+            )}
+          </div>
+
+          {/* 話者選択ポップアップ */}
+          {showSpeakerSelector && selectedText && (
+            <div className="absolute z-50 bg-gray-800 text-white rounded-lg shadow-lg p-3 border border-gray-600"
+                 style={{
+                   top: '50%',
+                   left: '50%',
+                   transform: 'translate(-50%, -50%)'
+                 }}>
+              <div className="mb-2 text-sm font-semibold">選択したテキストの話者を変更:</div>
+              <div className="text-xs text-gray-300 mb-3 max-w-60 truncate">
+                "{selectedText.text}"
+              </div>
+              <div className="space-y-2">
+                {uniqueSpeakers.map(speakerId => {
+                  const speakerInfo = speakerConfig[speakerId] || { 
+                    name: speakerId, 
+                    color: DEFAULT_SPEAKER_COLORS[0] 
+                  };
+                  return (
+                    <button
+                      key={speakerId}
+                      onClick={() => changeSelectedSpeaker(speakerId)}
+                      className="flex items-center gap-2 w-full p-2 rounded hover:bg-gray-700 text-left"
+                    >
+                      <span
+                        className="w-4 h-4 rounded"
+                        style={{ backgroundColor: speakerInfo.color }}
+                      />
+                      <span>{speakerInfo.name}</span>
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="flex justify-end mt-3">
+                <button
+                  onClick={() => {
+                    setSelectedText(null);
+                    setShowSpeakerSelector(false);
+                    window.getSelection()?.removeAllRanges();
+                  }}
+                  className="px-3 py-1 text-xs bg-gray-600 hover:bg-gray-500 rounded"
+                >
+                  キャンセル
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
