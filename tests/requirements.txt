@@ -1,32 +1,40 @@
-# 主要な依存関係
-python-dotenv==1.0.1
-firebase-admin==6.6.0
-Pillow==11.0.0
+# テスト実行用の依存関係
 
-# Google Cloud関連
-google-cloud-aiplatform==1.82.0
-google-cloud-speech==2.31.0
-google-cloud-secret-manager==2.23.1
-google-cloud-pubsub==2.29.0
-google-cloud-storage==2.19.0
-google-cloud-batch==0.17.35
-google-cloud-tasks==2.19.2
+# テストフレームワーク
+pytest==8.3.4
+pytest-asyncio==0.24.0
+pytest-mock==3.12.0
+pytest-cov==6.0.0
+pytest-xdist==3.6.1
 
-# APIおよびHTTP
+# HTTPテスト用
+httpx==0.28.1
 fastapi==0.115.11
-starlette==0.46.0
+uvicorn==0.34.0
+
+# モックと初期化用
+factory-boy==3.3.1
+faker==33.1.0
+
+# Google Cloud エミュレータ用
+google-cloud-firestore==2.20.2
+google-cloud-storage==3.1.0
+google-cloud-pubsub==2.29.0
 requests==2.32.3
-asgiref==3.8.1
-websockets==15.0
 
-# ファイル処理
-docx2txt==0.8
-
-# 本番サーバー用
-hypercorn==0.17.3
-priority==2.0.0
-wsproto==1.2.0
-h11==0.14.0
-
-#音声データ処理用
+# 音声処理関連（テスト用サンプル音声生成）
 pydub==0.25.1
+numpy==2.2.5
+
+# データ処理・検証
+pandas==2.2.3
+pydantic==2.10.6
+
+# 共通ユーティリティ（プロジェクト内）
+python-dotenv==1.1.0
+
+# Docker関連（GCSエミュレータ用）
+# docker コマンドは外部依存関係のため requirements.txt に含めない
+
+# 環境管理・デバッグ用
+ipython==8.31.0
