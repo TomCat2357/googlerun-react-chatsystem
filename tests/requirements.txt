@@ -44,6 +44,7 @@ docx2txt==0.8
 # 音声処理関連（テスト用サンプル音声生成）
 pydub==0.25.1
 numpy==2.2.5
+faster-whisper>=1.1.0
 
 # データ処理・検証
 pandas==2.2.3

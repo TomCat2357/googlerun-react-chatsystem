@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field, field_validator
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, ClassVar
 import datetime, re
 
 
@@ -98,7 +98,7 @@ class WhisperFirestoreData(BaseModel):
 
     # 例：特定のフィールドのバリデーション
     # クラス変数として有効なステータスを定義
-    VALID_STATUSES = ["queued", "launched", "processing", "completed", "failed", "canceled"]
+    VALID_STATUSES: ClassVar[List[str]] = ["queued", "launched", "processing", "completed", "failed", "canceled"]
     
     @field_validator("status")
     @classmethod
