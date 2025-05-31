@@ -18,12 +18,28 @@ faker==33.1.0
 
 # Google Cloud エミュレータ用
 google-cloud-firestore==2.20.2
-google-cloud-storage==3.1.0
+google-cloud-storage==2.19.0
 google-cloud-pubsub==2.29.0
+google-cloud-secret-manager==2.23.1
+google-cloud-aiplatform==1.82.0
+google-cloud-speech==2.31.0
+google-cloud-batch==0.17.35
+google-cloud-tasks==2.19.2
 requests==2.32.3
 
 # Firebase関連
 firebase-admin==6.6.0
+
+# APIフレームワーク
+starlette==0.46.0
+asgiref==3.8.1
+websockets==15.0
+
+# 画像処理
+Pillow==11.0.0
+
+# ファイル処理
+docx2txt==0.8
 
 # 音声処理関連（テスト用サンプル音声生成）
 pydub==0.25.1
