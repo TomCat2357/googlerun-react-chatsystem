@@ -84,10 +84,15 @@ def mock_heavy_modules():
     mock_vertexai = MagicMock()
     mock_vertexai.init = MagicMock()
     mock_vertexai.generative_models = MagicMock()
+    mock_vertexai_preview = MagicMock()
+    mock_vertexai_preview.generative_models = MagicMock()
+    mock_vertexai_preview.vision_models = MagicMock()
+    mock_vertexai.preview = mock_vertexai_preview
     sys.modules['vertexai'] = mock_vertexai
-    sys.modules['vertexai.generative_models'] = MagicMock()
-    sys.modules['vertexai.preview'] = MagicMock()
-    sys.modules['vertexai.preview.generative_models'] = MagicMock()
+    sys.modules['vertexai.generative_models'] = mock_vertexai.generative_models
+    sys.modules['vertexai.preview'] = mock_vertexai_preview
+    sys.modules['vertexai.preview.generative_models'] = mock_vertexai_preview.generative_models
+    sys.modules['vertexai.preview.vision_models'] = mock_vertexai_preview.vision_models
     
     # Google Cloud AI Platform関連のモック
     mock_aiplatform = MagicMock()
@@ -98,8 +103,14 @@ def mock_heavy_modules():
     
     # Google Cloud Speech関連のモック  
     mock_speech = MagicMock()
+    mock_speech_client = MagicMock()
+    mock_speech.SpeechClient = MagicMock(return_value=mock_speech_client)
+    mock_speech_types = MagicMock()
+    mock_speech.types = mock_speech_types
     sys.modules['google.cloud.speech'] = mock_speech
     sys.modules['google.cloud.speech_v1'] = MagicMock()
+    sys.modules['google.cloud.speech_v2'] = mock_speech
+    sys.modules['google.cloud.speech_v2.types'] = mock_speech_types
     
     # Firebase Admin関連のモック（一部）
     mock_firebase_admin = MagicMock()
