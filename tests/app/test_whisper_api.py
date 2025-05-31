@@ -20,8 +20,7 @@ from backend.app.main import app
 class TestWhisperUploadUrl:
     """署名付きURL生成のテスト"""
     
-    @pytest.mark.asyncio
-    async def test_create_upload_url_success(self, async_test_client, mock_auth_user, mock_environment_variables):
+    def test_create_upload_url_success(self, test_client, mock_auth_user, mock_environment_variables):
         """署名付きURL生成の成功ケース"""
         with patch("google.cloud.storage.Client") as mock_storage:
             # GCSクライアントのモック
@@ -31,9 +30,10 @@ class TestWhisperUploadUrl:
             mock_bucket.blob.return_value = mock_blob
             mock_storage.return_value.bucket.return_value = mock_bucket
             
-            response = await async_test_client.post(
-                "/whisper/upload_url",
-                json={"content_type": "audio/wav"}
+            response = test_client.post(
+                "/backend/whisper/upload_url",
+                json={"content_type": "audio/wav"},
+                headers={"Authorization": "Bearer test-token"}
             )
             
             assert response.status_code == 200
@@ -43,11 +43,10 @@ class TestWhisperUploadUrl:
             assert data["upload_url"] == "https://storage.googleapis.com/signed-url"
             assert data["object_name"].startswith("whisper/test-user-123/")
     
-    @pytest.mark.asyncio
-    async def test_create_upload_url_without_auth(self, async_test_client, mock_environment_variables):
+    def test_create_upload_url_without_auth(self, test_client, mock_environment_variables):
         """認証なしでのURL生成（失敗ケース）"""
-        response = await async_test_client.post(
-            "/whisper/upload_url",
+        response = test_client.post(
+            "/backend/whisper/upload_url",
             json={"content_type": "audio/wav"}
         )
         
@@ -60,10 +59,12 @@ class TestWhisperUpload:
     @pytest.mark.asyncio
     async def test_upload_audio_success(self, async_test_client, mock_auth_user, mock_environment_variables, sample_audio_file):
         """音声アップロードの成功ケース"""
-        # テスト用のリクエストデータ
+        # テスト用のリクエストデータ（実装に合わせてフィールドを追加）
         upload_request = {
-            "gcs_object": "temp/test-audio.wav",
-            "original_name": "test-audio.wav",
+            "audio_data": "dummy_base64_data",  # WhisperUploadRequestで必要
+            "filename": "test-audio.wav",       # WhisperUploadRequestで必要
+            "gcs_object": "temp/test-audio.wav", # 実装で使用
+            "original_name": "test-audio.wav",   # 実装で使用
             "description": "テスト用音声",
             "recording_date": "2025-05-29",
             "language": "ja",
@@ -74,56 +75,62 @@ class TestWhisperUpload:
             "max_speakers": 1
         }
         
-        with patch.multiple(
-            "backend.app.api.whisper",
-            storage=Mock(),
-            firestore=Mock(),
-            tempfile=Mock()
-        ):
-            # GCSモック
-            mock_storage_client = Mock()
+        # subprocess.Popenを直接モック化してffprobeとffmpegの問題を回避
+        mock_process = Mock()
+        mock_process.communicate.return_value = (b"1.0", b"")  # duration=1.0秒
+        mock_process.returncode = 0
+        
+        with patch('subprocess.Popen', return_value=mock_process), \
+             patch("google.cloud.storage.Client") as mock_storage, \
+             patch("google.cloud.firestore.Client") as mock_firestore, \
+             patch("backend.app.api.whisper.enqueue_job_atomic") as mock_enqueue, \
+             patch("fastapi.BackgroundTasks.add_task") as mock_add_task:
+            
+            # GCSクライアントのモック
             mock_bucket = Mock()
             mock_blob = Mock()
             mock_blob.exists.return_value = True
             mock_blob.content_type = "audio/wav"
             mock_blob.size = 44100
+            mock_blob.reload.return_value = None
             mock_bucket.blob.return_value = mock_blob
-            mock_storage_client.bucket.return_value = mock_bucket
+            mock_storage.return_value.bucket.return_value = mock_bucket
             
-            # Firestoreモック
-            mock_firestore_client = Mock()
+            # Firestoreのモック
+            mock_doc_ref = Mock()
+            mock_doc_ref.id = "test-job-123"
+            mock_collection = Mock()
+            mock_collection.add.return_value = (None, mock_doc_ref)
+            mock_firestore.return_value.collection.return_value = mock_collection
             
-            # 音声処理のモック
-            with patch("backend.app.api.whisper.probe_duration", return_value=1.0), \
-                 patch("backend.app.api.whisper.convert_audio_to_wav_16k_mono"), \
-                 patch("backend.app.api.whisper.enqueue_job_atomic"), \
-                 patch("backend.app.api.whisper.trigger_whisper_batch_processing"), \
-                 patch("google.cloud.storage.Client", return_value=mock_storage_client), \
-                 patch("google.cloud.firestore.Client", return_value=mock_firestore_client), \
-                 patch("tempfile.NamedTemporaryFile") as mock_tempfile, \
-                 patch("os.path.getsize", return_value=44100), \
-                 patch("os.remove"):
-                
-                # 一時ファイルのモック
-                mock_temp_file = Mock()
-                mock_temp_file.name = "/tmp/test_audio.wav"
-                mock_tempfile.return_value.__enter__.return_value = mock_temp_file
-                
-                response = await async_test_client.post(
-                    "/whisper",
-                    json=upload_request
-                )
-                
-                assert response.status_code == 200
-                data = response.json()
-                assert data["status"] == "success"
-                assert "job_id" in data
-                assert "file_hash" in data
+            # ジョブエンキューのモック
+            mock_enqueue.return_value = None
+            
+            # BackgroundTasksのadd_taskメソッドをモック化してバックグラウンド実行を無効化
+            mock_add_task.return_value = None
+            
+            response = await async_test_client.post(
+                "/backend/whisper",
+                json=upload_request,
+                headers={"Authorization": "Bearer test-token"}
+            )
+        
+        # デバッグ用：レスポンス内容を表示
+        print(f"Status code: {response.status_code}")
+        print(f"Response: {response.text}")
+        
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "success"
+        assert "job_id" in data
+        assert "file_hash" in data
     
     @pytest.mark.asyncio
     async def test_upload_audio_file_too_large(self, async_test_client, mock_auth_user, mock_environment_variables):
         """ファイルサイズが大きすぎる場合のテスト"""
         upload_request = {
+            "audio_data": "dummy_base64_data",  # 必須フィールド
+            "filename": "large-audio.wav",     # 必須フィールド
             "gcs_object": "temp/large-audio.wav",
             "original_name": "large-audio.wav"
         }
@@ -134,12 +141,14 @@ class TestWhisperUpload:
             mock_blob.exists.return_value = True
             mock_blob.content_type = "audio/wav"
             mock_blob.size = 200 * 1024 * 1024  # 200MB（制限を超える）
+            mock_blob.reload.return_value = None
             mock_bucket.blob.return_value = mock_blob
             mock_storage.return_value.bucket.return_value = mock_bucket
             
             response = await async_test_client.post(
-                "/whisper",
-                json=upload_request
+                "/backend/whisper",
+                json=upload_request,
+                headers={"Authorization": "Bearer test-token"}
             )
             
             assert response.status_code == 413
@@ -149,6 +158,8 @@ class TestWhisperUpload:
     async def test_upload_audio_invalid_format(self, async_test_client, mock_auth_user, mock_environment_variables):
         """無効な音声フォーマットの場合のテスト"""
         upload_request = {
+            "audio_data": "dummy_base64_data",  # 必須フィールド
+            "filename": "test-document.pdf",   # 必須フィールド
             "gcs_object": "temp/test-document.pdf",
             "original_name": "test-document.pdf"
         }
@@ -159,13 +170,19 @@ class TestWhisperUpload:
             mock_blob.exists.return_value = True
             mock_blob.content_type = "application/pdf"
             mock_blob.size = 1024
+            mock_blob.reload.return_value = None
             mock_bucket.blob.return_value = mock_blob
             mock_storage.return_value.bucket.return_value = mock_bucket
             
             response = await async_test_client.post(
-                "/whisper",
-                json=upload_request
+                "/backend/whisper",
+                json=upload_request,
+                headers={"Authorization": "Bearer test-token"}
             )
+            
+            # デバッグ用：レスポンス内容を表示
+            print(f"Status code: {response.status_code}")
+            print(f"Response: {response.text}")
             
             assert response.status_code == 400
             assert "無効な音声フォーマット" in response.json()["detail"]
@@ -198,7 +215,10 @@ class TestWhisperJobsList:
             mock_collection.where.return_value.where.return_value.order_by.return_value.limit.return_value = mock_query
             mock_firestore.return_value.collection.return_value = mock_collection
             
-            response = await async_test_client.get("/whisper/jobs")
+            response = await async_test_client.get(
+                "/backend/whisper/jobs",
+                headers={"Authorization": "Bearer test-token"}
+            )
             
             assert response.status_code == 200
             data = response.json()
@@ -220,7 +240,10 @@ class TestWhisperJobsList:
             mock_collection.where.return_value.where.return_value.where.return_value.order_by.return_value.limit.return_value = mock_query
             mock_firestore.return_value.collection.return_value = mock_collection
             
-            response = await async_test_client.get("/whisper/jobs?status=completed&limit=10")
+            response = await async_test_client.get(
+                "/backend/whisper/jobs?status=completed&limit=10",
+                headers={"Authorization": "Bearer test-token"}
+            )
             
             assert response.status_code == 200
 
@@ -248,7 +271,10 @@ class TestWhisperJobOperations:
             mock_collection.where.return_value.where.return_value = mock_query
             mock_firestore.return_value.collection.return_value = mock_collection
             
-            response = await async_test_client.get(f"/whisper/jobs/{file_hash}")
+            response = await async_test_client.get(
+                f"/backend/whisper/jobs/{file_hash}",
+                headers={"Authorization": "Bearer test-token"}
+            )
             
             assert response.status_code == 200
             data = response.json()
@@ -267,7 +293,10 @@ class TestWhisperJobOperations:
             mock_collection.where.return_value.where.return_value = mock_query
             mock_firestore.return_value.collection.return_value = mock_collection
             
-            response = await async_test_client.get(f"/whisper/jobs/{file_hash}")
+            response = await async_test_client.get(
+                f"/backend/whisper/jobs/{file_hash}",
+                headers={"Authorization": "Bearer test-token"}
+            )
             
             assert response.status_code == 404
     
@@ -277,7 +306,10 @@ class TestWhisperJobOperations:
         file_hash = "test-hash-123"
         
         with patch("backend.app.api.whisper._update_job_status", return_value="job-123"):
-            response = await async_test_client.post(f"/whisper/jobs/{file_hash}/cancel")
+            response = await async_test_client.post(
+                f"/backend/whisper/jobs/{file_hash}/cancel",
+                headers={"Authorization": "Bearer test-token"}
+            )
             
             assert response.status_code == 200
             data = response.json()
@@ -303,7 +335,10 @@ class TestWhisperJobOperations:
             mock_collection.where.return_value.where.return_value.limit.return_value = mock_query
             mock_firestore.return_value.collection.return_value = mock_collection
             
-            response = await async_test_client.post(f"/whisper/jobs/{file_hash}/retry")
+            response = await async_test_client.post(
+                f"/backend/whisper/jobs/{file_hash}/retry",
+                headers={"Authorization": "Bearer test-token"}
+            )
             
             assert response.status_code == 200
             data = response.json()
@@ -341,7 +376,10 @@ class TestWhisperTranscript:
             mock_bucket.blob.return_value = mock_blob
             mock_storage.return_value.bucket.return_value = mock_bucket
             
-            response = await async_test_client.get(f"/whisper/transcript/{file_hash}/original")
+            response = await async_test_client.get(
+                f"/backend/whisper/transcript/{file_hash}/original",
+                headers={"Authorization": "Bearer test-token"}
+            )
             
             assert response.status_code == 200
             data = response.json()
@@ -383,8 +421,9 @@ class TestWhisperTranscript:
             mock_storage.return_value.bucket.return_value = mock_bucket
             
             response = await async_test_client.post(
-                f"/whisper/jobs/{file_hash}/edit",
-                json=edit_request
+                f"/backend/whisper/jobs/{file_hash}/edit",
+                json=edit_request,
+                headers={"Authorization": "Bearer test-token"}
             )
             
             assert response.status_code == 200
@@ -433,8 +472,9 @@ class TestWhisperSpeakerConfig:
             mock_storage.return_value.bucket.return_value = mock_bucket
             
             response = await async_test_client.post(
-                f"/whisper/jobs/{file_hash}/speaker_config",
-                json=speaker_config_request
+                f"/backend/whisper/jobs/{file_hash}/speaker_config",
+                json=speaker_config_request,
+                headers={"Authorization": "Bearer test-token"}
             )
             
             assert response.status_code == 200
@@ -468,7 +508,10 @@ class TestWhisperSpeakerConfig:
             mock_bucket.blob.return_value = mock_blob
             mock_storage.return_value.bucket.return_value = mock_bucket
             
-            response = await async_test_client.get(f"/whisper/jobs/{file_hash}/speaker_config")
+            response = await async_test_client.get(
+                f"/backend/whisper/jobs/{file_hash}/speaker_config",
+                headers={"Authorization": "Bearer test-token"}
+            )
             
             assert response.status_code == 200
             data = response.json()
@@ -498,7 +541,10 @@ class TestWhisperSpeakerConfig:
             mock_bucket.blob.return_value = mock_blob
             mock_storage.return_value.bucket.return_value = mock_bucket
             
-            response = await async_test_client.get(f"/whisper/jobs/{file_hash}/speaker_config")
+            response = await async_test_client.get(
+                f"/backend/whisper/jobs/{file_hash}/speaker_config",
+                headers={"Authorization": "Bearer test-token"}
+            )
             
             assert response.status_code == 200
             data = response.json()

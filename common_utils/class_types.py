@@ -62,6 +62,9 @@ class WhisperUploadRequest(BaseModel):
     num_speakers: Optional[int] = None  # 明示的に指定された話者数
     min_speakers: Optional[int] = 1  # 最小話者数（自動検出の範囲指定用）
     max_speakers: Optional[int] = 6  # 最大話者数（自動検出の範囲指定用）
+    # GCSベースのワークフロー用フィールドを追加
+    gcs_object: Optional[str] = None  # GCSオブジェクト名（GCSベースワークフロー用）
+    original_name: Optional[str] = None  # 元のファイル名（GCSベースワークフロー用）
 
 
 # WhisperのFirestoreデータの型に segments を追加

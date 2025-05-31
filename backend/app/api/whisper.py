@@ -55,7 +55,7 @@ class UploadUrlResponse(BaseModel):
     object_name: str
 
 # 有効なステータス一覧 (WhisperFirestoreDataから取得)
-VALID_STATUSES = set(WhisperFirestoreData._VALID_STATUSES)
+VALID_STATUSES = set(WhisperFirestoreData.VALID_STATUSES)
 
 # 辞書ロガーのセットアップ
 create_dict_logger = partial(create_dict_logger, sensitive_keys=SENSITIVE_KEYS)

@@ -3,6 +3,7 @@
 """
 
 import pytest
+import pytest_asyncio
 import asyncio
 import tempfile
 import os
@@ -16,7 +17,7 @@ from unittest.mock import Mock, patch, MagicMock
 import numpy as np
 from pydub import AudioSegment
 from fastapi.testclient import TestClient
-from httpx import AsyncClient
+from httpx import AsyncClient, ASGITransport
 
 # 重いライブラリを事前にモック化（インポート前に実行）
 def mock_heavy_modules():
@@ -153,6 +154,55 @@ def mock_heavy_modules():
     
     # docx2txt（ファイル処理）
     sys.modules['docx2txt'] = MagicMock()
+    
+    # PyTorch関連のモック（Whisperで使用）
+    mock_torch = MagicMock()
+    mock_torch.cuda = MagicMock()
+    mock_torch.cuda.is_available = MagicMock(return_value=False)
+    mock_torch.jit = MagicMock()
+    mock_torch.nn = MagicMock()
+    mock_torch.device = MagicMock()
+    sys.modules['torch'] = mock_torch
+    sys.modules['torch.nn'] = mock_torch.nn
+    sys.modules['torch.jit'] = mock_torch.jit
+    sys.modules['torch.cuda'] = mock_torch.cuda
+    
+    # torchaudio関連のモック
+    mock_torchaudio = MagicMock()
+    mock_torchaudio.load = MagicMock()
+    mock_torchaudio.save = MagicMock()
+    mock_torchaudio.transforms = MagicMock()
+    sys.modules['torchaudio'] = mock_torchaudio
+    sys.modules['torchaudio.transforms'] = mock_torchaudio.transforms
+    
+    # faster-whisper関連のモック
+    mock_faster_whisper = MagicMock()
+    sys.modules['faster_whisper'] = mock_faster_whisper
+    
+    # whisperやwhisper関連ライブラリのモック
+    mock_whisper = MagicMock()
+    sys.modules['whisper'] = mock_whisper
+    
+    # pyannote関連のモック（話者分離で使用）
+    mock_pyannote = MagicMock()
+    sys.modules['pyannote'] = mock_pyannote
+    sys.modules['pyannote.audio'] = MagicMock()
+    sys.modules['pyannote.audio.pipelines'] = MagicMock()
+    sys.modules['pyannote.core'] = MagicMock()
+    
+    # transformers関連のモック（Hugging Face）
+    mock_transformers = MagicMock()
+    sys.modules['transformers'] = mock_transformers
+    
+    # librosa関連のモック（音声処理）
+    mock_librosa = MagicMock()
+    sys.modules['librosa'] = mock_librosa
+    
+    # scipy関連のモック（科学計算）
+    mock_scipy = MagicMock()
+    sys.modules['scipy'] = mock_scipy
+    sys.modules['scipy.io'] = MagicMock()
+    sys.modules['scipy.signal'] = MagicMock()
 
 # 重いモジュールをモック化
 mock_heavy_modules()
@@ -282,8 +332,12 @@ TEST_USER = {
 @pytest.fixture
 def mock_auth_user():
     """認証ユーザーのモック"""
-    with patch('backend.app.api.whisper.get_current_user', return_value=TEST_USER), \
-         patch('backend.app.api.auth.get_current_user', return_value=TEST_USER), \
+    # 認証関数を直接モック化し、常にTEST_USERを返すようにする
+    async def mock_get_current_user(*args, **kwargs):
+        return TEST_USER
+        
+    with patch('backend.app.api.whisper.get_current_user', side_effect=mock_get_current_user), \
+         patch('backend.app.api.auth.get_current_user', side_effect=mock_get_current_user), \
          patch('firebase_admin.auth.verify_id_token', return_value=TEST_USER):
         yield TEST_USER
 
@@ -431,8 +485,8 @@ def mock_gcp_services():
 @pytest.fixture 
 def mock_audio_processing():
     """音声処理関連のモック"""
-    with patch('backend.app.core.audio_utils.probe_duration', return_value=1.0), \
-         patch('backend.app.core.audio_utils.convert_audio_to_wav_16k_mono'), \
+    with patch('app.core.audio_utils.probe_duration', return_value=1.0), \
+         patch('app.core.audio_utils.convert_audio_to_wav_16k_mono'), \
          patch('os.path.getsize', return_value=44100), \
          patch('os.remove'), \
          patch('tempfile.NamedTemporaryFile') as mock_tempfile:
@@ -451,20 +505,22 @@ def mock_audio_processing():
 @pytest.fixture
 def mock_whisper_services():
     """Whisper関連サービスのモック"""
-    with patch('backend.app.services.whisper_queue.enqueue_job_atomic'), \
-         patch('backend.app.api.whisper_batch.trigger_whisper_batch_processing'), \
-         patch('backend.app.api.whisper_batch._get_current_processing_job_count', return_value=0), \
-         patch('backend.app.api.whisper_batch._get_env_var', return_value="5"):
+    with patch('app.services.whisper_queue.enqueue_job_atomic'), \
+         patch('app.api.whisper_batch.trigger_whisper_batch_processing'), \
+         patch('app.api.whisper_batch._get_current_processing_job_count', return_value=0), \
+         patch('app.api.whisper_batch._get_env_var', return_value="5"):
         yield
 
 
 # 重い依存関係を持つモジュールのインポートは後で行う
-@pytest.fixture
+@pytest_asyncio.fixture
 async def async_test_client(mock_gcp_services, mock_audio_processing, mock_whisper_services):
     """非同期FastAPIテストクライアント（モック付き）"""
     # 使用時にのみインポート
     from backend.app.main import app
-    async with AsyncClient(app=app, base_url="http://test") as client:
+    
+    # AsyncClientを適切に初期化
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         yield client
 
 
