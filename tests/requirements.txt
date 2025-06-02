@@ -56,5 +56,8 @@ python-dotenv==1.1.0
 # Docker関連（GCSエミュレータ用）
 # docker コマンドは外部依存関係のため requirements.txt に含めない
 
+# システムモニタリング
+psutil==6.1.1
+
 # 環境管理・デバッグ用
 ipython==8.31.0

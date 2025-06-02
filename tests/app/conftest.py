@@ -302,6 +302,17 @@ os.environ.update({
     "BATCH_REGION": "us-central1",
     "BATCH_SERVICE_ACCOUNT": "test-service-account@test-project.iam.gserviceaccount.com",
     
+    # Whisper Batch設定
+    "COLLECTION": "whisper_jobs",
+    "HF_AUTH_TOKEN": "test-hf-token",
+    "DEVICE": "cpu",
+    "LOCAL_TMP_DIR": "/tmp",
+    "WHISPER_TRANSCRIPT_BLOB": "{file_hash}_transcription.json",
+    "WHISPER_DIARIZATION_BLOB": "{file_hash}_diarization.json",
+    "POLL_INTERVAL_SECONDS": "10",
+    "FULL_AUDIO_PATH": "gs://test-whisper-bucket/{file_hash}.wav",
+    "FULL_TRANSCRIPTION_PATH": "gs://test-whisper-bucket/{file_hash}/combine.json",
+    
     # SSL設定
     "SSL_CERT_PATH": "",
     "SSL_KEY_PATH": "",
@@ -435,19 +446,48 @@ def mock_gcp_services():
     mock_document = MagicMock()
     mock_query = MagicMock()
     
+    # 完全なジョブデータを含むドキュメント
+    complete_job_data = {
+        "job_id": "test-doc-id",
+        "user_id": TEST_USER["uid"],
+        "user_email": TEST_USER["email"],
+        "filename": "test-audio.wav",
+        "gcs_bucket_name": TEST_BUCKET_NAME,
+        "audio_size": 44100,
+        "audio_duration_ms": 1000,
+        "file_hash": "test-hash-123",
+        "status": "completed",
+        "created_at": "2025-06-01T10:00:00Z",
+        "updated_at": "2025-06-01T10:05:00Z"
+    }
+    
     # Firestoreドキュメントの基本設定
     mock_document.id = "test-doc-id"
     mock_document.exists = True
-    mock_document.to_dict.return_value = {"status": "completed", "user_id": TEST_USER["uid"]}
+    mock_document.to_dict.return_value = complete_job_data
     mock_document.reference = MagicMock()
     mock_document.reference.update.return_value = None
+    mock_document.get.return_value = mock_document  # get()メソッドを追加
     
+    # queryオブジェクトの設定 - streamメソッドがlist型を返すように修正
     mock_query.stream.return_value = [mock_document]
     mock_query.limit.return_value = mock_query
     mock_query.order_by.return_value = mock_query
     mock_query.where.return_value = mock_query
     
-    mock_collection.document.return_value = mock_document
+    # collectionのdocumentメソッドで新しいdocument referenceを作成する場合もモック化
+    def mock_document_method(doc_id):
+        """documentメソッドのモック（動的にドキュメントリファレンスを作成）"""
+        doc_ref = MagicMock()
+        doc_ref.id = doc_id
+        doc_ref.exists = True
+        doc_ref.to_dict.return_value = complete_job_data
+        doc_ref.get.return_value = doc_ref  # get()メソッドが自分自身を返す
+        doc_ref.reference = doc_ref
+        doc_ref.update.return_value = None
+        return doc_ref
+    
+    mock_collection.document = mock_document_method
     mock_collection.where.return_value = mock_query
     mock_collection.add.return_value = (None, mock_document.reference)
     
@@ -478,7 +518,8 @@ def mock_gcp_services():
             "pubsub": mock_pubsub_client,
             "bucket": mock_bucket,
             "blob": mock_blob,
-            "document": mock_document
+            "document": mock_document,
+            "complete_job_data": complete_job_data
         }
 
 
@@ -505,11 +546,113 @@ def mock_audio_processing():
 @pytest.fixture
 def mock_whisper_services():
     """Whisper関連サービスのモック"""
-    with patch('app.services.whisper_queue.enqueue_job_atomic'), \
-         patch('app.api.whisper_batch.trigger_whisper_batch_processing'), \
-         patch('app.api.whisper_batch._get_current_processing_job_count', return_value=0), \
-         patch('app.api.whisper_batch._get_env_var', return_value="5"):
+    
+    # バックグラウンドタスクを無効化するモック関数
+    async def mock_trigger_batch_processing(*args, **kwargs):
+        """バッチ処理トリガー関数のモック（何もしない）"""
+        pass
+    
+    # FastAPIのBackgroundTasksのadd_taskメソッドをモック化
+    def mock_add_task(func, *args, **kwargs):
+        """BackgroundTasksのadd_taskをモック化（実際には実行しない）"""
+        pass
+    
+    with patch('backend.app.services.whisper_queue.enqueue_job_atomic'), \
+         patch('backend.app.api.whisper_batch.trigger_whisper_batch_processing', side_effect=mock_trigger_batch_processing), \
+         patch('backend.app.api.whisper_batch._get_current_processing_job_count', return_value=0), \
+         patch('backend.app.api.whisper_batch._get_env_var', return_value="5"), \
+         patch('backend.app.api.whisper.trigger_whisper_batch_processing', side_effect=mock_trigger_batch_processing), \
+         patch('fastapi.BackgroundTasks.add_task', side_effect=mock_add_task):
         yield
+
+
+@pytest.fixture 
+def firestore_client():
+    """Firestoreクライアントのフィクスチャ（実際のFirestoreエミュレータ使用）"""
+    # テスト用のFirestoreクライアントを提供
+    # 実際にはモックされたFirestoreクライアントを返す
+    mock_client = MagicMock()
+    mock_client.SERVER_TIMESTAMP = "mock_timestamp"
+    
+    # コレクションとドキュメントのモック設定
+    mock_collection = MagicMock()
+    mock_document = MagicMock()
+    mock_document.id = "test-doc-id"
+    mock_document.get.return_value = mock_document
+    mock_document.to_dict.return_value = {"status": "queued"}
+    mock_document.set.return_value = None
+    mock_document.update.return_value = None
+    
+    mock_collection.document.return_value = mock_document
+    mock_collection.where.return_value.order_by.return_value.limit.return_value.stream.return_value = [mock_document]
+    
+    mock_client.collection.return_value = mock_collection
+    yield mock_client
+
+
+@pytest.fixture
+def gcs_client():
+    """GCSクライアントのフィクスチャ"""
+    mock_client = MagicMock()
+    mock_bucket = MagicMock()
+    mock_blob = MagicMock()
+    
+    mock_blob.exists.return_value = True
+    mock_blob.upload_from_file.return_value = None
+    mock_blob.download_to_filename.return_value = None
+    mock_blob.upload_from_filename.return_value = None
+    
+    mock_bucket.blob.return_value = mock_blob
+    mock_client.bucket.return_value = mock_bucket
+    
+    yield mock_client
+
+
+@pytest.fixture
+def sample_firestore_job():
+    """サンプルのFirestoreジョブデータ"""
+    from common_utils.class_types import WhisperFirestoreData
+    
+    return WhisperFirestoreData(
+        job_id="test-job-123",
+        user_id=TEST_USER["uid"],
+        user_email=TEST_USER["email"],
+        filename="test-audio.wav",
+        gcs_bucket_name=TEST_BUCKET_NAME,
+        audio_size=44100,
+        audio_duration_ms=1000,
+        file_hash="test-hash-123",
+        status="queued",
+        num_speakers=1,
+        min_speakers=1,
+        max_speakers=1,
+        language="ja",
+        initial_prompt="",
+        tags=["test"],
+        description="テスト用音声"
+    )
+
+
+@pytest.fixture
+def sample_transcription_result():
+    """サンプルの文字起こし結果データ"""
+    return [
+        {
+            "start": 0.0,
+            "end": 1.0,
+            "text": "こんにちは"
+        },
+        {
+            "start": 1.0,
+            "end": 2.0,
+            "text": "今日はいい天気ですね"
+        },
+        {
+            "start": 2.0,
+            "end": 3.0,
+            "text": "ありがとうございます"
+        }
+    ]
 
 
 # 重い依存関係を持つモジュールのインポートは後で行う

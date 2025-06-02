@@ -194,26 +194,15 @@ class TestWhisperJobsList:
     @pytest.mark.asyncio
     async def test_list_jobs_success(self, async_test_client, mock_auth_user, mock_environment_variables):
         """ジョブ一覧取得の成功ケース"""
-        with patch("google.cloud.firestore.Client") as mock_firestore, \
-             patch("backend.app.api.whisper.check_and_update_timeout_jobs"), \
+        
+        # check_and_update_timeout_jobsをモック化（問題の原因）
+        async def mock_check_and_update_timeout_jobs(db):
+            """タイムアウトジョブチェック関数のモック"""
+            pass
+            
+        with patch("backend.app.api.whisper.check_and_update_timeout_jobs", side_effect=mock_check_and_update_timeout_jobs), \
              patch("backend.app.api.whisper._get_current_processing_job_count", return_value=0), \
              patch("backend.app.api.whisper._get_env_var", return_value="5"):
-            
-            # モックジョブデータ
-            mock_job_doc = Mock()
-            mock_job_doc.id = "job-123"
-            mock_job_doc.to_dict.return_value = {
-                "user_email": "test-user@example.com",
-                "filename": "test.wav",
-                "status": "completed",
-                "created_at": "2025-05-29T10:00:00Z"
-            }
-            
-            mock_collection = Mock()
-            mock_query = Mock()
-            mock_query.stream.return_value = [mock_job_doc]
-            mock_collection.where.return_value.where.return_value.order_by.return_value.limit.return_value = mock_query
-            mock_firestore.return_value.collection.return_value = mock_collection
             
             response = await async_test_client.get(
                 "/backend/whisper/jobs",
@@ -224,21 +213,20 @@ class TestWhisperJobsList:
             data = response.json()
             assert "jobs" in data
             assert len(data["jobs"]) == 1
-            assert data["jobs"][0]["id"] == "job-123"
+            assert data["jobs"][0]["id"] == "test-doc-id"  # conftest.pyで設定したIDに合わせる
     
     @pytest.mark.asyncio
     async def test_list_jobs_with_status_filter(self, async_test_client, mock_auth_user, mock_environment_variables):
         """ステータスフィルターを使ったジョブ一覧取得"""
-        with patch("google.cloud.firestore.Client") as mock_firestore, \
-             patch("backend.app.api.whisper.check_and_update_timeout_jobs"), \
+        
+        # check_and_update_timeout_jobsをモック化
+        async def mock_check_and_update_timeout_jobs(db):
+            """タイムアウトジョブチェック関数のモック"""
+            pass
+            
+        with patch("backend.app.api.whisper.check_and_update_timeout_jobs", side_effect=mock_check_and_update_timeout_jobs), \
              patch("backend.app.api.whisper._get_current_processing_job_count", return_value=5), \
              patch("backend.app.api.whisper._get_env_var", return_value="5"):
-            
-            mock_collection = Mock()
-            mock_query = Mock()
-            mock_query.stream.return_value = []
-            mock_collection.where.return_value.where.return_value.where.return_value.order_by.return_value.limit.return_value = mock_query
-            mock_firestore.return_value.collection.return_value = mock_collection
             
             response = await async_test_client.get(
                 "/backend/whisper/jobs?status=completed&limit=10",
@@ -305,7 +293,7 @@ class TestWhisperJobOperations:
         """ジョブキャンセルの成功ケース"""
         file_hash = "test-hash-123"
         
-        with patch("backend.app.api.whisper._update_job_status", return_value="job-123"):
+        with patch("backend.app.api.whisper._update_job_status", return_value="test-doc-id"):
             response = await async_test_client.post(
                 f"/backend/whisper/jobs/{file_hash}/cancel",
                 headers={"Authorization": "Bearer test-token"}
@@ -314,26 +302,19 @@ class TestWhisperJobOperations:
             assert response.status_code == 200
             data = response.json()
             assert data["status"] == "canceled"
-            assert data["job_id"] == "job-123"
+            assert data["job_id"] == "test-doc-id"  # conftest.pyで設定したIDに合わせる
     
     @pytest.mark.asyncio
     async def test_retry_job_success(self, async_test_client, mock_auth_user, mock_environment_variables):
         """ジョブ再実行の成功ケース"""
         file_hash = "test-hash-123"
         
-        with patch("google.cloud.firestore.Client") as mock_firestore, \
-             patch("backend.app.api.whisper.trigger_whisper_batch_processing"):
-            
-            mock_job_doc = Mock()
-            mock_job_doc.id = "job-123"
-            mock_job_doc.to_dict.return_value = {"status": "failed"}
-            mock_job_doc.reference = Mock()
-            
-            mock_query = Mock()
-            mock_query.stream.return_value = [mock_job_doc]
-            mock_collection = Mock()
-            mock_collection.where.return_value.where.return_value.limit.return_value = mock_query
-            mock_firestore.return_value.collection.return_value = mock_collection
+        # trigger_whisper_batch_processing を適切にモック化
+        async def mock_trigger_batch_processing(job_id: str, background_tasks):
+            """バッチ処理トリガー関数のモック"""
+            pass
+        
+        with patch("backend.app.api.whisper.trigger_whisper_batch_processing", side_effect=mock_trigger_batch_processing):
             
             response = await async_test_client.post(
                 f"/backend/whisper/jobs/{file_hash}/retry",
@@ -343,6 +324,7 @@ class TestWhisperJobOperations:
             assert response.status_code == 200
             data = response.json()
             assert data["status"] == "queued_for_retry"
+            assert data["job_id"] == "test-doc-id"  # conftest.pyで設定したIDに合わせる
 
 
 class TestWhisperTranscript:
@@ -401,35 +383,18 @@ class TestWhisperTranscript:
             ]
         }
         
-        with patch("google.cloud.firestore.Client") as mock_firestore, \
-             patch("google.cloud.storage.Client") as mock_storage:
-            
-            # Firestoreモック
-            mock_job_doc = Mock()
-            mock_job_doc.id = "job-123"
-            mock_job_doc.reference = Mock()
-            mock_query = Mock()
-            mock_query.stream.return_value = [mock_job_doc]
-            mock_collection = Mock()
-            mock_collection.where.return_value.where.return_value = mock_query
-            mock_firestore.return_value.collection.return_value = mock_collection
-            
-            # GCSモック
-            mock_blob = Mock()
-            mock_bucket = Mock()
-            mock_bucket.blob.return_value = mock_blob
-            mock_storage.return_value.bucket.return_value = mock_bucket
-            
-            response = await async_test_client.post(
-                f"/backend/whisper/jobs/{file_hash}/edit",
-                json=edit_request,
-                headers={"Authorization": "Bearer test-token"}
-            )
-            
-            assert response.status_code == 200
-            data = response.json()
-            assert data["status"] == "success"
-            assert "gcs_path" in data
+        # 既存のmock_gcp_servicesフィクスチャを使用するので、
+        # 個別のモック化は不要。レスポンスを確認するだけ。
+        response = await async_test_client.post(
+            f"/backend/whisper/jobs/{file_hash}/edit",
+            json=edit_request,
+            headers={"Authorization": "Bearer test-token"}
+        )
+        
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "success"
+        assert "gcs_path" in data
 
 
 class TestWhisperSpeakerConfig:
