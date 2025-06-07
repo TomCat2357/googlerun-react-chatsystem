@@ -228,6 +228,113 @@ pytest tests/app/test_specific.py::test_func # 特定テスト実行
 5. **マーカー**: テストスキップ・カテゴリ分け・条件付き実行
 6. **エミュレータ優先**: FirestoreとGCS操作はエミュレータを優先使用
 7. **環境分離**: テスト用プロジェクトIDで本番環境を保護
+8. **🎯 create_autospec + side_effect パターン（強く推奨）**: 安全で制御可能なモック設計
+
+### モック設計の黄金律（強く推奨）
+
+#### **create_autospec() + side_effect パターンの使用**
+
+**このプロジェクトでは、全てのモックに `create_autospec() + side_effect` パターンを強く推奨します。**
+
+```python
+from unittest.mock import create_autospec, patch
+import google.cloud.storage as storage
+
+# ✅ 推奨パターン: create_autospec + side_effect
+def test_gcs_operations():
+    # 実際のクラスからautospecを作成
+    mock_client_class = create_autospec(storage.Client, spec_set=True)
+    
+    # カスタム振る舞いを定義
+    class GCSClientBehavior:
+        def __init__(self):
+            self._buckets = {}
+        
+        def bucket(self, name: str):
+            if not isinstance(name, str) or not name:
+                raise ValueError("バケット名は空文字列にできません")
+            if name not in self._buckets:
+                self._buckets[name] = GCSBucketBehavior(name)
+            return self._buckets[name]
+    
+    # autospecモックにカスタム振る舞いを注入
+    behavior = GCSClientBehavior()
+    mock_client_instance = mock_client_class.return_value
+    mock_client_instance.bucket.side_effect = behavior.bucket
+    
+    with patch('google.cloud.storage.Client', return_value=mock_client_instance):
+        # テスト実行
+        client = storage.Client()
+        
+        # ✅ 存在するメソッドのみ呼び出し可能（autospecの安全性）
+        bucket = client.bucket("test-bucket")
+        
+        # ✅ カスタム振る舞い（状態管理）が動作
+        assert bucket.name == "test-bucket"
+        
+        # ❌ 存在しないメソッドは呼び出せない（autospecの保護）
+        # client.non_existent_method()  # ← AttributeError
+```
+
+#### **なぜこのパターンが推奨されるのか**
+
+1. **型安全性**: 実際のクラス構造に基づくため、存在しないメソッドの呼び出しを防ぐ
+2. **柔軟性**: side_effectでカスタムロジック（状態管理・バリデーション）を実装可能
+3. **保守性**: 実際のAPIが変更されたときにテストで検出できる
+4. **デバッグ性**: エラーが発生したときに原因が明確
+
+#### **禁止パターン**
+
+```python
+# ❌ 禁止: autospec + return_value の併用
+with patch('module.Class', return_value=mock_obj, autospec=True):
+    # InvalidSpecError が発生
+
+# ❌ 非推奨: MagicMock のみ使用
+with patch('module.Class') as mock:
+    mock.return_value = MagicMock()
+    # 存在しないメソッドも呼び出せてしまう
+
+# ❌ 非推奨: plain patch のみ
+with patch('module.function', return_value="test"):
+    # 引数チェックが行われない
+```
+
+#### **実装ガイドライン**
+
+```python
+# ✅ 基本パターン
+mock_class = create_autospec(OriginalClass, spec_set=True)
+mock_instance = mock_class.return_value
+mock_instance.method.side_effect = custom_function
+
+# ✅ 複雑な状態管理が必要な場合
+class CustomBehavior:
+    def __init__(self):
+        self.state = {}
+    
+    def method(self, arg):
+        # カスタムロジック
+        return self.handle_method(arg)
+
+behavior = CustomBehavior()
+mock_instance.method.side_effect = behavior.method
+
+# ✅ エラーパターンのテスト
+def error_side_effect(*args, **kwargs):
+    raise ConnectionError("テスト用エラー")
+
+mock_instance.method.side_effect = error_side_effect
+```
+
+#### **適用対象**
+
+- **全てのGCPクライアント**: Firestore, Cloud Storage, Vertex AI等
+- **外部ライブラリ**: pandas, numpy, requests等
+- **カスタムクラス**: プロジェクト内の重要なクラス
+- **関数モック**: 重要なビジネスロジック関数
+
+この設計により、テストの**安全性・保守性・拡張性**が大幅に向上し、本番環境での不具合を事前に検出できます。
 
 ### エミュレータテストのベストプラクティス
 ```python

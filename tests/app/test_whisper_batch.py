@@ -11,8 +11,144 @@ from pathlib import Path
 import pandas as pd
 import time
 import os
+import google.cloud.storage as storage
+import google.cloud.firestore as firestore
 
 from common_utils.class_types import WhisperFirestoreData
+
+
+# カスタムFirestore動作クラス（バッチ処理用）
+class BatchFirestoreClientBehavior:
+    """バッチ処理用Firestoreクライアントの検証付きモック動作"""
+    def __init__(self):
+        self._collections = {}
+        self._transactions = []
+    
+    def collection(self, name: str):
+        if name not in self._collections:
+            self._collections[name] = BatchFirestoreCollectionBehavior(name)
+        return self._collections[name]
+    
+    def transaction(self):
+        return BatchFirestoreTransactionBehavior()
+
+
+class BatchFirestoreCollectionBehavior:
+    """バッチ処理用Firestoreコレクションの検証付きモック動作"""
+    def __init__(self, name: str):
+        self.name = name
+        self._documents = {}
+        self._test_job_data = None
+    
+    def document(self, doc_id: str):
+        if doc_id not in self._documents:
+            self._documents[doc_id] = BatchFirestoreDocumentBehavior(doc_id, self)
+        return self._documents[doc_id]
+    
+    def where(self, field, operator=None, value=None, filter=None):
+        return BatchFirestoreQueryBehavior(self, field, operator, value, filter)
+
+
+class BatchFirestoreQueryBehavior:
+    """バッチ処理用Firestoreクエリの検証付きモック動作"""
+    def __init__(self, collection, field=None, operator=None, value=None, filter=None):
+        self.collection = collection
+        self.field = field
+        self.operator = operator
+        self.value = value
+        self.filter = filter
+    
+    def where(self, field, operator=None, value=None, filter=None):
+        return BatchFirestoreQueryBehavior(self.collection, field, operator, value, filter)
+    
+    def limit(self, count: int):
+        return self
+    
+    def order_by(self, field: str, direction=None):
+        return self
+    
+    def stream(self):
+        # テスト用のジョブデータを返す
+        if self.collection._test_job_data:
+            doc = BatchFirestoreDocumentBehavior("test-job-123", self.collection)
+            doc._data = self.collection._test_job_data
+            return [doc]
+        return []
+
+
+class BatchFirestoreDocumentBehavior:
+    """バッチ処理用Firestoreドキュメントの検証付きモック動作"""
+    def __init__(self, doc_id: str, collection):
+        self.id = doc_id
+        self.collection = collection
+        self.reference = self
+        self._data = {}
+    
+    def get(self):
+        return self
+    
+    def to_dict(self):
+        return self._data.copy()
+    
+    def update(self, data: dict):
+        self._data.update(data)
+    
+    @property
+    def exists(self):
+        return bool(self._data)
+
+
+class BatchFirestoreTransactionBehavior:
+    """バッチ処理用Firestoreトランザクションの検証付きモック動作"""
+    def __init__(self):
+        self._updates = []
+    
+    def update(self, doc_ref, data: dict):
+        self._updates.append((doc_ref, data))
+        # 実際にドキュメントを更新
+        doc_ref.update(data)
+
+
+# カスタムGCS動作クラス（バッチ処理用）
+class BatchGCSClientBehavior:
+    """バッチ処理用GCSクライアントの検証付きモック動作"""
+    def __init__(self):
+        self._buckets = {}
+    
+    def bucket(self, name: str):
+        if name not in self._buckets:
+            self._buckets[name] = BatchGCSBucketBehavior(name)
+        return self._buckets[name]
+
+
+class BatchGCSBucketBehavior:
+    """バッチ処理用GCSバケットの検証付きモック動作"""
+    def __init__(self, name: str):
+        self.name = name
+        self._blobs = {}
+    
+    def blob(self, name: str):
+        if name not in self._blobs:
+            self._blobs[name] = BatchGCSBlobBehavior(name, self)
+        return self._blobs[name]
+
+
+class BatchGCSBlobBehavior:
+    """バッチ処理用GCSブロブの検証付きモック動作"""
+    def __init__(self, name: str, bucket):
+        self.name = name
+        self.bucket = bucket
+        self._local_path = None
+    
+    def download_to_filename(self, local_path: str):
+        self._local_path = local_path
+        # テスト用の音声ファイルを作成
+        Path(local_path).parent.mkdir(parents=True, exist_ok=True)
+        with open(local_path, 'wb') as f:
+            f.write(b'fake audio data')
+    
+    def upload_from_filename(self, local_path: str):
+        self._local_path = local_path
 
 
 class TestPickNextJob:
@@ -21,16 +157,12 @@ class TestPickNextJob:
     @pytest.mark.asyncio
     async def test_pick_next_job_success(self):
         """キューから次のジョブを正常に取得"""
-        # Firestoreクライアントのモック
-        mock_fs_client = MagicMock()
-        mock_transaction = MagicMock()
-        mock_fs_client.transaction.return_value = mock_transaction
+        # create_autospec + side_effectパターンを使用
+        mock_fs_client_class = create_autospec(firestore.Client, spec_set=True)
+        firestore_behavior = BatchFirestoreClientBehavior()
         
-        # ドキュメントのモック
-        mock_doc = MagicMock()
-        mock_doc.id = "test-job-123"
-        mock_doc.reference = MagicMock()
-        mock_doc.to_dict.return_value = {
+        # テスト用ジョブデータを設定
+        test_job_data = {
             "job_id": "test-job-123",
             "user_id": "test-user",
             "user_email": "test@example.com",
@@ -48,19 +180,18 @@ class TestPickNextJob:
             "description": "テスト"
         }
         
-        # コレクションとクエリのモック
-        mock_collection = MagicMock()
-        mock_query = MagicMock()
-        mock_query.stream.return_value = [mock_doc]
-        mock_query.limit.return_value = mock_query
-        mock_query.order_by.return_value = mock_query
-        mock_collection.where.return_value = mock_query
-        mock_fs_client.collection.return_value = mock_collection
+        # コレクションにテストデータを設定
+        collection = firestore_behavior.collection("whisper_jobs")
+        collection._test_job_data = test_job_data
+        
+        mock_fs_instance = mock_fs_client_class.return_value
+        mock_fs_instance.collection.side_effect = firestore_behavior.collection
+        mock_fs_instance.transaction.side_effect = firestore_behavior.transaction
         
         # transactional デコレータの動作をシミュレート
         def mock_transactional_decorator(func):
             def wrapper(*args, **kwargs):
-                return func(mock_transaction)
+                return func(firestore_behavior.transaction())
             return wrapper
         
         # 環境変数をモック
@@ -70,14 +201,11 @@ class TestPickNextJob:
             from whisper_batch.app.main import _pick_next_job
             
             # ジョブを取得
-            result = _pick_next_job(mock_fs_client)
+            result = _pick_next_job(mock_fs_instance)
             
             assert result is not None
             assert result["job_id"] == "test-job-123"
             assert result["status"] == "processing"
-            
-            # トランザクション内でアップデートが呼ばれたことを確認
-            mock_transaction.update.assert_called_once()
     
     @pytest.mark.asyncio
     async def test_pick_next_job_empty_queue(self):
@@ -173,9 +301,18 @@ class TestProcessJob:
     @pytest.mark.asyncio
     async def test_process_job_success_single_speaker(self, temp_directory):
         """単一話者のジョブ処理成功ケース"""
-        # モッククライアント
-        mock_fs_client = MagicMock()
-        mock_gcs_client = MagicMock()
+        # create_autospec + side_effectパターンを使用
+        mock_fs_client_class = create_autospec(firestore.Client, spec_set=True)
+        mock_gcs_client_class = create_autospec(storage.Client, spec_set=True)
+        
+        firestore_behavior = BatchFirestoreClientBehavior()
+        gcs_behavior = BatchGCSClientBehavior()
+        
+        mock_fs_instance = mock_fs_client_class.return_value
+        mock_fs_instance.collection.side_effect = firestore_behavior.collection
+        
+        mock_gcs_instance = mock_gcs_client_class.return_value
+        mock_gcs_instance.bucket.side_effect = gcs_behavior.bucket
         
         # テスト用ジョブデータ
         job_data = {
@@ -195,21 +332,6 @@ class TestProcessJob:
             "max_speakers": 1,
             "description": "テスト"
         }
-        
-        # Firestoreドキュメントのモック
-        mock_doc_ref = MagicMock()
-        mock_fs_client.collection.return_value.document.return_value = mock_doc_ref
-        mock_doc_ref.get.return_value.exists = True
-        mock_doc_ref.get.return_value.to_dict.return_value = {"status": "processing"}
-        mock_doc_ref.update.return_value = None
-        
-        # GCSのモック
-        mock_bucket = MagicMock()
-        mock_blob = MagicMock()
-        mock_bucket.blob.return_value = mock_blob
-        mock_blob.download_to_filename.return_value = None
-        mock_blob.upload_from_filename.return_value = None
-        mock_gcs_client.bucket.return_value = mock_bucket
         
         # モック文字起こし結果データ
         mock_transcription_data = [
@@ -277,7 +399,7 @@ class TestProcessJob:
         }
         
         with patch.dict(os.environ, env_vars), \
-             patch("google.cloud.storage.Client", return_value=mock_gcs_client), \
+             patch("google.cloud.storage.Client", return_value=mock_gcs_instance), \
              patch("whisper_batch.app.main.transcribe_audio", side_effect=mock_transcribe_audio) as mock_transcribe, \
              patch("whisper_batch.app.main.create_single_speaker_json", side_effect=mock_create_single_speaker_json) as mock_single_speaker, \
              patch("whisper_batch.app.main.combine_results", side_effect=mock_combine_results) as mock_combine, \

@@ -15,10 +15,148 @@ from fastapi.testclient import TestClient
 import os
 import tempfile
 from pathlib import Path
+import google.cloud.storage as storage
+import google.cloud.firestore as firestore
 
 from common_utils.class_types import WhisperUploadRequest, WhisperEditRequest, WhisperSegment, WhisperSpeakerConfigRequest, SpeakerConfigItem
 from backend.app.api.whisper import router
 from backend.app.main import app
+
+
+# カスタムGCSクライアント動作クラス
+class GCSClientBehavior:
+    """Google Cloud Storageクライアントの検証付きモック動作"""
+    def __init__(self):
+        self._buckets = {}
+    
+    def bucket(self, name: str):
+        if not isinstance(name, str) or not name:
+            raise ValueError("バケット名は空文字列にできません")
+        if name not in self._buckets:
+            self._buckets[name] = GCSBucketBehavior(name)
+        return self._buckets[name]
+
+
+class GCSBucketBehavior:
+    """Google Cloud Storageバケットの検証付きモック動作"""
+    def __init__(self, name: str):
+        self.name = name
+        self._blobs = {}
+    
+    def blob(self, name: str):
+        if name not in self._blobs:
+            self._blobs[name] = GCSBlobBehavior(name, self)
+        return self._blobs[name]
+
+
+class GCSBlobBehavior:
+    """Google Cloud StorageブロブのカスタムモックBehavior"""
+    def __init__(self, name: str, bucket):
+        self.name = name
+        self.bucket = bucket
+        self._content = None
+        self._uploaded = False
+        self.content_type = "audio/wav"
+        self.size = 44100
+    
+    def generate_signed_url(self, expiration=3600):
+        return f"https://storage.googleapis.com/signed-url/{self.bucket.name}/{self.name}"
+    
+    def exists(self):
+        return self._uploaded
+    
+    def reload(self):
+        pass
+    
+    def download_as_text(self):
+        if not self._uploaded:
+            raise Exception("ファイルがアップロードされていません")
+        return self._content or ""
+    
+    def upload_from_string(self, data: str, content_type: str = None):
+        if len(data) > 100 * 1024 * 1024:  # 100MB制限
+            raise Exception("ファイルサイズが大きすぎます")
+        self._content = data
+        self._uploaded = True
+        if content_type:
+            self.content_type = content_type
+
+
+# カスタムFirestoreクライアント動作クラス
+class FirestoreClientBehavior:
+    """Firestoreクライアントの検証付きモック動作"""
+    def __init__(self):
+        self._collections = {}
+    
+    def collection(self, name: str):
+        if name not in self._collections:
+            self._collections[name] = FirestoreCollectionBehavior(name)
+        return self._collections[name]
+
+
+class FirestoreCollectionBehavior:
+    """Firestoreコレクションの検証付きモック動作"""
+    def __init__(self, name: str):
+        self.name = name
+        self._documents = {}
+    
+    def add(self, data: dict):
+        doc_id = str(uuid.uuid4())
+        doc_ref = FirestoreDocumentBehavior(doc_id, self)
+        doc_ref.set(data)
+        return (None, doc_ref)
+    
+    def where(self, field, operator=None, value=None, filter=None):
+        return FirestoreQueryBehavior(self, field, operator, value, filter)
+    
+    def document(self, doc_id: str):
+        if doc_id not in self._documents:
+            self._documents[doc_id] = FirestoreDocumentBehavior(doc_id, self)
+        return self._documents[doc_id]
+
+
+class FirestoreQueryBehavior:
+    """Firestoreクエリの検証付きモック動作"""
+    def __init__(self, collection, field=None, operator=None, value=None, filter=None):
+        self.collection = collection
+        self.field = field
+        self.operator = operator
+        self.value = value
+        self.filter = filter
+    
+    def where(self, field, operator=None, value=None, filter=None):
+        return FirestoreQueryBehavior(self.collection, field, operator, value, filter)
+    
+    def stream(self):
+        # テスト用の基本データを返す
+        doc = FirestoreDocumentBehavior("test-doc-id", self.collection)
+        doc._data = {"file_hash": "test-hash-123", "status": "completed"}
+        return [doc]
+
+
+class FirestoreDocumentBehavior:
+    """Firestoreドキュメントの検証付きモック動作"""
+    def __init__(self, doc_id: str, collection):
+        self.id = doc_id
+        self.collection = collection
+        self.reference = self
+        self._data = {}
+    
+    def set(self, data: dict):
+        self._data = data.copy()
+    
+    def update(self, data: dict):
+        self._data.update(data)
+    
+    def get(self):
+        return self
+    
+    def to_dict(self):
+        return self._data.copy()
+    
+    @property
+    def exists(self):
+        return bool(self._data)
 
 
 class TestWhisperUploadUrl:
@@ -26,14 +164,14 @@ class TestWhisperUploadUrl:
     
     def test_create_upload_url_success(self, test_client, mock_auth_user, mock_environment_variables):
         """署名付きURL生成の成功ケース"""
-        with patch("google.cloud.storage.Client") as mock_storage:
-            # GCSクライアントのモック
-            mock_bucket = Mock()
-            mock_blob = Mock()
-            mock_blob.generate_signed_url.return_value = "https://storage.googleapis.com/signed-url"
-            mock_bucket.blob.return_value = mock_blob
-            mock_storage.return_value.bucket.return_value = mock_bucket
-            
+        # create_autospec + side_effectパターンを使用
+        mock_client_class = create_autospec(storage.Client, spec_set=True)
+        behavior = GCSClientBehavior()
+        
+        mock_client_instance = mock_client_class.return_value
+        mock_client_instance.bucket.side_effect = behavior.bucket
+        
+        with patch("google.cloud.storage.Client", return_value=mock_client_instance):
             response = test_client.post(
                 "/backend/whisper/upload_url",
                 json={"content_type": "audio/wav"},
@@ -44,7 +182,7 @@ class TestWhisperUploadUrl:
             data = response.json()
             assert "upload_url" in data
             assert "object_name" in data
-            assert data["upload_url"] == "https://storage.googleapis.com/signed-url"
+            assert data["upload_url"].startswith("https://storage.googleapis.com/signed-url")
             assert data["object_name"].startswith("whisper/test-user-123/")
     
     def test_create_upload_url_without_auth(self, test_client, mock_environment_variables):
@@ -84,28 +222,24 @@ class TestWhisperUpload:
         mock_process.communicate.return_value = (b"1.0", b"")  # duration=1.0秒
         mock_process.returncode = 0
         
+        # create_autospec + side_effectパターンでGCSとFirestoreをモック
+        mock_gcs_client_class = create_autospec(storage.Client, spec_set=True)
+        mock_firestore_client_class = create_autospec(firestore.Client, spec_set=True)
+        
+        gcs_behavior = GCSClientBehavior()
+        firestore_behavior = FirestoreClientBehavior()
+        
+        mock_gcs_instance = mock_gcs_client_class.return_value
+        mock_gcs_instance.bucket.side_effect = gcs_behavior.bucket
+        
+        mock_firestore_instance = mock_firestore_client_class.return_value
+        mock_firestore_instance.collection.side_effect = firestore_behavior.collection
+        
         with patch('subprocess.Popen', return_value=mock_process), \
-             patch("google.cloud.storage.Client") as mock_storage, \
-             patch("google.cloud.firestore.Client") as mock_firestore, \
+             patch("google.cloud.storage.Client", return_value=mock_gcs_instance), \
+             patch("google.cloud.firestore.Client", return_value=mock_firestore_instance), \
              patch("backend.app.api.whisper.enqueue_job_atomic") as mock_enqueue, \
              patch("fastapi.BackgroundTasks.add_task") as mock_add_task:
-            
-            # GCSクライアントのモック
-            mock_bucket = Mock()
-            mock_blob = Mock()
-            mock_blob.exists.return_value = True
-            mock_blob.content_type = "audio/wav"
-            mock_blob.size = 44100
-            mock_blob.reload.return_value = None
-            mock_bucket.blob.return_value = mock_blob
-            mock_storage.return_value.bucket.return_value = mock_bucket
-            
-            # Firestoreのモック
-            mock_doc_ref = Mock()
-            mock_doc_ref.id = "test-job-123"
-            mock_collection = Mock()
-            mock_collection.add.return_value = (None, mock_doc_ref)
-            mock_firestore.return_value.collection.return_value = mock_collection
             
             # ジョブエンキューのモック
             mock_enqueue.return_value = None
@@ -139,16 +273,24 @@ class TestWhisperUpload:
             "original_name": "large-audio.wav"
         }
         
-        with patch("google.cloud.storage.Client") as mock_storage:
-            mock_bucket = Mock()
-            mock_blob = Mock()
-            mock_blob.exists.return_value = True
-            mock_blob.content_type = "audio/wav"
-            mock_blob.size = 200 * 1024 * 1024  # 200MB（制限を超える）
-            mock_blob.reload.return_value = None
-            mock_bucket.blob.return_value = mock_blob
-            mock_storage.return_value.bucket.return_value = mock_bucket
-            
+        # create_autospec + side_effectパターンを使用
+        mock_gcs_client_class = create_autospec(storage.Client, spec_set=True)
+        gcs_behavior = GCSClientBehavior()
+        
+        # ファイルサイズが大きいblobを設定
+        large_blob = GCSBlobBehavior("large-audio.wav", gcs_behavior.bucket("test-bucket"))
+        large_blob.size = 200 * 1024 * 1024  # 200MB（制限を超える）
+        large_blob._uploaded = True
+        
+        def custom_bucket_behavior(name):
+            bucket = gcs_behavior.bucket(name)
+            bucket._blobs["large-audio.wav"] = large_blob
+            return bucket
+        
+        mock_gcs_instance = mock_gcs_client_class.return_value
+        mock_gcs_instance.bucket.side_effect = custom_bucket_behavior
+        
+        with patch("google.cloud.storage.Client", return_value=mock_gcs_instance):
             response = await async_test_client.post(
                 "/backend/whisper",
                 json=upload_request,
@@ -168,16 +310,25 @@ class TestWhisperUpload:
             "original_name": "test-document.pdf"
         }
         
-        with patch("google.cloud.storage.Client") as mock_storage:
-            mock_bucket = Mock()
-            mock_blob = Mock()
-            mock_blob.exists.return_value = True
-            mock_blob.content_type = "application/pdf"
-            mock_blob.size = 1024
-            mock_blob.reload.return_value = None
-            mock_bucket.blob.return_value = mock_blob
-            mock_storage.return_value.bucket.return_value = mock_bucket
-            
+        # create_autospec + side_effectパターンを使用
+        mock_gcs_client_class = create_autospec(storage.Client, spec_set=True)
+        gcs_behavior = GCSClientBehavior()
+        
+        # 無効フォーマットのblobを設定
+        invalid_blob = GCSBlobBehavior("test-document.pdf", gcs_behavior.bucket("test-bucket"))
+        invalid_blob.content_type = "application/pdf"
+        invalid_blob.size = 1024
+        invalid_blob._uploaded = True
+        
+        def custom_bucket_behavior(name):
+            bucket = gcs_behavior.bucket(name)
+            bucket._blobs["test-document.pdf"] = invalid_blob
+            return bucket
+        
+        mock_gcs_instance = mock_gcs_client_class.return_value
+        mock_gcs_instance.bucket.side_effect = custom_bucket_behavior
+        
+        with patch("google.cloud.storage.Client", return_value=mock_gcs_instance):
             response = await async_test_client.post(
                 "/backend/whisper",
                 json=upload_request,
@@ -248,21 +399,33 @@ class TestWhisperJobOperations:
         """ジョブ詳細取得の成功ケース"""
         file_hash = "test-hash-123"
         
-        with patch("google.cloud.firestore.Client") as mock_firestore:
-            mock_job_doc = Mock()
-            mock_job_doc.id = "job-123"
-            mock_job_doc.to_dict.return_value = {
-                "file_hash": file_hash,
-                "filename": "test.wav",
-                "status": "completed"
-            }
-            
-            mock_query = Mock()
-            mock_query.stream.return_value = [mock_job_doc]
-            mock_collection = Mock()
-            mock_collection.where.return_value.where.return_value = mock_query
-            mock_firestore.return_value.collection.return_value = mock_collection
-            
+        # create_autospec + side_effectパターンを使用
+        mock_firestore_client_class = create_autospec(firestore.Client, spec_set=True)
+        firestore_behavior = FirestoreClientBehavior()
+        
+        # 特定のジョブデータを返すように設定
+        class CustomQueryBehavior(FirestoreQueryBehavior):
+            def stream(self):
+                doc = FirestoreDocumentBehavior("job-123", self.collection)
+                doc._data = {
+                    "file_hash": file_hash,
+                    "filename": "test.wav",
+                    "status": "completed"
+                }
+                return [doc]
+        
+        class CustomCollectionBehavior(FirestoreCollectionBehavior):
+            def where(self, field, operator=None, value=None, filter=None):
+                query = CustomQueryBehavior(self, field, operator, value, filter)
+                return query
+        
+        def custom_collection_behavior(name):
+            return CustomCollectionBehavior(name)
+        
+        mock_firestore_instance = mock_firestore_client_class.return_value
+        mock_firestore_instance.collection.side_effect = custom_collection_behavior
+        
+        with patch("google.cloud.firestore.Client", return_value=mock_firestore_instance):
             response = await async_test_client.get(
                 f"/backend/whisper/jobs/{file_hash}",
                 headers={"Authorization": "Bearer test-token"}
@@ -278,13 +441,25 @@ class TestWhisperJobOperations:
         """存在しないジョブの取得"""
         file_hash = "nonexistent-hash"
         
-        with patch("google.cloud.firestore.Client") as mock_firestore:
-            mock_query = Mock()
-            mock_query.stream.return_value = []
-            mock_collection = Mock()
-            mock_collection.where.return_value.where.return_value = mock_query
-            mock_firestore.return_value.collection.return_value = mock_collection
-            
+        # create_autospec + side_effectパターンを使用
+        mock_firestore_client_class = create_autospec(firestore.Client, spec_set=True)
+        
+        # 空の結果を返すQuery動作
+        class EmptyQueryBehavior(FirestoreQueryBehavior):
+            def stream(self):
+                return []
+        
+        class EmptyCollectionBehavior(FirestoreCollectionBehavior):
+            def where(self, field, operator=None, value=None, filter=None):
+                return EmptyQueryBehavior(self, field, operator, value, filter)
+        
+        def empty_collection_behavior(name):
+            return EmptyCollectionBehavior(name)
+        
+        mock_firestore_instance = mock_firestore_client_class.return_value
+        mock_firestore_instance.collection.side_effect = empty_collection_behavior
+        
+        with patch("google.cloud.firestore.Client", return_value=mock_firestore_instance):
             response = await async_test_client.get(
                 f"/backend/whisper/jobs/{file_hash}",
                 headers={"Authorization": "Bearer test-token"}
