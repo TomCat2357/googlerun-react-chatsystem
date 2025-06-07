@@ -54,9 +54,9 @@ except KeyError:
     )
 # PROCESS_TIMEOUT_SECONDS と AUDIO_TIMEOUT_MULTIPLIER の読み込みは backend 側に移管するため削除
 # PROCESS_TIMEOUT_SECONDS と AUDIO_TIMEOUT_MULTIPLIER の読み込みは backend 側に移管するため削除
-POLL_INTERVAL_SECONDS: int = int(
-    os.environ.get("POLL_INTERVAL_SECONDS", "10") # Default if not set
-)
+def get_poll_interval_seconds() -> int:
+    """POLL_INTERVAL_SECONDS環境変数を動的に取得"""
+    return int(os.environ.get("POLL_INTERVAL_SECONDS", "10"))
 HF_AUTH_TOKEN: str = os.environ["HF_AUTH_TOKEN"]
 DEVICE: str = os.environ["DEVICE"].lower()
 USE_GPU: bool = DEVICE == "cuda"
@@ -315,13 +315,13 @@ def main_loop() -> None:
                 _process_job(db, job)
             else:
                 # logger.info("キューが空です。待機…") # ログ出力を抑制する場合
-                time.sleep(POLL_INTERVAL_SECONDS)
+                time.sleep(get_poll_interval_seconds())
         except KeyboardInterrupt:
             logger.info("SIGINT 受信。ワーカーを終了します")
             break
         except Exception as e:
             logger.error(f"Main loop error: {e}\n{traceback.format_exc()}")
-            time.sleep(POLL_INTERVAL_SECONDS)
+            time.sleep(get_poll_interval_seconds())
 
 if __name__ == "__main__":
     # 常にワーカーモード (main_loop) を実行

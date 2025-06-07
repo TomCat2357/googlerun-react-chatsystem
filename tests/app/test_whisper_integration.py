@@ -147,9 +147,9 @@ class TestWhisperIntegrationWorkflow:
         with patch.dict(os.environ, env_vars), \
              patch("google.cloud.storage.Client", return_value=mock_gcs_client), \
              patch("google.cloud.firestore.Client", return_value=mock_fs_client), \
-             patch("whisper_batch.app.transcribe.transcribe_audio", side_effect=mock_transcribe_audio) as mock_transcribe, \
+             patch("whisper_batch.app.main.transcribe_audio", side_effect=mock_transcribe_audio) as mock_transcribe, \
              patch("whisper_batch.app.main.create_single_speaker_json", side_effect=mock_create_single_speaker_json) as mock_single_speaker, \
-             patch("whisper_batch.app.combine_results.combine_results", side_effect=mock_combine_results) as mock_combine, \
+             patch("whisper_batch.app.main.combine_results", side_effect=mock_combine_results) as mock_combine, \
              patch("shutil.rmtree"):
             
             # 1. Firestoreにジョブを登録（モック）
@@ -163,10 +163,9 @@ class TestWhisperIntegrationWorkflow:
             _process_job(mock_fs_client, job_data.model_dump())
             
             # 4. 関数が適切に呼ばれたことを確認
-            # NOTE: 実際の関数が実行されているため、モックのアサーションをコメントアウト
-            # mock_transcribe.assert_called_once()
-            # mock_single_speaker.assert_called_once()
-            # combine_resultsは実際に実行されているため、モックのアサーションはスキップ
+            mock_transcribe.assert_called_once()
+            mock_single_speaker.assert_called_once()
+            mock_combine.assert_called_once()
             
             # 5. 処理が成功したことをログとGCSアップロードで確認
             # GCSへのアップロードが呼ばれたことを確認

@@ -65,7 +65,7 @@ class TestPickNextJob:
         
         # 環境変数をモック
         with patch.dict(os.environ, {"COLLECTION": "whisper_jobs"}), \
-             patch("google.cloud.firestore.transactional", side_effect=mock_transactional_decorator, autospec=True):
+             patch("google.cloud.firestore.transactional", side_effect=mock_transactional_decorator):
             
             from whisper_batch.app.main import _pick_next_job
             
@@ -277,21 +277,21 @@ class TestProcessJob:
         }
         
         with patch.dict(os.environ, env_vars), \
-             patch("google.cloud.storage.Client", return_value=mock_gcs_client, autospec=True), \
-             patch("whisper_batch.app.transcribe.transcribe_audio", side_effect=mock_transcribe_audio, autospec=True) as mock_transcribe, \
-             patch("whisper_batch.app.main.create_single_speaker_json", side_effect=mock_create_single_speaker_json, autospec=True) as mock_single_speaker, \
-             patch("whisper_batch.app.combine_results.combine_results", side_effect=mock_combine_results, autospec=True) as mock_combine, \
-             patch("shutil.rmtree", autospec=True):
+             patch("google.cloud.storage.Client", return_value=mock_gcs_client), \
+             patch("whisper_batch.app.main.transcribe_audio", side_effect=mock_transcribe_audio) as mock_transcribe, \
+             patch("whisper_batch.app.main.create_single_speaker_json", side_effect=mock_create_single_speaker_json) as mock_single_speaker, \
+             patch("whisper_batch.app.main.combine_results", side_effect=mock_combine_results) as mock_combine, \
+             patch("shutil.rmtree"):
             
             from whisper_batch.app.main import _process_job
             
             # ジョブ処理を実行
             _process_job(mock_fs_client, job_data)
             
-            # モック関数の呼び出し確認（実際の処理が動作するため、呼び出し回数は柔軟に確認）
-            # mock_transcribe.assert_called_once()  # 実際のtranscribe_audioが呼ばれる場合があるためコメントアウト
-            # mock_single_speaker.assert_called_once()  # 実際のcreate_single_speaker_jsonが呼ばれる場合があるためコメントアウト
-            # combine_resultsは実際の関数が実行される場合があるためモックのチェックはスキップ
+            # モック関数の呼び出し確認
+            mock_transcribe.assert_called_once()
+            mock_single_speaker.assert_called_once()
+            mock_combine.assert_called_once()
             
             # Firestoreの更新が呼ばれたことを確認（成功ステータス）
             mock_doc_ref.update.assert_called()
@@ -416,9 +416,9 @@ class TestProcessJob:
         
         with patch.dict(os.environ, env_vars), \
              patch("google.cloud.storage.Client", return_value=mock_gcs_client), \
-             patch("whisper_batch.app.transcribe.transcribe_audio", side_effect=mock_transcribe_audio) as mock_transcribe, \
+             patch("whisper_batch.app.main.transcribe_audio", side_effect=mock_transcribe_audio) as mock_transcribe, \
              patch("whisper_batch.app.diarize.diarize_audio", side_effect=mock_diarize_audio) as mock_diarize, \
-             patch("whisper_batch.app.combine_results.combine_results", side_effect=mock_combine_results) as mock_combine, \
+             patch("whisper_batch.app.main.combine_results", side_effect=mock_combine_results) as mock_combine, \
              patch("torchaudio.load", return_value=(None, None)), \
              patch("shutil.rmtree"):
             
