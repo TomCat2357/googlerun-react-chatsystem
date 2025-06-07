@@ -352,7 +352,7 @@ echo "Whisperテスト改善完了レポート" > ./ContextSave/whisper_test_imp
 
 ### 参考ファイル
 - `./.claude/KnowledgeTransfer.txt` - 保存形式の詳細ガイド
-- 過去の保存例: `./ContextSave/` 内の既存ファイル
+- 過去の保存例: `./ContextSave/` 内の既存ファイルのうち、最近の（created_atが最新の）ファイルを参照
 
 ### 重要事項
 - **詳細記録**: エラーログ、コードスニペット、実行結果を可能な限り詳細に記録
