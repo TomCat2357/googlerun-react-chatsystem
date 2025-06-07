@@ -120,7 +120,7 @@ pytest tests/app/test_specific.py::test_func # 特定テスト実行
 
 #### ファイル命名規則
 ```
-./ContextSave/[作業内容]_[YYYYMMDD].md
+./ContextSave/[作業内容]_[yyyyMMdd]_[HHmmss].md
 ```
 
 #### 必須セクション構成
@@ -134,7 +134,7 @@ pytest tests/app/test_specific.py::test_func # 特定テスト実行
 #### 実行例
 ```bash
 # テスト改善完了時の保存例
-echo "Whisperテスト改善完了レポート" > ./ContextSave/whisper_test_improvement_20250607.md
+echo "Whisperテスト改善完了レポート" > ./ContextSave/whisper_test_improvement_20250607_110204.md
 ```
 
 ### 参考ファイル
