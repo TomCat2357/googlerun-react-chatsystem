@@ -11,7 +11,7 @@ import json
 import uuid
 import sys
 from pathlib import Path
-from typing import Dict, Any, Generator, AsyncGenerator
+from typing import Dict, Any, Generator, AsyncGenerator, Optional
 from unittest.mock import Mock, patch, MagicMock
 
 import numpy as np
@@ -415,9 +415,212 @@ def mock_environment_variables():
         yield env_vars
 
 
+# 強化されたGCSモック実装
+class EnhancedGCSBlob:
+    """本番環境に近いGCS Blobシミュレーター"""
+    
+    def __init__(self, bucket_name: str, blob_name: str):
+        self.bucket_name = bucket_name
+        self.blob_name = blob_name
+        self._content: Optional[bytes] = None
+        self._content_type: str = "application/octet-stream"
+        self._size: int = 0
+        self._exists: bool = False
+        
+    @property
+    def name(self) -> str:
+        return self.blob_name
+        
+    @property
+    def content_type(self) -> str:
+        return self._content_type
+        
+    @content_type.setter
+    def content_type(self, value: str):
+        self._content_type = value
+        
+    @property
+    def size(self) -> int:
+        return self._size
+        
+    def exists(self, **kwargs) -> bool:
+        return self._exists
+        
+    def upload_from_string(self, data: str, content_type: Optional[str] = None, **kwargs):
+        if not isinstance(data, (str, bytes)):
+            raise TypeError(f"Expected str or bytes, got {type(data)}")
+        self._content = data.encode() if isinstance(data, str) else data
+        self._size = len(self._content)
+        self._exists = True
+        if content_type:
+            self._content_type = content_type
+            
+    def upload_from_filename(self, filename: str, content_type: Optional[str] = None, **kwargs):
+        if not isinstance(filename, str):
+            raise TypeError(f"filename must be str, got {type(filename)}")
+        if os.path.exists(filename):
+            with open(filename, 'rb') as f:
+                self._content = f.read()
+            self._size = len(self._content)
+            self._exists = True
+            if filename.endswith('.wav'):
+                self._content_type = 'audio/wav'
+            elif filename.endswith('.json'):
+                self._content_type = 'application/json'
+            elif content_type:
+                self._content_type = content_type
+        else:
+            raise FileNotFoundError(f"File {filename} not found")
+            
+    def download_as_text(self, encoding: str = 'utf-8', **kwargs) -> str:
+        if not self._exists:
+            raise Exception(f"Blob {self.blob_name} does not exist")
+        return self._content.decode(encoding) if self._content else ""
+        
+    def download_to_filename(self, filename: str, **kwargs):
+        if not isinstance(filename, str):
+            raise TypeError(f"filename must be str, got {type(filename)}")
+        if not self._exists:
+            raise Exception(f"Blob {self.blob_name} does not exist")
+        os.makedirs(os.path.dirname(filename), exist_ok=True)
+        with open(filename, 'wb') as f:
+            f.write(self._content or b'')
+            
+    def delete(self, **kwargs):
+        self._exists = False
+        self._content = None
+        self._size = 0
+        
+    def generate_signed_url(self, expiration=None, method: str = "GET", **kwargs) -> str:
+        if method not in ["GET", "POST", "PUT", "DELETE"]:
+            raise ValueError(f"Invalid method: {method}")
+        return f"https://storage.googleapis.com/{self.bucket_name}/{self.blob_name}?signed=true"
+        
+    def reload(self, **kwargs):
+        pass
+
+
+class EnhancedGCSBucket:
+    """本番環境に近いGCS Bucketシミュレーター"""
+    
+    def __init__(self, name: str):
+        self.name = name
+        self._blobs: Dict[str, EnhancedGCSBlob] = {}
+        
+    def blob(self, blob_name: str, **kwargs) -> EnhancedGCSBlob:
+        if not isinstance(blob_name, str):
+            raise TypeError(f"blob_name must be str, got {type(blob_name)}")
+        if blob_name not in self._blobs:
+            self._blobs[blob_name] = EnhancedGCSBlob(self.name, blob_name)
+        return self._blobs[blob_name]
+
+
+class EnhancedGCSClient:
+    """本番環境に近いGCS Clientシミュレーター"""
+    
+    def __init__(self, project: Optional[str] = None, **kwargs):
+        self.project = project
+        self._buckets: Dict[str, EnhancedGCSBucket] = {}
+        
+    def bucket(self, bucket_name: str, **kwargs) -> EnhancedGCSBucket:
+        if not isinstance(bucket_name, str):
+            raise TypeError(f"bucket_name must be str, got {type(bucket_name)}")
+        if bucket_name not in self._buckets:
+            self._buckets[bucket_name] = EnhancedGCSBucket(bucket_name)
+        return self._buckets[bucket_name]
+
+
+@pytest.fixture
+def enhanced_gcs_client() -> EnhancedGCSClient:
+    """強化されたGCSクライアントのフィクスチャ"""
+    client = EnhancedGCSClient(project=TEST_PROJECT_ID)
+    bucket = client.bucket(TEST_BUCKET_NAME)
+    audio_blob = bucket.blob("temp/test-audio.wav")
+    audio_blob.upload_from_string(b"fake_audio_data", content_type="audio/wav")
+    return client
+
+
+@pytest.fixture
+def enhanced_gcp_services(enhanced_gcs_client):
+    """強化されたGCPサービスの包括的なモック（autospec付き）"""
+    
+    # 既存のFirestoreモック（簡略化）
+    mock_firestore_client = MagicMock()
+    mock_collection = MagicMock()
+    mock_document = MagicMock()
+    mock_query = MagicMock()
+    
+    complete_job_data = {
+        "job_id": "test-doc-id",
+        "user_id": TEST_USER["uid"],
+        "user_email": TEST_USER["email"],
+        "filename": "test-audio.wav",
+        "gcs_bucket_name": TEST_BUCKET_NAME,
+        "audio_size": 44100,
+        "audio_duration_ms": 1000,
+        "file_hash": "test-hash-123",
+        "status": "completed",
+        "created_at": "2025-06-01T10:00:00Z",
+        "updated_at": "2025-06-01T10:05:00Z"
+    }
+    
+    mock_document.id = "test-doc-id"
+    mock_document.exists = True
+    mock_document.to_dict.return_value = complete_job_data
+    mock_document.reference = MagicMock()
+    mock_document.reference.update.return_value = None
+    mock_document.get.return_value = mock_document
+    
+    mock_query.stream.return_value = [mock_document]
+    mock_query.limit.return_value = mock_query
+    mock_query.order_by.return_value = mock_query
+    mock_query.where.return_value = mock_query
+    
+    def mock_document_method(doc_id):
+        doc_ref = MagicMock()
+        doc_ref.id = doc_id
+        doc_ref.exists = True
+        doc_ref.to_dict.return_value = complete_job_data
+        doc_ref.get.return_value = doc_ref
+        doc_ref.reference = doc_ref
+        doc_ref.update.return_value = None
+        return doc_ref
+    
+    mock_collection.document = mock_document_method
+    mock_collection.where.return_value = mock_query
+    mock_collection.add.return_value = (None, mock_document.reference)
+    
+    mock_firestore_client.collection.return_value = mock_collection
+    mock_firestore_client.batch.return_value = MagicMock()
+    mock_firestore_client.transaction.return_value = MagicMock()
+    
+    # Pub/Sub クライアントのモック（autospec付き）
+    mock_pubsub_client = MagicMock()
+    mock_pubsub_client.topic_path.return_value = f"projects/{TEST_PROJECT_ID}/topics/whisper-queue"
+    mock_publish_future = MagicMock()
+    mock_publish_future.result.return_value = "message-id-123"
+    mock_pubsub_client.publish.return_value = mock_publish_future
+    
+    with patch.multiple(
+        'google.cloud.storage',
+        Client=MagicMock(return_value=enhanced_gcs_client)
+    ), patch.multiple(
+        'google.cloud.firestore',
+        Client=MagicMock(return_value=mock_firestore_client)
+    ), patch.multiple(
+        'google.cloud.pubsub_v1',
+        PublisherClient=MagicMock(return_value=mock_pubsub_client)
+    ):
+        yield {
+            "storage": enhanced_gcs_client,
+            "firestore": mock_firestore_client,
+            "pubsub": mock_pubsub_client
+        }
+
+
 @pytest.fixture
 def mock_gcp_services():
-    """GCPサービスの包括的なモック"""
+    """GCPサービスの包括的なモック（従来版との互換性維持）"""
     
     # Google Cloud Storageモック
     mock_gcs_client = MagicMock()
@@ -525,12 +728,20 @@ def mock_gcp_services():
 
 @pytest.fixture 
 def mock_audio_processing():
-    """音声処理関連のモック"""
-    with patch('app.core.audio_utils.probe_duration', return_value=1.0), \
-         patch('app.core.audio_utils.convert_audio_to_wav_16k_mono'), \
+    """音声処理関連のモック（autospec付き）"""
+    
+    # subprocess.Popenのautospecモック
+    mock_process = MagicMock()
+    mock_process.communicate.return_value = (b"1.0", b"")  # duration=1.0秒
+    mock_process.returncode = 0
+    
+    with patch('subprocess.Popen', return_value=mock_process), \
+         patch('backend.app.core.audio_utils.probe_duration', return_value=1.0), \
+         patch('backend.app.core.audio_utils.convert_audio_to_wav_16k_mono'), \
          patch('os.path.getsize', return_value=44100), \
          patch('os.remove'), \
-         patch('tempfile.NamedTemporaryFile') as mock_tempfile:
+         patch('tempfile.NamedTemporaryFile') as mock_tempfile, \
+         patch('shutil.which', return_value='/usr/bin/ffprobe'):  # ffprobeが存在することをシミュレート
         
         # 一時ファイルのモック設定
         mock_temp_file = MagicMock()
@@ -539,7 +750,8 @@ def mock_audio_processing():
         
         yield {
             "probe_duration": 1.0,
-            "temp_file": mock_temp_file
+            "temp_file": mock_temp_file,
+            "process": mock_process
         }
 
 
