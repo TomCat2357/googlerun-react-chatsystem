@@ -110,7 +110,7 @@ pytest tests/app/test_specific.py::test_func # 特定テスト実行
 ## ナレッジ管理とコンテキスト保存
 
 ### 作業記録の保存方法
-重要な作業完了時は `./.claude/ContextSave/` に結果を保存すること。以下の形式に従う：
+重要な作業完了時は `./ContextSave/` に結果を保存すること。以下の形式に従う：
 
 #### 保存タイミング
 - 大きなバグ修正完了時
@@ -120,7 +120,7 @@ pytest tests/app/test_specific.py::test_func # 特定テスト実行
 
 #### ファイル命名規則
 ```
-./.claude/ContextSave/[作業内容]_[YYYYMMDD].md
+./ContextSave/[作業内容]_[YYYYMMDD].md
 ```
 
 #### 必須セクション構成
@@ -134,12 +134,12 @@ pytest tests/app/test_specific.py::test_func # 特定テスト実行
 #### 実行例
 ```bash
 # テスト改善完了時の保存例
-echo "Whisperテスト改善完了レポート" > ./.claude/ContextSave/whisper_test_improvement_20250607.md
+echo "Whisperテスト改善完了レポート" > ./ContextSave/whisper_test_improvement_20250607.md
 ```
 
 ### 参考ファイル
 - `./.claude/KnowledgeTransfer.txt` - 保存形式の詳細ガイド
-- 過去の保存例: `./.claude/ContextSave/` 内の既存ファイル
+- 過去の保存例: `./ContextSave/` 内の既存ファイル
 
 ### 重要事項
 - **詳細記録**: エラーログ、コードスニペット、実行結果を可能な限り詳細に記録
