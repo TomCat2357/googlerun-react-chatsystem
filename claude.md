@@ -106,3 +106,42 @@ pytest tests/app/test_specific.py::test_func # 特定テスト実行
 - **音声エラー**: ffmpeg インストール・CUDA 環境確認
 - **デバッグ**: `DEBUG=1` 環境変数でログ詳細化
 - **テスト失敗**: `pytest --pdb` でデバッガ起動、`breakpoint()` でブレークポイント設定
+
+## ナレッジ管理とコンテキスト保存
+
+### 作業記録の保存方法
+重要な作業完了時は `./.claude/ContextSave/` に結果を保存すること。以下の形式に従う：
+
+#### 保存タイミング
+- 大きなバグ修正完了時
+- テスト環境の大幅改善時
+- 新機能実装完了時
+- トラブルシューティングの知見蓄積時
+
+#### ファイル命名規則
+```
+./.claude/ContextSave/[作業内容]_[YYYYMMDD].md
+```
+
+#### 必須セクション構成
+1. **# Objective** - プロジェクトとタスクの目的
+2. **# All user instructions** - ユーザーからの全指示内容
+3. **# Current status of the task** - 達成済み内容（残課題は含めない）
+4. **# Pending issues with snippets** - 残課題とエラー詳細（解決策は含めない）
+5. **# Build and development instructions** - ビルド・実行・テスト手順
+6. **# Relevant file paths** - 関連ファイルパス一覧
+
+#### 実行例
+```bash
+# テスト改善完了時の保存例
+echo "Whisperテスト改善完了レポート" > ./.claude/ContextSave/whisper_test_improvement_20250607.md
+```
+
+### 参考ファイル
+- `./.claude/KnowledgeTransfer.txt` - 保存形式の詳細ガイド
+- 過去の保存例: `./.claude/ContextSave/` 内の既存ファイル
+
+### 重要事項
+- **詳細記録**: エラーログ、コードスニペット、実行結果を可能な限り詳細に記録
+- **再現可能性**: 他の人が同じ作業を再現できるレベルの情報を含める
+- **技術的洞察**: 解決に至った重要な技術的発見や知見を明記

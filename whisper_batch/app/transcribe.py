@@ -44,7 +44,7 @@ def _get_whisper_model(device="cuda"):
 
 def is_gcs_path(path):
     """GCSパスかどうかを判定する"""
-    return path.startswith("gs://")
+    return str(path).startswith("gs://")
 
 def save_dataframe_to_local(df, output_path):
     """データフレームをローカルJSONファイルとして保存する"""

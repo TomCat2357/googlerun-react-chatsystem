@@ -177,6 +177,22 @@ def mock_heavy_modules():
     
     # faster-whisper関連のモック
     mock_faster_whisper = MagicMock()
+    
+    # WhisperModelのモック設定
+    mock_whisper_model = MagicMock()
+    mock_info = MagicMock()
+    mock_info.language = "ja"
+    
+    # Segmentのモック
+    mock_segment = MagicMock()
+    mock_segment.start = 0.0
+    mock_segment.end = 1.0
+    mock_segment.text = "テストテキスト"
+    
+    # transcribeメソッドが2つの値（segments, info）を返すようにモック
+    mock_whisper_model.transcribe.return_value = ([mock_segment], mock_info)
+    mock_faster_whisper.WhisperModel.return_value = mock_whisper_model
+    
     sys.modules['faster_whisper'] = mock_faster_whisper
     
     # whisperやwhisper関連ライブラリのモック
