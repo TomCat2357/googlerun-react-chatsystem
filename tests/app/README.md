@@ -17,6 +17,8 @@
 ### サポートファイル
 
 - **`gcp_emulator_run.py`** - GCPエミュレータ起動スクリプト
+- **`test_emulator_availability.py`** - エミュレータ利用可能性テスト
+- **`test_whisper_emulator_example.py`** - エミュレータ使用例（通常はスキップ）
 - **`requirements.txt`** - テスト依存関係
 
 ## 前提条件
@@ -79,6 +81,9 @@ pytest tests/app/ -m integration -v
 
 # 統合テスト以外を実行
 pytest tests/app/ -m "not integration" -v
+
+# エミュレータ利用可能性テスト
+pytest tests/app/test_emulator_availability.py -v
 
 # 非同期テストのみ実行
 pytest tests/app/ -k "async" -v

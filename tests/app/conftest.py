@@ -923,6 +923,12 @@ def test_client(mock_gcp_services, mock_audio_processing, mock_whisper_services)
 @pytest.fixture(scope="session")
 def emulator_firestore():
     """Firestoreエミュレータのセッションスコープフィクスチャ（オプション使用）"""
+    import shutil
+    
+    # 依存関係チェック
+    if not shutil.which('gcloud'):
+        pytest.skip("gcloudコマンドが利用できません。Google Cloud SDKをインストールしてください。")
+    
     try:
         from common_utils.gcp_emulator import firestore_emulator_context
         with firestore_emulator_context(
@@ -939,6 +945,21 @@ def emulator_firestore():
 @pytest.fixture(scope="session") 
 def emulator_gcs():
     """GCSエミュレータのセッションスコープフィクスチャ（オプション使用）"""
+    import shutil
+    import subprocess
+    
+    # Docker依存関係チェック
+    if not shutil.which('docker'):
+        pytest.skip("Dockerが利用できません。GCSエミュレータはスキップします。")
+    
+    # Dockerデーモン動作確認
+    try:
+        result = subprocess.run(['docker', 'info'], capture_output=True, timeout=5)
+        if result.returncode != 0:
+            pytest.skip("Dockerデーモンが動作していません。GCSエミュレータはスキップします。")
+    except:
+        pytest.skip("Docker動作確認に失敗しました。GCSエミュレータはスキップします。")
+    
     try:
         from common_utils.gcp_emulator import gcs_emulator_context
         with gcs_emulator_context(
