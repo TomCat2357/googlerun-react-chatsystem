@@ -388,6 +388,8 @@ class TestWhisperAPIIntegration:
     async def test_whisper_job_creation(self, async_test_client, mock_auth_user):
         """Whisperジョブ作成のテスト"""
         upload_request = {
+            "audio_data": "fake_audio_data_base64_encoded",  # 必須フィールド
+            "filename": "test-audio.wav",  # 必須フィールド
             "gcs_object": "temp/test-audio.wav",
             "original_name": "test-audio.wav",
             "description": "API統合テスト",
