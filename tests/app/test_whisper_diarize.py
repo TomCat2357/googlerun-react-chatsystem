@@ -6,7 +6,7 @@ import pytest
 import json
 import tempfile
 import os
-from unittest.mock import patch, Mock, MagicMock
+from unittest.mock import patch, Mock, MagicMock, create_autospec
 from pathlib import Path
 import pandas as pd
 import numpy as np
@@ -35,8 +35,8 @@ class TestDiarizeAudio:
             {"start": 2.0, "end": 3.0, "speaker": "SPEAKER_01"}
         ]
         
-        with patch("whisper_batch.app.diarize.Pipeline") as mock_pipeline_class, \
-             patch("whisper_batch.app.diarize.save_dataframe") as mock_save:
+        with patch("whisper_batch.app.diarize.Pipeline", autospec=True) as mock_pipeline_class, \
+             patch("whisper_batch.app.diarize.save_dataframe", autospec=True) as mock_save:
             
             # pyannote.audioのPipelineをモック
             mock_pipeline_instance = Mock()
@@ -85,8 +85,8 @@ class TestDiarizeAudio:
         """指定された話者数での話者分離"""
         output_file = temp_directory / "diarization_num_speakers.json"
         
-        with patch("whisper_batch.app.diarize.Pipeline") as mock_pipeline_class, \
-             patch("whisper_batch.app.diarize.save_dataframe"):
+        with patch("whisper_batch.app.diarize.Pipeline", autospec=True) as mock_pipeline_class, \
+             patch("whisper_batch.app.diarize.save_dataframe", autospec=True):
             
             mock_pipeline_instance = Mock()
             mock_pipeline_class.from_pretrained.return_value = mock_pipeline_instance
@@ -117,8 +117,8 @@ class TestDiarizeAudio:
         """話者数範囲指定での話者分離"""
         output_file = temp_directory / "diarization_range.json"
         
-        with patch("whisper_batch.app.diarize.Pipeline") as mock_pipeline_class, \
-             patch("whisper_batch.app.diarize.save_dataframe"):
+        with patch("whisper_batch.app.diarize.Pipeline", autospec=True) as mock_pipeline_class, \
+             patch("whisper_batch.app.diarize.save_dataframe", autospec=True):
             
             mock_pipeline_instance = Mock()
             mock_pipeline_class.from_pretrained.return_value = mock_pipeline_instance
@@ -210,8 +210,8 @@ class TestDiarizationResultProcessing:
         """話者分離結果のDataFrame変換"""
         output_file = temp_directory / "diarization_dataframe.json"
         
-        with patch("whisper_batch.app.diarize.Pipeline") as mock_pipeline_class, \
-             patch("whisper_batch.app.diarize.save_dataframe") as mock_save:
+        with patch("whisper_batch.app.diarize.Pipeline", autospec=True) as mock_pipeline_class, \
+             patch("whisper_batch.app.diarize.save_dataframe", autospec=True) as mock_save:
             
             mock_pipeline_instance = Mock()
             mock_pipeline_class.from_pretrained.return_value = mock_pipeline_instance
@@ -259,7 +259,7 @@ class TestDiarizationErrorHandling:
         """Pipelineでエラーが発生した場合"""
         output_file = temp_directory / "diarization_error.json"
         
-        with patch("whisper_batch.app.diarize.Pipeline") as mock_pipeline_class:
+        with patch("whisper_batch.app.diarize.Pipeline", autospec=True) as mock_pipeline_class:
             # Pipeline初期化でエラーを発生させる
             mock_pipeline_class.from_pretrained.side_effect = Exception("Pipeline initialization error")
             
@@ -277,7 +277,7 @@ class TestDiarizationErrorHandling:
         """話者分離処理でエラーが発生した場合"""
         output_file = temp_directory / "diarization_processing_error.json"
         
-        with patch("whisper_batch.app.diarize.Pipeline") as mock_pipeline_class:
+        with patch("whisper_batch.app.diarize.Pipeline", autospec=True) as mock_pipeline_class:
             mock_pipeline_instance = Mock()
             mock_pipeline_class.from_pretrained.return_value = mock_pipeline_instance
             
@@ -298,7 +298,7 @@ class TestDiarizationErrorHandling:
         """無効な認証トークンの場合"""
         output_file = temp_directory / "diarization_invalid_token.json"
         
-        with patch("whisper_batch.app.diarize.Pipeline") as mock_pipeline_class:
+        with patch("whisper_batch.app.diarize.Pipeline", autospec=True) as mock_pipeline_class:
             # 認証エラーを発生させる
             mock_pipeline_class.from_pretrained.side_effect = Exception("Authentication failed")
             
@@ -318,8 +318,8 @@ class TestDiarizationParameterValidation:
     @pytest.mark.asyncio
     async def test_diarize_audio_parameter_combinations(self, sample_audio_file, temp_directory):
         """様々なパラメータ組み合わせのテスト"""
-        with patch("whisper_batch.app.diarize.Pipeline") as mock_pipeline_class, \
-             patch("whisper_batch.app.diarize.save_dataframe"):
+        with patch("whisper_batch.app.diarize.Pipeline", autospec=True) as mock_pipeline_class, \
+             patch("whisper_batch.app.diarize.save_dataframe", autospec=True):
             
             mock_pipeline_instance = Mock()
             mock_pipeline_class.from_pretrained.return_value = mock_pipeline_instance
@@ -360,8 +360,8 @@ class TestDiarizationIntegration:
         """話者分離の完全なワークフローテスト"""
         output_file = temp_directory / "diarization_full_workflow.json"
         
-        with patch("whisper_batch.app.diarize.Pipeline") as mock_pipeline_class, \
-             patch("whisper_batch.app.diarize.save_dataframe") as mock_save:
+        with patch("whisper_batch.app.diarize.Pipeline", autospec=True) as mock_pipeline_class, \
+             patch("whisper_batch.app.diarize.save_dataframe", autospec=True) as mock_save:
             
             # Pipelineセットアップ
             mock_pipeline_instance = Mock()

@@ -4,7 +4,7 @@
 
 import pytest
 import os
-from unittest.mock import patch, Mock
+from unittest.mock import patch, Mock, create_autospec
 
 
 def test_environment_variables():
@@ -50,7 +50,7 @@ def test_mock_basic():
     assert mock_obj.method() == "mocked"
 
 
-@patch('os.path.exists')
+@patch('os.path.exists', autospec=True)
 def test_patch_decorator(mock_exists):
     """patchデコレータのテスト"""
     mock_exists.return_value = True

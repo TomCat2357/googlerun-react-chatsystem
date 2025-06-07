@@ -902,3 +902,58 @@ def test_client(mock_gcp_services, mock_audio_processing, mock_whisper_services)
     from backend.app.main import app
     with TestClient(app) as client:
         yield client
+
+
+# GCPエミュレータ統合のためのフィクスチャ（オプション）
+@pytest.fixture(scope="session")
+def emulator_firestore():
+    """Firestoreエミュレータのセッションスコープフィクスチャ（オプション使用）"""
+    try:
+        from common_utils.gcp_emulator import firestore_emulator_context
+        with firestore_emulator_context(
+            host='localhost',
+            port=8090,  # テスト専用ポート
+            project_id='test-session-project'
+        ) as emulator:
+            yield emulator
+    except Exception as e:
+        # エミュレータが利用できない場合はスキップ
+        pytest.skip(f"Firestore emulator not available: {e}")
+
+
+@pytest.fixture(scope="session") 
+def emulator_gcs():
+    """GCSエミュレータのセッションスコープフィクスチャ（オプション使用）"""
+    try:
+        from common_utils.gcp_emulator import gcs_emulator_context
+        with gcs_emulator_context(
+            host='localhost',
+            port=9010,  # テスト専用ポート
+            project_id='test-session-gcs-project'
+        ) as emulator:
+            yield emulator
+    except Exception as e:
+        # エミュレータが利用できない場合はスキップ
+        pytest.skip(f"GCS emulator not available: {e}")
+
+
+@pytest.fixture
+def real_firestore_client(emulator_firestore):
+    """実際のFirestoreクライアント（エミュレータ接続）"""
+    try:
+        from google.cloud import firestore
+        client = firestore.Client(project='test-session-project')
+        yield client
+    except ImportError:
+        pytest.skip("google-cloud-firestore not available")
+
+
+@pytest.fixture
+def real_gcs_client(emulator_gcs):
+    """実際のGCSクライアント（エミュレータ接続）"""
+    try:
+        from google.cloud import storage
+        client = storage.Client(project='test-session-gcs-project')
+        yield client
+    except ImportError:
+        pytest.skip("google-cloud-storage not available")

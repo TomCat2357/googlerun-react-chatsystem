@@ -6,7 +6,7 @@ import pytest
 import json
 import tempfile
 import uuid
-from unittest.mock import patch, Mock, MagicMock, mock_open
+from unittest.mock import patch, Mock, MagicMock, mock_open, create_autospec
 from pathlib import Path
 import pandas as pd
 import time
@@ -65,7 +65,7 @@ class TestPickNextJob:
         
         # 環境変数をモック
         with patch.dict(os.environ, {"COLLECTION": "whisper_jobs"}), \
-             patch("google.cloud.firestore.transactional", side_effect=mock_transactional_decorator):
+             patch("google.cloud.firestore.transactional", side_effect=mock_transactional_decorator, autospec=True):
             
             from whisper_batch.app.main import _pick_next_job
             
@@ -277,11 +277,11 @@ class TestProcessJob:
         }
         
         with patch.dict(os.environ, env_vars), \
-             patch("google.cloud.storage.Client", return_value=mock_gcs_client), \
-             patch("whisper_batch.app.transcribe.transcribe_audio", side_effect=mock_transcribe_audio) as mock_transcribe, \
-             patch("whisper_batch.app.main.create_single_speaker_json", side_effect=mock_create_single_speaker_json) as mock_single_speaker, \
-             patch("whisper_batch.app.combine_results.combine_results", side_effect=mock_combine_results) as mock_combine, \
-             patch("shutil.rmtree"):
+             patch("google.cloud.storage.Client", return_value=mock_gcs_client, autospec=True), \
+             patch("whisper_batch.app.transcribe.transcribe_audio", side_effect=mock_transcribe_audio, autospec=True) as mock_transcribe, \
+             patch("whisper_batch.app.main.create_single_speaker_json", side_effect=mock_create_single_speaker_json, autospec=True) as mock_single_speaker, \
+             patch("whisper_batch.app.combine_results.combine_results", side_effect=mock_combine_results, autospec=True) as mock_combine, \
+             patch("shutil.rmtree", autospec=True):
             
             from whisper_batch.app.main import _process_job
             

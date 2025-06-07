@@ -1,11 +1,15 @@
 """
 Whisper API エンドポイントのテスト
+
+このファイルでは主にモック中心のテストを行いますが、
+一部のテストでGCPエミュレータの使用例も示しています。
+エミュレータを使用するテストは @pytest.mark.emulator でマークされています。
 """
 
 import pytest
 import json
 import uuid
-from unittest.mock import patch, Mock, MagicMock
+from unittest.mock import patch, Mock, MagicMock, create_autospec
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 import os
@@ -22,7 +26,7 @@ class TestWhisperUploadUrl:
     
     def test_create_upload_url_success(self, test_client, mock_auth_user, mock_environment_variables):
         """署名付きURL生成の成功ケース"""
-        with patch("google.cloud.storage.Client") as mock_storage:
+        with patch("google.cloud.storage.Client", autospec=True) as mock_storage:
             # GCSクライアントのモック
             mock_bucket = Mock()
             mock_blob = Mock()
@@ -80,11 +84,11 @@ class TestWhisperUpload:
         mock_process.communicate.return_value = (b"1.0", b"")  # duration=1.0秒
         mock_process.returncode = 0
         
-        with patch('subprocess.Popen', return_value=mock_process), \
-             patch("google.cloud.storage.Client") as mock_storage, \
-             patch("google.cloud.firestore.Client") as mock_firestore, \
-             patch("backend.app.api.whisper.enqueue_job_atomic") as mock_enqueue, \
-             patch("fastapi.BackgroundTasks.add_task") as mock_add_task:
+        with patch('subprocess.Popen', return_value=mock_process, autospec=True), \
+             patch("google.cloud.storage.Client", autospec=True) as mock_storage, \
+             patch("google.cloud.firestore.Client", autospec=True) as mock_firestore, \
+             patch("backend.app.api.whisper.enqueue_job_atomic", autospec=True) as mock_enqueue, \
+             patch("fastapi.BackgroundTasks.add_task", autospec=True) as mock_add_task:
             
             # GCSクライアントのモック
             mock_bucket = Mock()
@@ -135,7 +139,7 @@ class TestWhisperUpload:
             "original_name": "large-audio.wav"
         }
         
-        with patch("google.cloud.storage.Client") as mock_storage:
+        with patch("google.cloud.storage.Client", autospec=True) as mock_storage:
             mock_bucket = Mock()
             mock_blob = Mock()
             mock_blob.exists.return_value = True
@@ -164,7 +168,7 @@ class TestWhisperUpload:
             "original_name": "test-document.pdf"
         }
         
-        with patch("google.cloud.storage.Client") as mock_storage:
+        with patch("google.cloud.storage.Client", autospec=True) as mock_storage:
             mock_bucket = Mock()
             mock_blob = Mock()
             mock_blob.exists.return_value = True
@@ -244,7 +248,7 @@ class TestWhisperJobOperations:
         """ジョブ詳細取得の成功ケース"""
         file_hash = "test-hash-123"
         
-        with patch("google.cloud.firestore.Client") as mock_firestore:
+        with patch("google.cloud.firestore.Client", autospec=True) as mock_firestore:
             mock_job_doc = Mock()
             mock_job_doc.id = "job-123"
             mock_job_doc.to_dict.return_value = {
@@ -274,7 +278,7 @@ class TestWhisperJobOperations:
         """存在しないジョブの取得"""
         file_hash = "nonexistent-hash"
         
-        with patch("google.cloud.firestore.Client") as mock_firestore:
+        with patch("google.cloud.firestore.Client", autospec=True) as mock_firestore:
             mock_query = Mock()
             mock_query.stream.return_value = []
             mock_collection = Mock()
@@ -293,7 +297,7 @@ class TestWhisperJobOperations:
         """ジョブキャンセルの成功ケース"""
         file_hash = "test-hash-123"
         
-        with patch("backend.app.api.whisper._update_job_status", return_value="test-doc-id"):
+        with patch("backend.app.api.whisper._update_job_status", return_value="test-doc-id", autospec=True):
             response = await async_test_client.post(
                 f"/backend/whisper/jobs/{file_hash}/cancel",
                 headers={"Authorization": "Bearer test-token"}
@@ -314,7 +318,7 @@ class TestWhisperJobOperations:
             """バッチ処理トリガー関数のモック"""
             pass
         
-        with patch("backend.app.api.whisper.trigger_whisper_batch_processing", side_effect=mock_trigger_batch_processing):
+        with patch("backend.app.api.whisper.trigger_whisper_batch_processing", side_effect=mock_trigger_batch_processing, autospec=True):
             
             response = await async_test_client.post(
                 f"/backend/whisper/jobs/{file_hash}/retry",
@@ -514,3 +518,95 @@ class TestWhisperSpeakerConfig:
             assert response.status_code == 200
             data = response.json()
             assert data == {}  # 空のオブジェクトが返される
+
+
+# エミュレータ使用例（オプション）
+@pytest.mark.emulator
+class TestWhisperJobOperationsWithEmulator:
+    """GCPエミュレータを使用したジョブ操作テスト（使用例）"""
+    
+    @pytest.mark.asyncio
+    async def test_job_storage_with_real_firestore_emulator(self, real_firestore_client, mock_auth_user):
+        """実際のFirestoreエミュレータを使用したジョブ保存テスト"""
+        
+        # 実際のFirestoreクライアントを使用（エミュレータに接続）
+        client = real_firestore_client
+        
+        # テストジョブデータ
+        job_data = {
+            "job_id": "emulator-api-test-123",
+            "user_id": mock_auth_user["uid"],
+            "user_email": mock_auth_user["email"],
+            "filename": "emulator-api-test.wav",
+            "gcs_bucket_name": "test-emulator-bucket",
+            "file_hash": "emulator-api-hash",
+            "status": "queued",
+            "created_at": "2025-06-07T10:00:00Z"
+        }
+        
+        # Firestoreにジョブを保存
+        collection = client.collection('whisper_jobs')
+        doc_ref = collection.document('emulator-api-doc')
+        doc_ref.set(job_data)
+        
+        # データが正しく保存されたことを確認
+        saved_doc = doc_ref.get()
+        assert saved_doc.exists
+        saved_data = saved_doc.to_dict()
+        assert saved_data['job_id'] == job_data['job_id']
+        assert saved_data['status'] == 'queued'
+        
+        # ステータス更新テスト
+        doc_ref.update({"status": "processing"})
+        updated_doc = doc_ref.get()
+        assert updated_doc.to_dict()['status'] == 'processing'
+        
+        # ユーザークエリテスト
+        user_jobs = list(collection.where('user_id', '==', mock_auth_user["uid"]).stream())
+        assert len(user_jobs) >= 1
+        assert any(job.to_dict()['job_id'] == job_data['job_id'] for job in user_jobs)
+    
+    @pytest.mark.asyncio
+    async def test_file_storage_with_real_gcs_emulator(self, real_gcs_client):
+        """実際のGCSエミュレータを使用したファイル操作テスト"""
+        
+        # 実際のGCSクライアントを使用（エミュレータに接続）
+        client = real_gcs_client
+        
+        # バケットを作成
+        bucket_name = 'test-emulator-api-bucket'
+        try:
+            bucket = client.create_bucket(bucket_name)
+        except Exception:
+            # バケットが既に存在する場合
+            bucket = client.bucket(bucket_name)
+        
+        # 音声ファイルのアップロード
+        audio_content = b"fake audio data for emulator API test"
+        audio_blob = bucket.blob("whisper/emulator-api-hash.wav")
+        audio_blob.upload_from_string(audio_content, content_type="audio/wav")
+        
+        # ファイルが正しくアップロードされたことを確認
+        assert audio_blob.exists()
+        assert audio_blob.content_type == "audio/wav"
+        assert audio_blob.size == len(audio_content)
+        
+        # 署名付きURL生成テスト
+        signed_url = audio_blob.generate_signed_url(expiration=3600)
+        assert signed_url.startswith("http")
+        assert bucket_name in signed_url
+        
+        # 文字起こし結果保存テスト
+        transcript_data = [
+            {"start": 0.0, "end": 1.0, "text": "エミュレータAPIテスト", "speaker": "SPEAKER_01"}
+        ]
+        result_blob = bucket.blob("emulator-api-hash/combine.json")
+        result_blob.upload_from_string(
+            json.dumps(transcript_data, ensure_ascii=False),
+            content_type="application/json"
+        )
+        
+        # 結果ファイルが正しく保存されたことを確認
+        saved_transcript = json.loads(result_blob.download_as_text())
+        assert len(saved_transcript) == 1
+        assert saved_transcript[0]["text"] == "エミュレータAPIテスト"
