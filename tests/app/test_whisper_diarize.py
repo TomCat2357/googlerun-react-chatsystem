@@ -47,14 +47,27 @@ class TestDiarizeAudio:
             mock_waveform = Mock()
             mock_torchaudio.return_value = (mock_waveform, 16000)
             
-            # 話者分離結果をモック - yield_label=True時は(segment, track, speaker)の3つを返す
+            # 話者分離結果をモック - 正しいSegmentオブジェクトをシミュレート
+            class MockSegment:
+                def __init__(self, start, end):
+                    self.start = start
+                    self.end = end
+            
             mock_diarization = Mock()
             mock_segments = [
-                (Mock(start=0.0, end=1.0), Mock(), "SPEAKER_01"),
-                (Mock(start=1.0, end=2.0), Mock(), "SPEAKER_02"),
-                (Mock(start=2.0, end=3.0), Mock(), "SPEAKER_01")
+                (MockSegment(0.0, 1.0), Mock(), "SPEAKER_01"),
+                (MockSegment(1.0, 2.0), Mock(), "SPEAKER_02"),
+                (MockSegment(2.0, 3.0), Mock(), "SPEAKER_01")
             ]
-            mock_diarization.itertracks.return_value = iter(mock_segments)
+            
+            # itertracksメソッドの正しいモック
+            def mock_itertracks(yield_label=False):
+                if yield_label:
+                    return iter(mock_segments)
+                else:
+                    return iter([(seg, track) for seg, track, _ in mock_segments])
+            
+            mock_diarization.itertracks = mock_itertracks
             mock_pipeline_instance.return_value = mock_diarization
             
             # 話者分離実行
@@ -100,16 +113,29 @@ class TestDiarizeAudio:
             mock_waveform = Mock()
             mock_torchaudio.return_value = (mock_waveform, 16000)
             
+            # 正しいSegmentオブジェクトをシミュレート
+            class MockSegment:
+                def __init__(self, start, end):
+                    self.start = start
+                    self.end = end
+            
             mock_diarization = Mock()
             mock_segments = [
-                (Mock(start=0.0, end=1.0), Mock(), "SPEAKER_01"),
-                (Mock(start=1.0, end=2.0), Mock(), "SPEAKER_02")
+                (MockSegment(0.0, 1.0), Mock(), "SPEAKER_01"),
+                (MockSegment(1.0, 2.0), Mock(), "SPEAKER_02")
             ]
-            mock_diarization.itertracks.return_value = iter(mock_segments)
+            
+            def mock_itertracks(yield_label=False):
+                if yield_label:
+                    return iter(mock_segments)
+                else:
+                    return iter([(seg, track) for seg, track, _ in mock_segments])
+            
+            mock_diarization.itertracks = mock_itertracks
             mock_pipeline_instance.return_value = mock_diarization
             
-            # 話者数を明示的に指定
-            diarize_audio(
+            # 話者数を明示的に指定して実行
+            result = diarize_audio(
                 sample_audio_file,
                 str(output_file),
                 hf_auth_token="test-token",
@@ -117,10 +143,12 @@ class TestDiarizeAudio:
                 device="cpu"
             )
             
-            # パイプラインが話者数指定で呼ばれることを確認
-            pipeline_call_args = mock_pipeline_instance.call_args
-            # 実際の呼び出し引数を確認（num_speakersが適切に渡されている）
-            assert pipeline_call_args is not None
+            # 処理結果の確認
+            assert isinstance(result, pd.DataFrame)
+            assert len(result) == 2  # モックで設定した話者数
+            assert "start" in result.columns
+            assert "end" in result.columns
+            assert "speaker" in result.columns
     
     @pytest.mark.asyncio
     async def test_diarize_audio_with_speaker_range(self, sample_audio_file, temp_directory):
@@ -140,15 +168,27 @@ class TestDiarizeAudio:
             
             mock_diarization = Mock()
             # テスト用の話者データを追加
+            class MockSegment:
+                def __init__(self, start, end):
+                    self.start = start
+                    self.end = end
+            
             mock_segments = [
-                (Mock(start=0.0, end=1.0), Mock(), "SPEAKER_01"),
-                (Mock(start=1.0, end=2.0), Mock(), "SPEAKER_02")
+                (MockSegment(0.0, 1.0), Mock(), "SPEAKER_01"),
+                (MockSegment(1.0, 2.0), Mock(), "SPEAKER_02")
             ]
-            mock_diarization.itertracks.return_value = iter(mock_segments)
+            
+            def mock_itertracks(yield_label=False):
+                if yield_label:
+                    return iter(mock_segments)
+                else:
+                    return iter([(seg, track) for seg, track, _ in mock_segments])
+            
+            mock_diarization.itertracks = mock_itertracks
             mock_pipeline_instance.return_value = mock_diarization
             
-            # 話者数の範囲を指定
-            diarize_audio(
+            # 話者数の範囲を指定して実行
+            result = diarize_audio(
                 sample_audio_file,
                 str(output_file),
                 hf_auth_token="test-token",
@@ -158,8 +198,12 @@ class TestDiarizeAudio:
                 device="cpu"
             )
             
-            # パイプラインが範囲指定で呼ばれることを確認
-            mock_pipeline_instance.assert_called_once()
+            # 処理結果の確認
+            assert isinstance(result, pd.DataFrame)
+            assert len(result) == 2  # モックで設定した話者数
+            assert "start" in result.columns
+            assert "end" in result.columns
+            assert "speaker" in result.columns
     
     @pytest.mark.asyncio
     async def test_diarize_audio_cuda_device(self, sample_audio_file, temp_directory):
@@ -180,11 +224,23 @@ class TestDiarizeAudio:
             
             mock_diarization = Mock()
             # テスト用の話者データを追加
+            class MockSegment:
+                def __init__(self, start, end):
+                    self.start = start
+                    self.end = end
+            
             mock_segments = [
-                (Mock(start=0.0, end=1.0), Mock(), "SPEAKER_01"),
-                (Mock(start=1.0, end=2.0), Mock(), "SPEAKER_02")
+                (MockSegment(0.0, 1.0), Mock(), "SPEAKER_01"),
+                (MockSegment(1.0, 2.0), Mock(), "SPEAKER_02")
             ]
-            mock_diarization.itertracks.return_value = iter(mock_segments)
+            
+            def mock_itertracks(yield_label=False):
+                if yield_label:
+                    return iter(mock_segments)
+                else:
+                    return iter([(seg, track) for seg, track, _ in mock_segments])
+            
+            mock_diarization.itertracks = mock_itertracks
             mock_pipeline_instance.return_value = mock_diarization
             
             # CUDAデバイスで実行
@@ -219,11 +275,23 @@ class TestDiarizeAudio:
             
             mock_diarization = Mock()
             # テスト用の話者データを追加
+            class MockSegment:
+                def __init__(self, start, end):
+                    self.start = start
+                    self.end = end
+            
             mock_segments = [
-                (Mock(start=0.0, end=1.0), Mock(), "SPEAKER_01"),
-                (Mock(start=1.0, end=2.0), Mock(), "SPEAKER_02")
+                (MockSegment(0.0, 1.0), Mock(), "SPEAKER_01"),
+                (MockSegment(1.0, 2.0), Mock(), "SPEAKER_02")
             ]
-            mock_diarization.itertracks.return_value = iter(mock_segments)
+            
+            def mock_itertracks(yield_label=False):
+                if yield_label:
+                    return iter(mock_segments)
+                else:
+                    return iter([(seg, track) for seg, track, _ in mock_segments])
+            
+            mock_diarization.itertracks = mock_itertracks
             mock_pipeline_instance.return_value = mock_diarization
             
             # ジョブID付きで話者分離実行
@@ -260,15 +328,27 @@ class TestDiarizationResultProcessing:
             mock_torchaudio.return_value = (mock_waveform, 16000)
             
             # 複雑な話者分離結果をモック
+            class MockSegment:
+                def __init__(self, start, end):
+                    self.start = start
+                    self.end = end
+            
             mock_segments = [
-                (Mock(start=0.0, end=1.5), Mock(), "SPEAKER_01"),
-                (Mock(start=1.5, end=2.8), Mock(), "SPEAKER_02"),
-                (Mock(start=2.8, end=4.0), Mock(), "SPEAKER_01"),
-                (Mock(start=4.0, end=5.2), Mock(), "SPEAKER_03"),
+                (MockSegment(0.0, 1.5), Mock(), "SPEAKER_01"),
+                (MockSegment(1.5, 2.8), Mock(), "SPEAKER_02"),
+                (MockSegment(2.8, 4.0), Mock(), "SPEAKER_01"),
+                (MockSegment(4.0, 5.2), Mock(), "SPEAKER_03"),
             ]
             
             mock_diarization = Mock()
-            mock_diarization.itertracks.return_value = iter(mock_segments)
+            
+            def mock_itertracks(yield_label=False):
+                if yield_label:
+                    return iter(mock_segments)
+                else:
+                    return iter([(seg, track) for seg, track, _ in mock_segments])
+            
+            mock_diarization.itertracks = mock_itertracks
             mock_pipeline_instance.return_value = mock_diarization
             
             # 話者分離実行
@@ -280,7 +360,7 @@ class TestDiarizationResultProcessing:
             
             # DataFrameの構造確認
             assert isinstance(result, pd.DataFrame)
-            assert len(result) == 6  # 修正したモック数に合わせる
+            assert len(result) == 4  # 正しいモック数に合わせる
             assert list(result.columns) == ["start", "end", "speaker"]
             
             # 各セグメントのデータ確認
@@ -376,11 +456,23 @@ class TestDiarizationParameterValidation:
             
             mock_diarization = Mock()
             # テスト用の話者データを追加
+            class MockSegment:
+                def __init__(self, start, end):
+                    self.start = start
+                    self.end = end
+            
             mock_segments = [
-                (Mock(start=0.0, end=1.0), Mock(), "SPEAKER_01"),
-                (Mock(start=1.0, end=2.0), Mock(), "SPEAKER_02")
+                (MockSegment(0.0, 1.0), Mock(), "SPEAKER_01"),
+                (MockSegment(1.0, 2.0), Mock(), "SPEAKER_02")
             ]
-            mock_diarization.itertracks.return_value = iter(mock_segments)
+            
+            def mock_itertracks(yield_label=False):
+                if yield_label:
+                    return iter(mock_segments)
+                else:
+                    return iter([(seg, track) for seg, track, _ in mock_segments])
+            
+            mock_diarization.itertracks = mock_itertracks
             mock_pipeline_instance.return_value = mock_diarization
             
             # 様々なパラメータ組み合わせをテスト
@@ -428,16 +520,28 @@ class TestDiarizationIntegration:
             mock_torchaudio.return_value = (mock_waveform, 16000)
             
             # リアルな話者分離結果をモック
+            class MockSegment:
+                def __init__(self, start, end):
+                    self.start = start
+                    self.end = end
+            
             realistic_segments = [
-                (Mock(start=0.0, end=2.3), Mock(), "SPEAKER_01"),
-                (Mock(start=2.3, end=4.7), Mock(), "SPEAKER_02"),
-                (Mock(start=4.7, end=6.1), Mock(), "SPEAKER_01"),
-                (Mock(start=6.1, end=8.5), Mock(), "SPEAKER_02"),
-                (Mock(start=8.5, end=10.0), Mock(), "SPEAKER_01"),
+                (MockSegment(0.0, 2.3), Mock(), "SPEAKER_01"),
+                (MockSegment(2.3, 4.7), Mock(), "SPEAKER_02"),
+                (MockSegment(4.7, 6.1), Mock(), "SPEAKER_01"),
+                (MockSegment(6.1, 8.5), Mock(), "SPEAKER_02"),
+                (MockSegment(8.5, 10.0), Mock(), "SPEAKER_01"),
             ]
             
             mock_diarization = Mock()
-            mock_diarization.itertracks.return_value = iter(realistic_segments)
+            
+            def mock_itertracks(yield_label=False):
+                if yield_label:
+                    return iter(realistic_segments)
+                else:
+                    return iter([(seg, track) for seg, track, _ in realistic_segments])
+            
+            mock_diarization.itertracks = mock_itertracks
             mock_pipeline_instance.return_value = mock_diarization
             
             # 完全なワークフローを実行
@@ -454,7 +558,7 @@ class TestDiarizationIntegration:
             
             # 結果の検証
             assert isinstance(result, pd.DataFrame)
-            assert len(result) == 7  # 修正したモック数に合わせる
+            assert len(result) == 5  # 正しいモック数に合わせる
             
             # 話者の分布確認
             speaker_counts = result["speaker"].value_counts()
