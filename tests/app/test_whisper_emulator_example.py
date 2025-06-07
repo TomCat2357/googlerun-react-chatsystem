@@ -209,7 +209,7 @@ class TestWhisperWithMockedEmulator:
             mock_emulator_context.return_value.__enter__.return_value = mock_emulator
             
             # モックFirestoreクライアント
-            with patch('google.cloud.firestore.Client', autospec=True) as mock_client_class:
+            with patch('google.cloud.firestore.Client') as mock_client_class:
                 mock_client = create_autospec(firestore.Client)
                 mock_client_class.return_value = mock_client
                 

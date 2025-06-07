@@ -26,7 +26,7 @@ class TestWhisperUploadUrl:
     
     def test_create_upload_url_success(self, test_client, mock_auth_user, mock_environment_variables):
         """署名付きURL生成の成功ケース"""
-        with patch("google.cloud.storage.Client", autospec=True) as mock_storage:
+        with patch("google.cloud.storage.Client") as mock_storage:
             # GCSクライアントのモック
             mock_bucket = Mock()
             mock_blob = Mock()
@@ -84,11 +84,11 @@ class TestWhisperUpload:
         mock_process.communicate.return_value = (b"1.0", b"")  # duration=1.0秒
         mock_process.returncode = 0
         
-        with patch('subprocess.Popen', return_value=mock_process, autospec=True), \
-             patch("google.cloud.storage.Client", autospec=True) as mock_storage, \
-             patch("google.cloud.firestore.Client", autospec=True) as mock_firestore, \
-             patch("backend.app.api.whisper.enqueue_job_atomic", autospec=True) as mock_enqueue, \
-             patch("fastapi.BackgroundTasks.add_task", autospec=True) as mock_add_task:
+        with patch('subprocess.Popen', return_value=mock_process), \
+             patch("google.cloud.storage.Client") as mock_storage, \
+             patch("google.cloud.firestore.Client") as mock_firestore, \
+             patch("backend.app.api.whisper.enqueue_job_atomic") as mock_enqueue, \
+             patch("fastapi.BackgroundTasks.add_task") as mock_add_task:
             
             # GCSクライアントのモック
             mock_bucket = Mock()
@@ -139,7 +139,7 @@ class TestWhisperUpload:
             "original_name": "large-audio.wav"
         }
         
-        with patch("google.cloud.storage.Client", autospec=True) as mock_storage:
+        with patch("google.cloud.storage.Client") as mock_storage:
             mock_bucket = Mock()
             mock_blob = Mock()
             mock_blob.exists.return_value = True
@@ -168,7 +168,7 @@ class TestWhisperUpload:
             "original_name": "test-document.pdf"
         }
         
-        with patch("google.cloud.storage.Client", autospec=True) as mock_storage:
+        with patch("google.cloud.storage.Client") as mock_storage:
             mock_bucket = Mock()
             mock_blob = Mock()
             mock_blob.exists.return_value = True
@@ -248,7 +248,7 @@ class TestWhisperJobOperations:
         """ジョブ詳細取得の成功ケース"""
         file_hash = "test-hash-123"
         
-        with patch("google.cloud.firestore.Client", autospec=True) as mock_firestore:
+        with patch("google.cloud.firestore.Client") as mock_firestore:
             mock_job_doc = Mock()
             mock_job_doc.id = "job-123"
             mock_job_doc.to_dict.return_value = {
@@ -278,7 +278,7 @@ class TestWhisperJobOperations:
         """存在しないジョブの取得"""
         file_hash = "nonexistent-hash"
         
-        with patch("google.cloud.firestore.Client", autospec=True) as mock_firestore:
+        with patch("google.cloud.firestore.Client") as mock_firestore:
             mock_query = Mock()
             mock_query.stream.return_value = []
             mock_collection = Mock()
@@ -297,7 +297,7 @@ class TestWhisperJobOperations:
         """ジョブキャンセルの成功ケース"""
         file_hash = "test-hash-123"
         
-        with patch("backend.app.api.whisper._update_job_status", return_value="test-doc-id", autospec=True):
+        with patch("backend.app.api.whisper._update_job_status", return_value="test-doc-id"):
             response = await async_test_client.post(
                 f"/backend/whisper/jobs/{file_hash}/cancel",
                 headers={"Authorization": "Bearer test-token"}
@@ -318,7 +318,7 @@ class TestWhisperJobOperations:
             """バッチ処理トリガー関数のモック"""
             pass
         
-        with patch("backend.app.api.whisper.trigger_whisper_batch_processing", side_effect=mock_trigger_batch_processing, autospec=True):
+        with patch("backend.app.api.whisper.trigger_whisper_batch_processing", side_effect=mock_trigger_batch_processing):
             
             response = await async_test_client.post(
                 f"/backend/whisper/jobs/{file_hash}/retry",

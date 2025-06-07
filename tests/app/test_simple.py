@@ -50,7 +50,7 @@ def test_mock_basic():
     assert mock_obj.method() == "mocked"
 
 
-@patch('os.path.exists', autospec=True)
+@patch('os.path.exists')
 def test_patch_decorator(mock_exists):
     """patchデコレータのテスト"""
     mock_exists.return_value = True

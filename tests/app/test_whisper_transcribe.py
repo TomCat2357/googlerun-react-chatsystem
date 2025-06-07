@@ -112,8 +112,8 @@ class TestTranscribeAudio:
         mock_model = Mock()
         mock_model.transcribe.return_value = (mock_segments, mock_info)
         
-        with patch("whisper_batch.app.transcribe._get_whisper_model", return_value=mock_model, autospec=True), \
-             patch("whisper_batch.app.transcribe.save_dataframe", autospec=True) as mock_save:
+        with patch("whisper_batch.app.transcribe._get_whisper_model", return_value=mock_model), \
+             patch("whisper_batch.app.transcribe.save_dataframe") as mock_save:
             
             # 文字起こし実行
             result = transcribe_audio(
@@ -279,7 +279,7 @@ class TestSaveDataframe:
         
         gcs_uri = "gs://test-bucket/transcription/result.json"
         
-        with patch("google.cloud.storage.Client", autospec=True) as mock_storage:
+        with patch("google.cloud.storage.Client") as mock_storage:
             # GCSクライアントのモック
             mock_bucket = Mock()
             mock_blob = Mock()
@@ -307,7 +307,7 @@ class TestSaveDataframe:
         df = pd.DataFrame([{"start": 0.0, "end": 1.0, "text": "local test"}])
         output_file = temp_directory / "local_test.json"
         
-        with patch("whisper_batch.app.transcribe.save_dataframe_to_local", autospec=True) as mock_local_save:
+        with patch("whisper_batch.app.transcribe.save_dataframe_to_local") as mock_local_save:
             save_dataframe(df, str(output_file))
             mock_local_save.assert_called_once_with(df, str(output_file))
     
@@ -317,7 +317,7 @@ class TestSaveDataframe:
         df = pd.DataFrame([{"start": 0.0, "end": 1.0, "text": "gcs test"}])
         gcs_path = "gs://test-bucket/test.json"
         
-        with patch("whisper_batch.app.transcribe.save_dataframe_to_gcs", autospec=True) as mock_gcs_save:
+        with patch("whisper_batch.app.transcribe.save_dataframe_to_gcs") as mock_gcs_save:
             save_dataframe(df, gcs_path)
             mock_gcs_save.assert_called_once_with(df, gcs_path)
 
@@ -341,8 +341,8 @@ class TestTranscriptionDataProcessing:
         mock_model = Mock()
         mock_model.transcribe.return_value = (mock_segments, mock_info)
         
-        with patch("whisper_batch.app.transcribe._get_whisper_model", return_value=mock_model, autospec=True), \
-             patch("whisper_batch.app.transcribe.save_dataframe", autospec=True) as mock_save:
+        with patch("whisper_batch.app.transcribe._get_whisper_model", return_value=mock_model), \
+             patch("whisper_batch.app.transcribe.save_dataframe") as mock_save:
             
             result = transcribe_audio(
                 "dummy_audio.wav",
@@ -452,7 +452,7 @@ class TestErrorHandling:
         df = pd.DataFrame([{"start": 0.0, "end": 1.0, "text": "test"}])
         gcs_uri = "gs://invalid-bucket/file.json"
         
-        with patch("google.cloud.storage.Client", autospec=True) as mock_storage:
+        with patch("google.cloud.storage.Client") as mock_storage:
             # GCSクライアントでエラーを発生させる
             mock_storage.side_effect = Exception("GCS connection error")
             
