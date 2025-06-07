@@ -889,10 +889,17 @@ async def async_test_client(mock_gcp_services, mock_audio_processing, mock_whisp
     """非同期FastAPIテストクライアント（モック付き）"""
     # 使用時にのみインポート
     from backend.app.main import app
+    from backend.app.api.auth import get_current_user
+    
+    # 認証依存関係をオーバーライド（テスト用）
+    app.dependency_overrides[get_current_user] = lambda: TEST_USER
     
     # AsyncClientを適切に初期化
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         yield client
+    
+    # クリーンアップ
+    app.dependency_overrides.clear()
 
 
 @pytest.fixture
@@ -900,8 +907,16 @@ def test_client(mock_gcp_services, mock_audio_processing, mock_whisper_services)
     """FastAPIテストクライアント（モック付き）"""
     # 使用時にのみインポート
     from backend.app.main import app
+    from backend.app.api.auth import get_current_user
+    
+    # 認証依存関係をオーバーライド（テスト用）
+    app.dependency_overrides[get_current_user] = lambda: TEST_USER
+    
     with TestClient(app) as client:
         yield client
+    
+    # クリーンアップ
+    app.dependency_overrides.clear()
 
 
 # GCPエミュレータ統合のためのフィクスチャ（オプション）

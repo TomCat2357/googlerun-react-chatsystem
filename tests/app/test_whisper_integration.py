@@ -372,9 +372,12 @@ class TestWhisperAPIIntegration:
     @pytest.mark.asyncio
     async def test_whisper_api_upload_url_generation(self, async_test_client, mock_auth_user):
         """アップロードURL生成のテスト"""
+        # 認証ヘッダーを追加
+        headers = {"Authorization": "Bearer test-token"}
         response = await async_test_client.post(
             "/backend/whisper/upload_url",
-            json={"content_type": "audio/wav"}
+            json={"content_type": "audio/wav"},
+            headers=headers
         )
         assert response.status_code == 200
         upload_data = response.json()
@@ -392,7 +395,9 @@ class TestWhisperAPIIntegration:
             "num_speakers": 1
         }
         
-        response = await async_test_client.post("/backend/whisper", json=upload_request)
+        # 認証ヘッダーを追加
+        headers = {"Authorization": "Bearer test-token"}
+        response = await async_test_client.post("/backend/whisper", json=upload_request, headers=headers)
         assert response.status_code == 200
         job_data = response.json()
         assert job_data["status"] == "success"
@@ -401,7 +406,9 @@ class TestWhisperAPIIntegration:
     @pytest.mark.asyncio
     async def test_whisper_job_list(self, async_test_client, mock_auth_user):
         """ジョブ一覧取得のテスト"""
-        response = await async_test_client.get("/backend/whisper/jobs")
+        # 認証ヘッダーを追加
+        headers = {"Authorization": "Bearer test-token"}
+        response = await async_test_client.get("/backend/whisper/jobs", headers=headers)
         assert response.status_code == 200
         jobs_data = response.json()
         assert "jobs" in jobs_data
