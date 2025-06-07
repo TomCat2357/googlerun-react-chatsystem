@@ -36,19 +36,24 @@ class TestDiarizeAudio:
         ]
         
         with patch("whisper_batch.app.diarize.Pipeline") as mock_pipeline_class, \
-             patch("whisper_batch.app.diarize.save_dataframe") as mock_save:
+             patch("whisper_batch.app.diarize.save_dataframe") as mock_save, \
+             patch("whisper_batch.app.diarize.torchaudio.load") as mock_torchaudio:
             
             # pyannote.audioのPipelineをモック
             mock_pipeline_instance = Mock()
             mock_pipeline_class.from_pretrained.return_value = mock_pipeline_instance
             
-            # 話者分離結果をモック
+            # torchaudioの読み込みをモック
+            mock_torchaudio.return_value = (Mock(), 16000)
+            
+            # 話者分離結果をモック - yield_label=True時は(segment, track, speaker)の3つを返す
             mock_diarization = Mock()
-            mock_diarization.itertracks.return_value = [
+            mock_segments = [
                 (Mock(start=0.0, end=1.0), Mock(), "SPEAKER_01"),
                 (Mock(start=1.0, end=2.0), Mock(), "SPEAKER_02"),
                 (Mock(start=2.0, end=3.0), Mock(), "SPEAKER_01")
             ]
+            mock_diarization.itertracks.return_value = iter(mock_segments)
             mock_pipeline_instance.return_value = mock_diarization
             
             # 話者分離実行
@@ -92,10 +97,11 @@ class TestDiarizeAudio:
             mock_pipeline_class.from_pretrained.return_value = mock_pipeline_instance
             
             mock_diarization = Mock()
-            mock_diarization.itertracks.return_value = [
+            mock_segments = [
                 (Mock(start=0.0, end=1.0), Mock(), "SPEAKER_01"),
                 (Mock(start=1.0, end=2.0), Mock(), "SPEAKER_02")
             ]
+            mock_diarization.itertracks.return_value = iter(mock_segments)
             mock_pipeline_instance.return_value = mock_diarization
             
             # 話者数を明示的に指定
@@ -124,7 +130,7 @@ class TestDiarizeAudio:
             mock_pipeline_class.from_pretrained.return_value = mock_pipeline_instance
             
             mock_diarization = Mock()
-            mock_diarization.itertracks.return_value = []
+            mock_diarization.itertracks.return_value = iter([])
             mock_pipeline_instance.return_value = mock_diarization
             
             # 話者数の範囲を指定
@@ -154,7 +160,7 @@ class TestDiarizeAudio:
             mock_pipeline_class.from_pretrained.return_value = mock_pipeline_instance
             
             mock_diarization = Mock()
-            mock_diarization.itertracks.return_value = []
+            mock_diarization.itertracks.return_value = iter([])
             mock_pipeline_instance.return_value = mock_diarization
             
             # CUDAデバイスで実行
@@ -185,7 +191,7 @@ class TestDiarizeAudio:
             mock_pipeline_class.from_pretrained.return_value = mock_pipeline_instance
             
             mock_diarization = Mock()
-            mock_diarization.itertracks.return_value = []
+            mock_diarization.itertracks.return_value = iter([])
             mock_pipeline_instance.return_value = mock_diarization
             
             # ジョブID付きで話者分離実行
@@ -225,7 +231,7 @@ class TestDiarizationResultProcessing:
             ]
             
             mock_diarization = Mock()
-            mock_diarization.itertracks.return_value = mock_segments
+            mock_diarization.itertracks.return_value = iter(mock_segments)
             mock_pipeline_instance.return_value = mock_diarization
             
             # 話者分離実行
@@ -325,7 +331,7 @@ class TestDiarizationParameterValidation:
             mock_pipeline_class.from_pretrained.return_value = mock_pipeline_instance
             
             mock_diarization = Mock()
-            mock_diarization.itertracks.return_value = []
+            mock_diarization.itertracks.return_value = iter([])
             mock_pipeline_instance.return_value = mock_diarization
             
             # 様々なパラメータ組み合わせをテスト
@@ -377,7 +383,7 @@ class TestDiarizationIntegration:
             ]
             
             mock_diarization = Mock()
-            mock_diarization.itertracks.return_value = realistic_segments
+            mock_diarization.itertracks.return_value = iter(realistic_segments)
             mock_pipeline_instance.return_value = mock_diarization
             
             # 完全なワークフローを実行
