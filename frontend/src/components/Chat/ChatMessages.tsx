@@ -5,7 +5,7 @@ import { FileData } from "../../utils/fileUtils";
 
 interface ChatMessagesProps {
   messages: Message[];
-  onEditPrompt: (index: number) => void;
+  onEditPrompt: (index: number, messageContent: string) => void;
   onViewFile?: (content: string, mimeType: string) => void; // 新規追加：ファイル拡大表示用関数
 }
 
@@ -55,7 +55,7 @@ const ChatMessages: React.FC<ChatMessagesProps> = ({
               <div className="flex justify-between items-center">
                 <div>{message.content}</div>
                 <button
-                  onClick={() => onEditPrompt(index)}
+                  onClick={() => onEditPrompt(index, message.content)}
                   className="ml-2 text-sm text-gray-300 hover:text-gray-100"
                   title="このプロンプトを編集して再送信"
                 >

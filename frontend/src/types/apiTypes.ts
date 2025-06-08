@@ -1,6 +1,9 @@
 // apiTypes.ts
 import { FileData } from "../utils/fileUtils";
 
+// FileDataを再エクスポート
+export type { FileData };
+
 export interface Message {
   role: "user" | "assistant" | "system";
   content: string;
@@ -18,10 +21,12 @@ export interface ChatRequest {
 }
 
 export interface ChatHistory {
-  id: number;
+  id?: number;
   title: string;
+  model?: string;
   messages: Message[];
-  lastPromptDate: string;
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 export interface GeocodingRequest {

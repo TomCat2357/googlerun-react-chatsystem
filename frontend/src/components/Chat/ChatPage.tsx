@@ -1,505 +1,276 @@
 // frontend/src/components/Chat/ChatPage.tsx
-import React, { useState, useRef, useEffect, ChangeEvent, useCallback } from "react";
-import { Message, ChatRequest, ChatHistory } from "../../types/apiTypes";
+import React, { useEffect, useState } from "react";
 import { useToken } from "../../hooks/useToken";
-import * as indexedDBUtils from "../../utils/indexedDBUtils";
+import { useChatOperations } from "../../hooks/useChatOperations";
+import { useChatHistory } from "../../hooks/useChatHistory";
+import { useFileUpload } from "../../hooks/useFileUpload";
+import { useErrorHandler } from "../../hooks/useErrorHandler";
+import { FileData } from "../../types/apiTypes";
 import * as Config from "../../config";
-import { FileData } from "../../utils/fileUtils";
+
 import ChatSidebar from "./ChatSidebar";
 import ChatMessages from "./ChatMessages";
 import ChatInput from "./ChatInput";
 import FilePreview from "./FilePreview";
 import FileViewerModal from "./FileViewerModal";
 import ErrorModal from "./ErrorModal";
-import { generateRequestId } from '../../utils/requestIdUtils';
 
 const ChatPage: React.FC = () => {
-  // ==========================
-  //  State, Ref の定義
-  // ==========================
-  const [currentChatId, setCurrentChatId] = useState<number | null>(null);
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [input, setInput] = useState("");
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [models, setModels] = useState<string[]>([]);
-  const [selectedModel, setSelectedModel] = useState<string>("");
-  const [chatHistories, setChatHistories] = useState<ChatHistory[]>([]);
-  const abortControllerRef = useRef<AbortController | null>(null);
+  const token = useToken();
+  const { error: globalError, clearError } = useErrorHandler();
+  
+  // チャット操作フック
+  const {
+    messages,
+    input,
+    models,
+    selectedModel,
+    isProcessing,
+    isEditMode,
+    setInput,
+    setSelectedModel,
+    loadModels,
+    sendMessage,
+    cancelMessage,
+    clearMessages,
+    loadMessages,
+    startEditMode,
+    saveEditMode,
+    cancelEditMode,
+    deleteMessage,
+    editMessage,
+    deleteMessagesFromIndex,
+    regenerateLastMessage,
+  } = useChatOperations();
 
-  // ファイル関連の状態
-  const [selectedFiles, setSelectedFiles] = useState<FileData[]>([]);
+  // チャット履歴フック
+  const {
+    chatHistories,
+    currentChatId,
+    isLoading: isHistoryLoading,
+    setCurrentChatId,
+    createNewChat,
+    saveChatHistory,
+    deleteChatHistory,
+    loadChatHistory,
+    updateChatTitle,
+    clearAllChatHistories,
+    exportChatHistory,
+    importChatHistory,
+  } = useChatHistory();
+
+  // ファイルアップロードフック
+  const {
+    files: selectedFiles,
+    isUploading,
+    handleFileSelect,
+    removeFile,
+    clearFiles,
+    fileInputRef,
+    handleDragEnter,
+    handleDragLeave,
+    handleDragOver,
+    handleDrop,
+  } = useFileUpload({
+    allowedTypes: ['image/*', 'audio/*', '.txt', '.csv', '.pdf', '.docx'],
+    maxFiles: 10,
+    maxSize: 50 * 1024 * 1024, // 50MB
+    maxImageSize: 20 * 1024 * 1024, // 20MB
+    enableDragDrop: true,
+    extractMetadata: true,
+  });
+
+  // ファイルビューワー関連
   const [enlargedContent, setEnlargedContent] = useState<{
     content: string;
     mimeType: string;
   } | null>(null);
 
-  const [errorMessage, setErrorMessage] = useState<string>("");
-  const token = useToken();
-  const API_BASE_URL: string = Config.API_BASE_URL;
-
-  // 編集モード用の状態
-  const [isEditMode, setIsEditMode] = useState<boolean>(false);
-  const [backupMessages, setBackupMessages] = useState<Message[]>([]);
-
-  // ==========================
-  //  設定の読み込み
-  // ==========================
+  // 設定
   const MAX_IMAGES = Config.getServerConfig().MAX_IMAGES || 5;
   const MAX_AUDIO_FILES = Config.getServerConfig().MAX_AUDIO_FILES || 1;
   const MAX_TEXT_FILES = Config.getServerConfig().MAX_TEXT_FILES || 5;
-  const MAX_LONG_EDGE = Config.getServerConfig().MAX_LONG_EDGE || 1568;
-  const MAX_IMAGE_SIZE = Config.getServerConfig().MAX_IMAGE_SIZE || 5242880;
-  
-  // ==========================
-  //  IndexedDB関連の処理
-  // ==========================
-  function openChatHistoryDB(): Promise<IDBDatabase> {
-    return indexedDBUtils.openDB("ChatHistoryDB", 1, (db) => {
-      if (!db.objectStoreNames.contains("chatHistory")) {
-        db.createObjectStore("chatHistory", { keyPath: "id" });
-      }
-    });
-  }
+  const MAX_IMAGE_SIZE = Config.getServerConfig().MAX_IMAGE_SIZE || 20 * 1024 * 1024;
+  const MAX_LONG_EDGE = Config.getServerConfig().MAX_LONG_EDGE || 3008;
 
-  const loadChatHistories = useCallback(async () => {
-    try {
-      const db = await openChatHistoryDB();
-      const transaction = db.transaction(["chatHistory"], "readonly");
-      const store = transaction.objectStore("chatHistory");
-      store.getAll().onsuccess = (e) => {
-        const histories = (e.target as IDBRequest).result as ChatHistory[];
-        const sortedHistories = histories
-          .sort(
-            (a, b) =>
-              new Date(b.lastPromptDate).getTime() -
-              new Date(a.lastPromptDate).getTime()
-          )
-          .slice(0, 30);
-        setChatHistories(sortedHistories);
-      };
-    } catch (error) {
-      console.error("履歴読み込みエラー:", error);
-    }
-  }, []);
-
-  // ==========================
-  //  初期化処理
-  // ==========================
+  /**
+   * 初期化処理
+   */
   useEffect(() => {
-    const initDB = async () => {
-      try {
-        await openChatHistoryDB();
-        console.log("IndexedDB初期化成功");
-        loadChatHistories();
-      } catch (error) {
-        console.error("IndexedDB初期化エラー:", error);
-      }
-    };
-
-    initDB();
-  }, [loadChatHistories]);
-
-  // ==========================
-  //  利用可能なAIモデル一覧の取得
-  // ==========================
-  useEffect(() => {
-    const config = Config.getServerConfig();
-    if (config.MODELS) {
-      const { options: modelsArr, defaultOption } =
-        Config.parseOptionsWithDefault(config.MODELS);
-      setModels(modelsArr.filter((m) => m));
-      setSelectedModel(defaultOption);
+    if (token) {
+      loadModels();
     }
-  }, []);
+  }, [token, loadModels]);
 
-  const saveChatHistory = async (
-    currentMessages: Message[],
-    chatId: number | null
-  ) => {
-    if (currentMessages.length === 0) return;
-    const newChatId = chatId ?? Date.now();
-    if (!currentChatId) {
-      setCurrentChatId(newChatId);
-    }
-    const historyItem: ChatHistory = {
-      id: newChatId,
-      title: currentMessages[0].content.slice(0, 10) + "...",
-      messages: [...currentMessages],
-      lastPromptDate: new Date().toISOString(),
-    };
+  /**
+   * 新しいチャットを開始
+   */
+  const handleNewChat = async () => {
     try {
-      const db = await openChatHistoryDB();
-      const transaction = db.transaction(["chatHistory"], "readwrite");
-      const store = transaction.objectStore("chatHistory");
-      store.getAll().onsuccess = (e) => {
-        const histories = (e.target as IDBRequest).result as ChatHistory[];
-        const existingIndex = histories.findIndex((h) => h.id === chatId);
-        let updatedHistories = [...histories];
-        if (existingIndex !== -1) {
-          updatedHistories[existingIndex] = {
-            ...histories[existingIndex],
-            messages: historyItem.messages,
-            lastPromptDate: historyItem.lastPromptDate,
-          };
-        } else {
-          updatedHistories.push(historyItem);
-        }
-        updatedHistories = updatedHistories
-          .sort(
-            (a, b) =>
-              new Date(b.lastPromptDate).getTime() -
-              new Date(a.lastPromptDate).getTime()
-          )
-          .slice(0, 30);
-        store.clear().onsuccess = () => {
-          updatedHistories.forEach((history) => store.add(history));
-          setChatHistories(updatedHistories);
-        };
-      };
+      await createNewChat('新しいチャット', selectedModel);
+      clearMessages();
+      clearFiles();
+      clearError();
     } catch (error) {
-      console.error("履歴保存エラー:", error);
+      console.error('新しいチャット作成エラー:', error);
     }
   };
 
-  // ==========================
-  //  サイドバー関連の処理
-  // ==========================
-  const restoreHistory = (history: ChatHistory) => {
-    if (isEditMode) {
-      setInput("");
-      setSelectedFiles([]);
-      setIsEditMode(false);
+  /**
+   * チャット履歴を選択
+   */
+  const handleSelectHistory = async (chatId: number) => {
+    try {
+      const messages = await loadChatHistory(chatId);
+      loadMessages(messages);
+      clearFiles();
+      clearError();
+    } catch (error) {
+      console.error('チャット履歴読み込みエラー:', error);
     }
-    setCurrentChatId(history.id);
-    setMessages(history.messages);
   };
 
-  const clearChat = () => {
-    setMessages([]);
-    setCurrentChatId(null);
-    setSelectedFiles([]);
-    setInput("");
-    setIsEditMode(false);
+  /**
+   * チャット履歴を削除
+   */
+  const handleDeleteHistory = async (chatId: number) => {
+    try {
+      await deleteChatHistory(chatId);
+      
+      if (currentChatId === chatId) {
+        clearMessages();
+        clearFiles();
+      }
+    } catch (error) {
+      console.error('チャット履歴削除エラー:', error);
+    }
   };
 
-  const downloadHistory = () => {
-    const historyData = JSON.stringify(chatHistories, null, 2);
-    const blob = new Blob([historyData], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `chat-history-${new Date().toISOString()}.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+  /**
+   * チャット履歴をダウンロード
+   */
+  const handleDownloadHistory = async () => {
+    if (!currentChatId) return;
+
+    try {
+      const historyJson = await exportChatHistory(currentChatId);
+      const blob = new Blob([historyJson], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `chat_history_${currentChatId}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('チャット履歴ダウンロードエラー:', error);
+    }
   };
 
-  const uploadHistory = async (event: ChangeEvent<HTMLInputElement>) => {
+  /**
+   * チャット履歴をアップロード
+   */
+  const handleUploadHistory = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = async (e) => {
-      try {
-        const content = e.target?.result as string;
-        const uploadedHistories = JSON.parse(content) as ChatHistory[];
-        const db = await openChatHistoryDB();
-        const transaction = db.transaction(["chatHistory"], "readwrite");
-        const store = transaction.objectStore("chatHistory");
-        store.clear().onsuccess = () => {
-          uploadedHistories.forEach((history) => store.add(history));
-          setChatHistories(uploadedHistories);
-        };
-      } catch (error) {
-        console.error("履歴アップロードエラー:", error);
-      }
-    };
-    reader.readAsText(file);
-  };
 
-  // ==========================
-  //  履歴削除機能
-  // ==========================
-  const deleteHistory = async (historyId: number) => {
     try {
-      const db = await openChatHistoryDB();
-      const transaction = db.transaction(["chatHistory"], "readwrite");
-      const store = transaction.objectStore("chatHistory");
-      
-      // 履歴を削除
-      const request = store.delete(historyId);
-      
-      request.onsuccess = () => {
-        // 現在表示中の履歴が削除された場合、新規チャットに戻す
-        if (currentChatId === historyId) {
-          clearChat();
-        }
-        
-        // ローカルの履歴リストを更新
-        setChatHistories(prevHistories => 
-          prevHistories.filter(history => history.id !== historyId)
-        );
-      };
-      
-      request.onerror = (error) => {
-        console.error("履歴削除エラー:", error);
-        setErrorMessage("履歴の削除に失敗しました");
-      };
+      const text = await file.text();
+      const newChatId = await importChatHistory(text);
+      await handleSelectHistory(newChatId);
     } catch (error) {
-      console.error("履歴削除処理エラー:", error);
-      setErrorMessage("履歴の削除に失敗しました");
-    }
-  };
-
-  // ==========================
-  //  エディットモード関連の処理
-  // ==========================
-  const handleEditPrompt = (index: number) => {
-    if (isProcessing) return;
-    const messageToEdit = messages[index];
-    if (messageToEdit.role !== "user") return;
-
-    setBackupMessages(messages);
-    setInput(messageToEdit.content);
-
-    // ファイルデータの処理
-    const newFiles: FileData[] = [];
-
-    // 新形式のファイルがあれば追加
-    if (messageToEdit.files && messageToEdit.files.length > 0) {
-      newFiles.push(...messageToEdit.files);
+      console.error('チャット履歴アップロードエラー:', error);
     }
 
-    setSelectedFiles(newFiles);
-    setMessages(messages.slice(0, index));
-    setIsEditMode(true);
+    event.target.value = '';
   };
 
-  const cancelEditMode = () => {
-    if (backupMessages.length > 0) {
-      setMessages(backupMessages);
-      setBackupMessages([]);
-    }
-    setInput("");
-    setSelectedFiles([]);
-    setIsEditMode(false);
+  /**
+   * メッセージ送信
+   */
+  const handleSendMessage = async () => {
+    if ((!input.trim() && selectedFiles.length === 0) || isProcessing) return;
+
+    await sendMessage(input, selectedFiles);
+    clearFiles();
   };
 
-  // ==========================
-  //  ファイル処理関連の関数を他のコンポーネントに渡す
-  // ==========================
+  /**
+   * ファイルを追加
+   */
+  const handleAddFiles = (event: React.ChangeEvent<HTMLInputElement>) => {
+    handleFileSelect(event);
+  };
+
+  /**
+   * ファイルを削除
+   */
   const handleRemoveFile = (fileId: string) => {
-    setSelectedFiles(selectedFiles.filter((file) => file.id !== fileId));
+    const index = selectedFiles.findIndex(file => file.id === fileId);
+    if (index >= 0) {
+      removeFile(index);
+    }
   };
 
+  /**
+   * ファイルを表示
+   */
   const handleViewFile = (content: string, mimeType: string) => {
     setEnlargedContent({ content, mimeType });
   };
 
-  const handleCloseFileViewer = () => {
-    setEnlargedContent(null);
-  };
-
-  const addFiles = (newFiles: FileData[]) => {
-    setSelectedFiles([...selectedFiles, ...newFiles]);
-  };
-
-  // ==========================
-  //  音声ファイル最適化関数
-  // ==========================
-  // 音声ファイルを最適化する（最新のMAX_AUDIO_FILES個だけを残す）
-  const optimizeAudioFiles = (messages: Message[], maxAudioFiles: number): Message[] => {
-    // すべての音声ファイルを抽出
-    const allAudioFiles: { messageIndex: number, fileId: string }[] = [];
-
-    messages.forEach((msg, msgIndex) => {
-      if (msg.role === "user" && msg.files) {
-        msg.files.forEach(file => {
-          if (file.mimeType.startsWith('audio/')) {
-            allAudioFiles.push({
-              messageIndex: msgIndex,
-              fileId: file.id
-            });
-          }
-        });
-      }
-    });
-
-    if (allAudioFiles.length <= maxAudioFiles) {
-      return messages; // 最適化の必要なし
+  /**
+   * プロンプト編集
+   */
+  const handleEditPrompt = (index: number, messageContent: string) => {
+    if (!isEditMode) {
+      startEditMode();
     }
+    
+    // 指定されたメッセージ以降を削除
+    deleteMessagesFromIndex(index);
+    
+    // 入力欄に内容を設定
+    setInput(messageContent);
+  };
 
-    // 保持する最新の音声ファイルのIDを特定（最後のmaxAudioFiles個）
-    const keepAudioFileIds = new Set(
-      allAudioFiles
-        .slice(-maxAudioFiles) // 最後のmaxAudioFiles個を取得（最新のものたち）
-        .map(item => item.fileId) // ファイルIDを抽出
+  /**
+   * 生成停止
+   */
+  const handleStopGeneration = () => {
+    cancelMessage();
+  };
+
+  if (!token) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <div className="text-center">
+          <p className="text-gray-400 mb-4">チャットを利用するにはログインが必要です</p>
+        </div>
+      </div>
     );
+  }
 
-    // メッセージ配列をディープコピー
-    const optimizedMessages = JSON.parse(JSON.stringify(messages));
-
-    // 古い音声ファイルを削除
-    optimizedMessages.forEach((msg: Message) => {
-      if (msg.role === "user" && msg.files) {
-        msg.files = msg.files.filter((file: FileData) => {
-          // 音声ファイルでない場合は残す
-          if (!file.mimeType.startsWith('audio/')) {
-            return true;
-          }
-          // 音声ファイルの場合、keepAudioFileIdsに含まれているかチェック
-          return keepAudioFileIds.has(file.id);
-        });
-      }
-    });
-
-    return optimizedMessages;
-  };
-
-  // ==========================
-  //  メッセージ送信処理
-  // ==========================
-  const sendMessage = async () => {
-    let backupInput = "";
-    let backupFiles: FileData[] = [];
-    let backupMsgs: Message[] = [];
-
-    if (!input.trim() && selectedFiles.length === 0) return;
-    if (isProcessing || !token) return;
-
-    setErrorMessage("");
-
-    try {
-      setIsProcessing(true);
-      backupInput = input;
-      backupFiles = [...selectedFiles];
-      backupMsgs = [...messages];
-
-      const newUserMessage: Message = {
-        role: "user",
-        content: input.trim() || "[Files Uploaded]",
-        files: selectedFiles
-      };
-
-      // メッセージ配列を更新...
-      let updatedMessages: Message[] = [...messages, newUserMessage];
-
-      // 音声ファイルの最適化（最新のMAX_AUDIO_FILES個だけを残す）
-      updatedMessages = optimizeAudioFiles(updatedMessages, MAX_AUDIO_FILES);
-
-      setMessages(updatedMessages);
-      setInput("");
-      setSelectedFiles([]);
-      setIsEditMode(false);
-
-      abortControllerRef.current = new AbortController();
-      const signal = abortControllerRef.current.signal;
-
-      const chatRequest: ChatRequest = {
-        messages: updatedMessages,
-        model: selectedModel,
-      };
-
-      // リクエストIDを生成
-      const requestId = generateRequestId(); // "F" + uuid4の12桁
-      console.log(`生成されたリクエストID: ${requestId}`);
-
-      // 標準のHTTPリクエストを送信（ヘッダーにリクエストIDを追加）
-      const response = await fetch(`${API_BASE_URL}/backend/chat`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "text/event-stream",
-          Authorization: `Bearer ${token}`,
-          "X-Request-Id": requestId, // リクエストIDをヘッダーに追加
-        },
-        signal,
-        body: JSON.stringify(chatRequest),
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      let assistantMessage = "";
-      const reader = response.body?.getReader();
-      const decoder = new TextDecoder();
-
-      if (reader) {
-        updatedMessages = [
-          ...updatedMessages,
-          { role: "assistant", content: "" },
-        ];
-        setMessages(updatedMessages);
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          const text = decoder.decode(value, { stream: true });
-          assistantMessage += text;
-          setMessages((msgs) => {
-            const newMsgs = [...msgs];
-            newMsgs[newMsgs.length - 1] = {
-              role: "assistant",
-              content: assistantMessage,
-            };
-            return newMsgs;
-          });
-        }
-      }
-
-      updatedMessages[updatedMessages.length - 1].content = assistantMessage;
-      await saveChatHistory(updatedMessages, currentChatId);
-    } catch (error: any) {
-      if (error.name !== "AbortError") {
-        console.error("メッセージ送信エラー:", error);
-        setMessages(backupMsgs);
-        setInput(backupInput);
-        setSelectedFiles(backupFiles);
-        setErrorMessage(
-          error instanceof Error ? error.message : "不明なエラー"
-        );
-      }
-    } finally {
-      setIsProcessing(false);
-      abortControllerRef.current = null;
-    }
-  };
-
-  // ==========================
-  //  送信停止（AbortController利用）
-  // ==========================
-  const stopGeneration = () => {
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-      setIsProcessing(false);
-    }
-  };
-
-  // ==========================
-  //  JSX の描画
-  // ==========================
   return (
-    <div className="flex flex-1 h-[calc(100vh-64px)] mt-2 overflow-hidden">
-      {/* エラーモーダル */}
-      {errorMessage && (
-        <ErrorModal
-          message={errorMessage}
-          onClose={() => setErrorMessage("")}
-        />
-      )}
-
+    <div 
+      className="flex h-full bg-gray-900 text-white"
+      onDragEnter={handleDragEnter}
+      onDragLeave={handleDragLeave}
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
+    >
       {/* サイドバー */}
       <ChatSidebar
         models={models}
         selectedModel={selectedModel}
-        chatHistories={chatHistories}
         onModelChange={setSelectedModel}
-        onClearChat={clearChat}
-        onRestoreHistory={restoreHistory}
-        onDownloadHistory={downloadHistory}
-        onUploadHistory={uploadHistory}
-        onDeleteHistory={deleteHistory}
+        chatHistories={chatHistories}
+        currentChatId={currentChatId}
+        onNewChat={handleNewChat}
+        onSelectHistory={handleSelectHistory}
+        onClearAll={clearAllChatHistories}
+        onDownloadHistory={handleDownloadHistory}
+        onUploadHistory={handleUploadHistory}
+        onDeleteHistory={handleDeleteHistory}
       />
 
       {/* メインチャットエリア */}
@@ -513,19 +284,28 @@ const ChatPage: React.FC = () => {
 
         {/* 入力エリア */}
         <div className="border-t border-gray-700 p-4 bg-gray-800">
+          {/* 編集モード表示 */}
           {isEditMode && (
             <div className="mb-2 p-2 bg-yellow-200 text-yellow-800 rounded flex justify-between items-center">
               <span>※ 現在、プロンプトのやり直しモードです</span>
-              <button
-                onClick={cancelEditMode}
-                className="text-sm text-red-600 hover:underline"
-              >
-                キャンセル
-              </button>
+              <div className="space-x-2">
+                <button
+                  onClick={saveEditMode}
+                  className="text-sm text-green-600 hover:underline"
+                >
+                  保存
+                </button>
+                <button
+                  onClick={cancelEditMode}
+                  className="text-sm text-red-600 hover:underline"
+                >
+                  キャンセル
+                </button>
+              </div>
             </div>
           )}
 
-          {/* 選択済みファイルのプレビュー表示 */}
+          {/* 選択済みファイルのプレビュー */}
           {selectedFiles.length > 0 && (
             <FilePreview
               files={selectedFiles}
@@ -538,31 +318,49 @@ const ChatPage: React.FC = () => {
           <ChatInput
             input={input}
             setInput={setInput}
-            isProcessing={isProcessing}
+            isProcessing={isProcessing || isUploading}
             selectedFiles={selectedFiles}
-            addFiles={addFiles}
-            sendMessage={sendMessage}
-            stopGeneration={stopGeneration}
-            setErrorMessage={setErrorMessage}
+            addFiles={handleAddFiles}
+            sendMessage={handleSendMessage}
+            stopGeneration={handleStopGeneration}
+            setErrorMessage={() => {}} // エラーは統一的に処理
             maxLimits={{
               MAX_IMAGES,
               MAX_AUDIO_FILES,
               MAX_TEXT_FILES,
               MAX_IMAGE_SIZE,
-              MAX_LONG_EDGE
+              MAX_LONG_EDGE,
             }}
           />
         </div>
       </div>
 
-      {/* ファイル拡大表示用モーダル */}
+      {/* ファイルビューワーモーダル */}
       {enlargedContent && (
         <FileViewerModal
           content={enlargedContent.content}
           mimeType={enlargedContent.mimeType}
-          onClose={handleCloseFileViewer}
+          onClose={() => setEnlargedContent(null)}
         />
       )}
+
+      {/* エラーモーダル */}
+      {globalError && (
+        <ErrorModal
+          message={globalError}
+          onClose={clearError}
+        />
+      )}
+
+      {/* 隠しファイル入力 */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        accept="image/*,audio/*,.txt,.csv,.pdf,.docx"
+        onChange={handleAddFiles}
+        style={{ display: 'none' }}
+      />
     </div>
   );
 };

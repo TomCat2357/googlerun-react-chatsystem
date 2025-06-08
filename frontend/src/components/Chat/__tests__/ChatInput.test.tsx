@@ -24,18 +24,13 @@ vi.mock('../../../config', () => ({
 describe('ChatInput', () => {
   const mockProps = {
     input: '',
-    onInputChange: vi.fn(),
-    onSendMessage: vi.fn(),
+    setInput: vi.fn(),
+    isProcessing: false,
     selectedFiles: [],
-    onFileSelect: vi.fn(),
-    isLoading: false,
-    isSending: false,
-    models: ['gpt-3.5-turbo'],
-    selectedModel: 'gpt-3.5-turbo',
-    onModelChange: vi.fn(),
-    isEditMode: false,
-    onToggleEditMode: vi.fn(),
-    currentChatId: null,
+    addFiles: vi.fn(),
+    sendMessage: vi.fn(),
+    stopGeneration: vi.fn(),
+    setErrorMessage: vi.fn(),
     maxLimits: {
       MAX_IMAGES: 5,
       MAX_AUDIO_FILES: 3,
@@ -52,15 +47,15 @@ describe('ChatInput', () => {
     expect(textarea).toBeInTheDocument()
   })
 
-  it('テキスト入力時にonInputChangeが呼ばれる', () => {
-    const mockOnInputChange = vi.fn()
-    const propsWithMock = { ...mockProps, onInputChange: mockOnInputChange }
+  it('テキスト入力時にsetInputが呼ばれる', () => {
+    const mockSetInput = vi.fn()
+    const propsWithMock = { ...mockProps, setInput: mockSetInput }
 
     render(<ChatInput {...propsWithMock} />)
     
     const textarea = screen.getByPlaceholderText('メッセージを入力...')
     fireEvent.change(textarea, { target: { value: 'テストメッセージ' } })
     
-    expect(mockOnInputChange).toHaveBeenCalledWith('テストメッセージ')
+    expect(mockSetInput).toHaveBeenCalledWith('テストメッセージ')
   })
 })

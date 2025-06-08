@@ -5,25 +5,29 @@ import { ChatHistory } from "../../types/apiTypes";
 interface ChatSidebarProps {
   models: string[];
   selectedModel: string;
-  chatHistories: ChatHistory[];
   onModelChange: (model: string) => void;
-  onClearChat: () => void;
-  onRestoreHistory: (history: ChatHistory) => void;
+  chatHistories: ChatHistory[];
+  currentChatId: number | null;
+  onNewChat: () => void;
+  onSelectHistory: (chatId: number) => void;
+  onClearAll: () => void;
   onDownloadHistory: () => void;
   onUploadHistory: (event: ChangeEvent<HTMLInputElement>) => void;
-  onDeleteHistory?: (historyId: number) => void; // 新規追加：履歴削除関数
+  onDeleteHistory: (chatId: number) => void;
 }
 
 const ChatSidebar: React.FC<ChatSidebarProps> = ({
   models,
   selectedModel,
-  chatHistories,
   onModelChange,
-  onClearChat,
-  onRestoreHistory,
+  chatHistories,
+  currentChatId,
+  onNewChat,
+  onSelectHistory,
+  onClearAll,
   onDownloadHistory,
   onUploadHistory,
-  onDeleteHistory, // 新規追加
+  onDeleteHistory,
 }) => {
   // 削除ボタンのクリック時にイベントの伝播を止める
   const handleDeleteClick = (
@@ -57,7 +61,7 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
         </select>
       </div>
       <button
-        onClick={onClearChat}
+        onClick={onNewChat}
         className="w-full mb-6 p-2 bg-gray-700 hover:bg-gray-600 text-gray-100 rounded-lg transition-colors"
       >
         新規チャット
@@ -89,23 +93,21 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
           {chatHistories.map((history) => (
             <div
               key={history.id}
-              onClick={() => onRestoreHistory(history)}
+              onClick={() => onSelectHistory(history.id!)}
               className="p-2 hover:bg-gray-700 text-gray-100 rounded cursor-pointer transition-colors relative"
             >
               <div className="font-medium pr-6">{history.title}</div>
               <div className="text-sm text-gray-400">
-                {new Date(history.lastPromptDate).toLocaleString()}
+                {new Date(history.updatedAt).toLocaleString()}
               </div>
               {/* 削除ボタン（バツ印） */}
-              {onDeleteHistory && (
-                <button
-                  onClick={(e) => handleDeleteClick(e, history.id)}
-                  className="absolute top-2 right-2 w-5 h-5 flex items-center justify-center text-gray-400 hover:text-red-500 hover:bg-gray-600 rounded-full"
-                  title="この履歴を削除"
-                >
-                  ×
-                </button>
-              )}
+              <button
+                onClick={(e) => handleDeleteClick(e, history.id!)}
+                className="absolute top-2 right-2 w-5 h-5 flex items-center justify-center text-gray-400 hover:text-red-500 hover:bg-gray-600 rounded-full"
+                title="この履歴を削除"
+              >
+                ×
+              </button>
             </div>
           ))}
         </div>
