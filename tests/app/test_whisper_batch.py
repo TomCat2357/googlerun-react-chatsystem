@@ -45,7 +45,7 @@ class BatchFirestoreCollectionBehavior:
             self._documents[doc_id] = BatchFirestoreDocumentBehavior(doc_id, self)
         return self._documents[doc_id]
     
-    def where(self, field, operator=None, value=None, filter=None):
+    def where(self, field=None, operator=None, value=None, filter=None):
         return BatchFirestoreQueryBehavior(self, field, operator, value, filter)
 
 
@@ -58,7 +58,7 @@ class BatchFirestoreQueryBehavior:
         self.value = value
         self.filter = filter
     
-    def where(self, field, operator=None, value=None, filter=None):
+    def where(self, field=None, operator=None, value=None, filter=None):
         return BatchFirestoreQueryBehavior(self.collection, field, operator, value, filter)
     
     def limit(self, count: int):
@@ -67,7 +67,7 @@ class BatchFirestoreQueryBehavior:
     def order_by(self, field: str, direction=None):
         return self
     
-    def stream(self):
+    def stream(self, transaction=None):
         # テスト用のジョブデータを返す
         if self.collection._test_job_data:
             doc = BatchFirestoreDocumentBehavior("test-job-123", self.collection)

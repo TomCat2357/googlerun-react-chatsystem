@@ -38,7 +38,8 @@ class TestDiarizeAudio:
         # シンプルなモック方式でconftest.pyの競合を回避
         with patch("whisper_batch.app.diarize.Pipeline") as mock_pipeline_class, \
              patch("whisper_batch.app.diarize.save_dataframe") as mock_save, \
-             patch("whisper_batch.app.diarize.torchaudio.load") as mock_torchaudio:
+             patch("whisper_batch.app.diarize.torchaudio.load") as mock_torchaudio, \
+             patch("whisper_batch.app.diarize._GLOBAL_DIARIZE_PIPELINE", None):
             
             # MockSegmentクラスを定義
             class MockSegment:
@@ -70,6 +71,9 @@ class TestDiarizeAudio:
                     return iter([(seg, track) for seg, track, _ in mock_segments])
             
             mock_diarization.itertracks = mock_itertracks
+            
+            # パイプラインの呼び出し（__call__）をモック
+            # パイプライン自体が関数として呼び出されたときにdiarizationを返す
             mock_pipeline_instance.return_value = mock_diarization
             
             # 話者分離実行
@@ -106,7 +110,8 @@ class TestDiarizeAudio:
         
         with patch("whisper_batch.app.diarize.Pipeline") as mock_pipeline_class, \
              patch("whisper_batch.app.diarize.save_dataframe"), \
-             patch("whisper_batch.app.diarize.torchaudio.load") as mock_torchaudio:
+             patch("whisper_batch.app.diarize.torchaudio.load") as mock_torchaudio, \
+             patch("whisper_batch.app.diarize._GLOBAL_DIARIZE_PIPELINE", None):
             
             # MockSegmentクラスを定義
             class MockSegment:
@@ -159,7 +164,8 @@ class TestDiarizeAudio:
         
         with patch("whisper_batch.app.diarize.Pipeline") as mock_pipeline_class, \
              patch("whisper_batch.app.diarize.save_dataframe"), \
-             patch("whisper_batch.app.diarize.torchaudio.load") as mock_torchaudio:
+             patch("whisper_batch.app.diarize.torchaudio.load") as mock_torchaudio, \
+             patch("whisper_batch.app.diarize._GLOBAL_DIARIZE_PIPELINE", None):
             
             mock_pipeline_instance = MagicMock()
             mock_pipeline_class.from_pretrained.return_value = mock_pipeline_instance
@@ -448,7 +454,8 @@ class TestDiarizationParameterValidation:
         """様々なパラメータ組み合わせのテスト"""
         with patch("whisper_batch.app.diarize.Pipeline") as mock_pipeline_class, \
              patch("whisper_batch.app.diarize.save_dataframe"), \
-             patch("whisper_batch.app.diarize.torchaudio.load") as mock_torchaudio:
+             patch("whisper_batch.app.diarize.torchaudio.load") as mock_torchaudio, \
+             patch("whisper_batch.app.diarize._GLOBAL_DIARIZE_PIPELINE", None):
             
             mock_pipeline_instance = MagicMock()
             mock_pipeline_class.from_pretrained.return_value = mock_pipeline_instance
