@@ -164,6 +164,135 @@ pkill -f gcp_emulator_run.py
 - **メインフレームワーク**: pytest（高度な機能とプラグイン活用）
 - **サブフレームワーク**: unittest（標準ライブラリ、レガシーコード対応）
 
+### ユニットテストの基本原則
+
+#### 「1単位の振る舞い」の識別
+- **ユニットテストは1単位の振る舞い（a unit of Behavior）を検証すること**
+- 大きな振る舞いは分割して統治する（Divide and Conquer）
+- 処理フローロジックと中核ロジックを分離する
+
+#### 振る舞い分割の戦略
+```python
+# ❌ 悪い例：大きすぎる振る舞い（トランザクションスクリプト）
+def test_movie_ticket_price_calculation_all_patterns():
+    # 顧客分類、日付、会員フラグ、クーポンを全て組み合わせたテスト
+    # → 384ケースの組み合わせが必要、テスト設計が困難
+    pass
+
+# ✅ 良い例：小さく分割された振る舞い
+class TestRegularPriceCalculation:
+    """通常料金計算の振る舞いをテスト"""
+    def test_get_regular_price_大人の場合2000円を返すこと(self):
+        pass
+    
+    def test_get_regular_price_シニアの場合1500円を返すこと(self):
+        pass
+
+class TestDiscountPriceCalculation:
+    """割引料金計算の振る舞いをテスト"""
+    def test_find_cheapest_discount_水曜日割引が適用されること(self):
+        pass
+
+class TestFinalPriceCalculation:
+    """最終料金決定の振る舞いをテスト"""
+    def test_determine_final_price_クーポンが最安の場合クーポン料金を返すこと(self):
+        pass
+```
+
+### テストコードのSOS原則
+
+#### S - 構造化されている（Structured）
+```python
+# パッケージ構造：垂直分割（業務観点）で設計
+tests/
+├── chat/                    # チャット機能
+│   ├── test_message_handling.py
+│   └── test_ai_integration.py
+├── whisper/                 # 音声文字起こし機能
+│   ├── test_audio_processing.py
+│   └── test_batch_processing.py
+└── auth/                    # 認証機能
+    ├── test_firebase_auth.py
+    └── test_token_validation.py
+
+# テストケースの階層化（pytest内部クラス使用）
+class TestWhisperAPI:
+    """Whisper API のテスト"""
+    
+    class TestNormalCases:
+        """正常系テスト"""
+        def test_process_audio_有効なWAVファイルで文字起こし成功(self):
+            pass
+    
+    class TestErrorCases:
+        """異常系テスト"""
+        def test_process_audio_無効なファイル形式で400エラー(self):
+            pass
+    
+    class TestPerformance:
+        """性能テスト"""
+        def test_process_audio_5分音声が30秒以内で処理完了(self):
+            pass
+```
+
+#### O - 整理されている（Organized）
+```python
+# テスト設計の根拠をdocstringで明記
+class TestAudioFormatValidation:
+    """
+    音声ファイル形式検証のテスト
+    
+    テスト設計の根拠：
+    - 同値分割：有効形式（wav, mp3, m4a）vs 無効形式（txt, jpg等）
+    - 境界値分析：ファイルサイズ上限（100MB）付近
+    - エラー推測：拡張子と実際の形式が異なるケース
+    """
+    
+    @pytest.mark.parametrize(
+        ["file_format", "expected_result"],
+        [
+            ("wav", True),
+            ("mp3", True), 
+            ("m4a", True),
+            ("txt", False),
+            ("jpg", False),
+        ],
+        ids=[
+            "WAV形式_有効",
+            "MP3形式_有効",
+            "M4A形式_有効", 
+            "テキスト形式_無効",
+            "画像形式_無効",
+        ],
+    )
+    def test_validate_audio_format_各形式の検証結果が正しいこと(
+        self, file_format, expected_result
+    ):
+        pass
+```
+
+#### D - 自己文書化されている（Self-documenting）
+```python
+# AAA（Arrange-Act-Assert）パターンの徹底
+def test_whisper_batch_job_正常なパラメータで処理開始されること(self):
+    """Whisperバッチジョブが正常なパラメータで開始されることを検証"""
+    # Arrange（準備）
+    audio_file_path = "gs://bucket/test_audio.wav"
+    job_config = WhisperJobConfig(
+        language="ja",
+        speaker_diarization=True,
+        model="large-v3"
+    )
+    
+    # Act（実行）
+    result = whisper_service.start_batch_job(audio_file_path, job_config)
+    
+    # Assert（検証）
+    assert result.status == "SUBMITTED"
+    assert result.job_id is not None
+    assert result.estimated_completion_time > datetime.now()
+```
+
 ### テスト環境とエミュレータ使用
 
 #### テストレベル別のエミュレータ使用方針
@@ -189,14 +318,21 @@ pytest tests/app/ -v                    # 全テスト実行
 
 ### テスト命名規約
 ```python
-# 関数形式
-def test_関数・メソッド名_仕様():
+# 関数形式：条件と期待する振る舞いを明示
+def test_関数名_条件_期待する振る舞い():
     # テスト実装
 
-# クラス形式  
+# クラス形式：業務的な振る舞い単位でグループ化
 class TestClassName:
-    def test_メソッド名_仕様():
+    def test_メソッド名_条件_期待する振る舞い(self):
         # テスト実装
+
+# 具体例
+def test_calculate_movie_ticket_price_大人平日_通常料金2000円を返すこと(self):
+    pass
+
+def test_validate_audio_file_サイズ100MB超過_ValidationErrorを発生させること(self):
+    pass
 ```
 
 ### テスト構成
@@ -221,20 +357,95 @@ pytest tests/app/test_specific.py::test_func # 特定テスト実行
 ```
 
 ### テストベストプラクティス
-1. **AAA パターン**: Arrange（準備） → Act（実行） → Assert（検証）
-2. **mockは最小限**: 実環境に近い状態でテスト、autospecで引数チェック
-3. **parametrize活用**: 複数テストデータを1つのテスト関数で処理
-4. **フィクスチャ**: 共通セットアップ・クリーンアップロジックの再利用
-5. **マーカー**: テストスキップ・カテゴリ分け・条件付き実行
-6. **エミュレータ優先**: FirestoreとGCS操作はエミュレータを優先使用
-7. **環境分離**: テスト用プロジェクトIDで本番環境を保護
-8. **🎯 create_autospec + side_effect パターン（強く推奨）**: 安全で制御可能なモック設計
 
-### モック設計の黄金律（強く推奨）
+#### 質の良いテストの必要性
+**「単にテストを作成すれば十分ということではありません。作成されたテストの質が悪ければ、テストを全くしない場合と同じ結果になる」**
+
+#### 実践すべき原則
+1. **振る舞い駆動設計**: 実装の詳細ではなく、外部から観察可能な振る舞いをテスト
+2. **AAA パターン**: Arrange（準備） → Act（実行） → Assert（検証）
+3. **テスト容易性の重視**: 「テストしやすい設計」を意識したアーキテクチャ
+4. **parametrize活用**: 複数テストデータを1つのテスト関数で処理
+5. **フィクスチャ**: 共通セットアップ・クリーンアップロジックの再利用
+6. **マーカー**: テストスキップ・カテゴリ分け・条件付き実行
+7. **エミュレータ優先**: FirestoreとGCS操作はエミュレータを優先使用
+8. **環境分離**: テスト用プロジェクトIDで本番環境を保護
+9. **テストダブル最小化**: まず実オブジェクトでのテストを検討
+
+#### テスト容易性（Testability）の観点
+```python
+# ❌ テストしにくい設計例
+class AudioProcessor:
+    def process_file(self, file_path: str) -> str:
+        # ファイル読み込み、処理、保存が一体化
+        audio_data = self._read_file(file_path)
+        processed = self._apply_noise_reduction(audio_data)
+        processed = self._normalize_volume(processed)
+        output_path = f"/tmp/processed_{uuid4()}.wav"
+        self._save_file(processed, output_path)
+        return output_path
+        
+# ✅ テストしやすい設計例  
+class AudioProcessor:
+    def process_audio_data(self, audio_data: AudioData) -> AudioData:
+        """純粋な処理ロジック（副作用なし）"""
+        processed = self._apply_noise_reduction(audio_data)
+        return self._normalize_volume(processed)
+
+class AudioFileHandler:
+    def __init__(self, processor: AudioProcessor):
+        self.processor = processor
+        
+    def process_file(self, file_path: str, output_path: str) -> None:
+        """ファイルI/Oと処理の分離"""
+        audio_data = self._read_file(file_path)
+        processed = self.processor.process_audio_data(audio_data)
+        self._save_file(processed, output_path)
+```
+
+### テストダブル利用の基本方針
+
+#### **テストダブル利用指針（優先順位）**
+
+1. **まず、テストダブルを使わずに済むか考える**
+2. **スタブは目的を理解した上で適切に使えばOK**  
+3. **モックの利用は極めて慎重に**
+
+```python
+# ✅ 最優先：テストダブルなしでテスト
+def test_price_calculator_通常料金計算_テストダブルなし(self):
+    calculator = PriceCalculator()
+    result = calculator.calculate_regular_price(CustomerType.ADULT)
+    assert result == 2000
+
+# ✅ 必要に応じてスタブ使用
+def test_external_api_call_ネットワークエラー時の動作確認(self):
+    # 外部API呼び出しの制御にスタブを使用
+    with patch('external_api.get_exchange_rate') as stub_api:
+        stub_api.return_value = 110.0  # 間接入力の制御
+        
+        result = currency_converter.convert(100, 'USD', 'JPY')
+        assert result == 11000
+
+# ⚠️ 慎重に使用：モック（間接出力の観測）
+def test_notification_service_メール送信が実行されること(self):
+    # 本当に観測すべきか？副作用をなくす設計は可能か？を検討済み
+    with patch('email_service.send_email') as mock_email:
+        notification_service.notify_user("user@example.com", "メッセージ")
+        
+        # 外部との契約として観察可能な振る舞いのみ検証
+        mock_email.assert_called_once_with(
+            to="user@example.com",
+            subject="通知",
+            body="メッセージ"
+        )
+```
+
+### モック設計の実装ガイドライン
 
 #### **create_autospec() + side_effect パターンの使用**
 
-**このプロジェクトでは、全てのモックに `create_autospec() + side_effect` パターンを強く推奨します。**
+**このプロジェクトでは、テストダブルが必要な場合に `create_autospec() + side_effect` パターンを推奨します。**
 
 ```python
 from unittest.mock import create_autospec, patch

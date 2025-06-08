@@ -1,5 +1,90 @@
 アドバンスドなテスト技術とベストプラクティスを実装してください：
 
+## 振る舞い駆動設計とテスト戦略
+
+### 処理フローロジックと中核ロジックの分離
+```python
+# ❌ 悪い例：処理フローと中核ロジックが混在
+class AudioProcessingService:
+    def process_audio_request(self, audio_data, config):
+        # ファイル保存
+        file_path = self.save_to_temp_file(audio_data)
+        
+        # 音声処理
+        if config.noise_reduction:
+            audio_data = self.apply_noise_reduction(audio_data)
+        if config.volume_normalize:
+            audio_data = self.normalize_volume(audio_data)
+            
+        # 結果保存
+        result_path = self.save_processed_audio(audio_data)
+        
+        # 通知送信
+        self.send_notification(config.user_id, result_path)
+        
+        return result_path
+
+# ✅ 良い例：関心の分離
+class AudioProcessingService:
+    """アプリケーションサービス：処理フローに専念"""
+    def __init__(self, processor: AudioProcessor, storage: AudioStorage):
+        self.processor = processor
+        self.storage = storage
+    
+    def process_audio_request(self, audio_data, config):
+        # 1. 音声処理（中核ロジック）
+        processed_audio = self.processor.process_audio(audio_data, config)
+        
+        # 2. 保存（インフラ）
+        result_path = self.storage.save_audio(processed_audio)
+        
+        # 3. 最終料金決定（中核ロジック）
+        return result_path
+
+class AudioProcessor:
+    """中核ロジック：音声処理の振る舞いに専念"""
+    def process_audio(self, audio_data: AudioData, config: ProcessingConfig) -> AudioData:
+        if config.noise_reduction:
+            audio_data = self._apply_noise_reduction(audio_data)
+        if config.volume_normalize:
+            audio_data = self._normalize_volume(audio_data)
+        return audio_data
+```
+
+### 大きな振る舞いのテスト戦略
+```python
+# 中核ロジックのテスト：網羅的にテスト
+class TestAudioProcessor:
+    """音声処理の振る舞いを網羅的にテスト"""
+    
+    @pytest.mark.parametrize(
+        ["noise_reduction", "volume_normalize", "expected_operations"],
+        [
+            (True, True, ["noise_reduction", "volume_normalize"]),
+            (True, False, ["noise_reduction"]),
+            (False, True, ["volume_normalize"]),
+            (False, False, []),
+        ]
+    )
+    def test_process_audio_設定に応じた処理が実行されること(
+        self, noise_reduction, volume_normalize, expected_operations
+    ):
+        # 詳細なテスト実装
+        pass
+
+# アプリケーションサービスのテスト：代表的なパターンのみ
+class TestAudioProcessingService:
+    """処理フロー統合テスト：代表例＋エッジケースのみ"""
+    
+    def test_process_audio_request_正常な処理フロー(self):
+        """代表的な正常パターン"""
+        pass
+    
+    def test_process_audio_request_音声処理でエラー発生時(self):
+        """エラーハンドリングのエッジケース"""
+        pass
+```
+
 ## 1. 高度なpytestテクニック
 
 ### パラメータ化テスト（parametrize）
@@ -95,58 +180,145 @@ def test_data_persistence_実際のDBで永続化確認():
     pass
 ```
 
-## 2. モック戦略とベストプラクティス
+## 2. テストダブル戦略：スタブとモックの適切な使い分け
 
-### autospecを使った安全なモック
+### テストダブル利用指針の実践
+
+#### 1. まず、テストダブルなしでテスト
 ```python
-from unittest.mock import patch, Mock
+def test_audio_validator_有効なWAVファイルでTrue返却():
+    """純粋なロジックはテストダブル不要"""
+    validator = AudioValidator()
+    result = validator.is_valid_audio_file("sample.wav", file_size=1024*1024)
+    assert result is True
 
-@patch('backend.app.api.speech.VertexAI', autospec=True)
-def test_speech_api_vertex_ai_呼び出し引数が正しいこと(mock_vertex):
-    """autospecで引数チェックを強化"""
-    mock_instance = Mock()
-    mock_vertex.return_value = mock_instance
-    
-    # テスト実行
-    result = call_vertex_ai_speech("test.wav")
-    
-    # 引数チェック（autospecにより型チェックも実行される）
-    mock_vertex.assert_called_once_with(
-        project="test-project",
-        location="us-central1"
-    )
+def test_price_calculator_大人通常料金で2000円():
+    """ビジネスロジックのコア部分"""
+    calculator = PriceCalculator()
+    result = calculator.calculate_base_price(CustomerType.ADULT, MovieType.REGULAR)
+    assert result == 2000
 ```
 
-### コンテキストマネージャーとしてのモック
+#### 2. スタブ：間接入力の制御に使用
 ```python
-def test_file_upload_with_cleanup():
-    with patch('backend.app.utils.gcp_storage.upload_blob') as mock_upload:
-        mock_upload.return_value = "gs://bucket/file.wav"
+def test_weather_service_API障害時デフォルト値返却():
+    """外部API障害をスタブで再現"""
+    with patch('weather_api.get_current_weather') as stub_weather:
+        stub_weather.side_effect = ConnectionError("API接続失敗")
         
-        # テスト実行
-        result = upload_audio_file("test.wav")
+        service = WeatherService()
+        result = service.get_weather_info("Tokyo")
         
-        # 検証
+        # デフォルト値の検証
+        assert result.temperature == 20  # デフォルト値
+        assert result.status == "UNKNOWN"
+
+def test_file_processor_読み込みエラー時の処理():
+    """制御困難なファイルI/Oエラーを再現"""
+    with patch('builtins.open', side_effect=IOError("Permission denied")):
+        processor = FileProcessor()
+        result = processor.process_file("protected_file.txt")
+        
+        assert result.success is False
+        assert "Permission denied" in result.error_message
+```
+
+#### 3. モック：間接出力の観測（慎重に使用）
+```python
+def test_notification_service_重要通知でメール送信実行():
+    """
+    モック使用の事前検討済み事項：
+    - メール送信は外部との契約として観察可能な振る舞い
+    - 副作用をなくす設計変更は困難（通知が主目的）
+    - 実際のメール送信は統合テストで確認
+    """
+    with patch('email_service.send_email') as mock_email:
+        notification = NotificationService()
+        notification.notify_critical_alert("システム障害発生")
+        
+        # 外部システムとの契約を検証
+        mock_email.assert_called_once_with(
+            to="admin@company.com",
+            subject="【緊急】システム障害発生",
+            body="システム障害発生",
+            priority="HIGH"
+        )
+
+def test_audit_logger_機密操作でログ出力実行():
+    """監査ログの出力確認（コンプライアンス要件）"""
+    with patch('audit_logger.log_security_event') as mock_audit:
+        service = SecurityService()
+        service.access_sensitive_data(user_id="user123", data_type="personal_info")
+        
+        mock_audit.assert_called_once_with(
+            event_type="SENSITIVE_DATA_ACCESS",
+            user_id="user123", 
+            resource="personal_info",
+            timestamp=ANY
+        )
+```
+
+### autospecを使った安全なモック（必要時のみ）
+```python
+from unittest.mock import create_autospec, patch
+
+def test_gcs_upload_安全なモック設計():
+    """create_autospec + side_effectパターン"""
+    # 実際のクラスからautospecを作成
+    mock_client_class = create_autospec(storage.Client, spec_set=True)
+    
+    # カスタム振る舞いを定義
+    def upload_behavior(bucket_name, blob_name, file_path):
+        if not file_path.endswith('.wav'):
+            raise ValueError("Invalid file format")
+        return f"gs://{bucket_name}/{blob_name}"
+    
+    # autospecモックにカスタム振る舞いを注入
+    mock_instance = mock_client_class.return_value
+    mock_instance.upload_blob.side_effect = upload_behavior
+    
+    with patch('google.cloud.storage.Client', return_value=mock_instance):
+        uploader = FileUploader()
+        
+        # ✅ 正常ケース
+        result = uploader.upload_audio("bucket", "test.wav", "sample.wav")
         assert result.startswith("gs://")
-        mock_upload.assert_called_once()
+        
+        # ✅ エラーケース（カスタム振る舞いによる検証）
+        with pytest.raises(ValueError, match="Invalid file format"):
+            uploader.upload_audio("bucket", "test.txt", "invalid.txt")
 ```
 
-### 複数レイヤーのモック
+### 複数レイヤーのテストダブル使用（統合テスト）
 ```python
-@patch('backend.app.api.whisper.pub_sub_client')
-@patch('backend.app.api.whisper.storage_client')
-@patch('backend.app.api.whisper.firestore_client')
-def test_whisper_api_integration_全依存関係をモック(
-    mock_firestore, mock_storage, mock_pubsub
-):
-    # 各モックの設定
-    mock_storage.upload_blob.return_value = "gs://bucket/audio.wav"
-    mock_pubsub.publish.return_value.result.return_value = "message-id"
-    mock_firestore.collection.return_value.document.return_value.set.return_value = None
-    
-    # テスト実行と検証
-    result = process_whisper_request("audio_data")
-    assert result["status"] == "processing"
+def test_whisper_processing_pipeline_統合テスト():
+    """
+    注意：統合テストでのみ複数モック使用
+    各コンポーネントの単体テストは個別に実施済み
+    """
+    with patch('gcp_storage.upload_blob') as stub_storage, \
+         patch('pub_sub.publish_message') as stub_pubsub, \
+         patch('firestore.save_document') as stub_firestore:
+        
+        # スタブの設定（間接入力制御）
+        stub_storage.return_value = "gs://bucket/audio.wav"
+        stub_pubsub.return_value.result.return_value = "msg-123"
+        stub_firestore.return_value = None
+        
+        # 統合処理の実行
+        result = whisper_pipeline.process_audio_request(
+            audio_data=b"fake_audio_data",
+            user_id="user123"
+        )
+        
+        # 統合結果の検証（各ステップの実行確認）
+        assert result["status"] == "processing"
+        assert result["job_id"] is not None
+        
+        # 各外部サービス呼び出しの確認
+        stub_storage.assert_called_once()
+        stub_pubsub.assert_called_once()
+        stub_firestore.assert_called_once()
 ```
 
 ## 3. テストデータ管理
