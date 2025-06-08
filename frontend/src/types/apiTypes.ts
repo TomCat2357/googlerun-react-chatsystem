@@ -91,3 +91,32 @@ export interface SpeakerStats {
     percentage: number;
   };
 }
+
+// Whisperジョブデータの型（バックエンドレスポンス用）
+export interface WhisperJobData {
+  id: string;
+  job_id: string;
+  user_id: string;
+  user_email: string;
+  filename: string;
+  description?: string;
+  recording_date?: string;
+  gcs_bucket_name: string;
+  // 注意: 音声URLは動的生成される（/whisper/jobs/{file_hash}/audio_url エンドポイント）
+  audio_size: number;
+  audio_duration_ms: number;
+  file_hash: string;
+  language?: string;
+  initial_prompt?: string;
+  status: 'queued' | 'launched' | 'processing' | 'completed' | 'failed' | 'canceled';
+  created_at: any;
+  updated_at: any;
+  process_started_at?: any;
+  process_ended_at?: any;
+  tags?: string[];
+  num_speakers?: number;
+  min_speakers?: number;
+  max_speakers?: number;
+  error_message?: string;
+  segments?: WhisperSegment[];  // 詳細表示時のみ含まれる
+}

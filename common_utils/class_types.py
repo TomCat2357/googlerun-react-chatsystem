@@ -76,6 +76,7 @@ class WhisperFirestoreData(BaseModel):
     description: str = "" # 音声ファイルの説明
     recording_date: str = "" # 録音日時。YYYY-MM-DD形式。
     gcs_bucket_name : str # GCSのバケット名
+    # 注意: 音声ファイルのGCSパスは WHISPER_AUDIO_BLOB テンプレート（{file_hash}/audio.wav）で決定される
     audio_size: int  # 音声ファイルのサイズ (バイト単位)
     audio_duration_ms: int  # 音声ファイルの再生時間 (ミリ秒単位)
     file_hash: str # 音声ファイルのハッシュ値。SHA256を使用。

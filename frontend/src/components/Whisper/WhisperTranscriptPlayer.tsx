@@ -17,11 +17,10 @@ interface WhisperTranscriptPlayerProps {
   jobData: {
     id: string;
     filename: string;
-    gcs_audio_url: string;
     segments: Segment[];
     audio_duration_ms?: number; // 音声全体の長さ（ミリ秒）
     audio_size?: number; // 音声全体のサイズ（バイト）
-    file_hash?: string; // ファイルハッシュを追加
+    file_hash: string; // ファイルハッシュ（音声URL生成に必要）
   };
   onSaveEdit: (editedSegments: any[]) => void;
 }
@@ -62,6 +61,10 @@ const WhisperTranscriptPlayer: React.FC<WhisperTranscriptPlayerProps> = ({
   const [speakerStats, setSpeakerStats] = useState<SpeakerStats>({});
   const [hasSpeakerConfigEdits, setHasSpeakerConfigEdits] = useState(false);
   const [selectedSpeakers, setSelectedSpeakers] = useState<Set<string>>(new Set());
+  
+  // 音声URL管理のstate
+  const [audioUrl, setAudioUrl] = useState<string>("");
+  const [audioUrlLoading, setAudioUrlLoading] = useState(false);
   
   // 新しい機能のためのstate
   const [isColorDisplayMode, setIsColorDisplayMode] = useState(true); // true: 色分け, false: 文字表示
@@ -180,6 +183,37 @@ const WhisperTranscriptPlayer: React.FC<WhisperTranscriptPlayerProps> = ({
     }
   };
 
+  // 音声URLを動的取得
+  const fetchAudioUrl = async () => {
+    if (!jobData.file_hash || audioUrlLoading) return;
+    
+    try {
+      setAudioUrlLoading(true);
+      const requestId = generateRequestId();
+      const response = await fetch(`${API_BASE_URL}/backend/whisper/jobs/${jobData.file_hash}/audio_url`, {
+        method: "GET",
+        headers: {
+          "Authorization": `Bearer ${token}`,
+          "X-Request-Id": requestId
+        }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setAudioUrl(data.audio_url);
+        console.log("音声URL取得成功:", jobData.file_hash);
+      } else {
+        throw new Error("音声URLの取得に失敗しました");
+      }
+    } catch (error) {
+      console.error("音声URL取得エラー:", error);
+      // エラー時はフォールバック処理を行わず、ユーザーに通知
+      alert("音声ファイルの読み込みに失敗しました");
+    } finally {
+      setAudioUrlLoading(false);
+    }
+  };
+
   // 初期データのロード
   useEffect(() => {
     if (jobData?.segments) {
@@ -191,6 +225,13 @@ const WhisperTranscriptPlayer: React.FC<WhisperTranscriptPlayerProps> = ({
       setSpeakerStats(stats);
     }
   }, [jobData]);
+
+  // 音声URL取得の初期化
+  useEffect(() => {
+    if (jobData.file_hash) {
+      fetchAudioUrl();
+    }
+  }, [jobData.file_hash]);
 
   // スピーカー設定の初期化
   useEffect(() => {
@@ -270,13 +311,13 @@ const WhisperTranscriptPlayer: React.FC<WhisperTranscriptPlayerProps> = ({
   };
 
   const handleSegmentDoubleClick = async (index: number) => {
-    if (!audioContextRef.current || !jobData || !jobData.segments[index]) {
-      console.error("AudioContextまたはジョブデータが利用できません");
+    if (!audioContextRef.current || !jobData || !jobData.segments[index] || !audioUrl) {
+      console.error("AudioContextまたはジョブデータ、音声URLが利用できません");
       return;
     }
 
     const segment = jobData.segments[index];
-    const { gcs_audio_url, audio_duration_ms, audio_size } = jobData;
+    const { audio_duration_ms, audio_size } = jobData;
 
     if (!audio_duration_ms || !audio_size || audio_duration_ms <= 0 || audio_size <= 0) {
       console.error("音声長さまたはサイズのデータが不正です。フォールバック処理を実行します。");
@@ -310,7 +351,7 @@ const WhisperTranscriptPlayer: React.FC<WhisperTranscriptPlayerProps> = ({
     }
 
     try {
-      const response = await fetch(gcs_audio_url, {
+      const response = await fetch(audioUrl, {
         headers: { Range: `bytes=${startByte}-${endByte}` },
       });
       
@@ -606,7 +647,7 @@ const WhisperTranscriptPlayer: React.FC<WhisperTranscriptPlayerProps> = ({
         {/* オーディオ要素 */}
         <audio
           ref={audioRef}
-          src={jobData.gcs_audio_url}
+          src={audioUrl}
           onTimeUpdate={handleTimeUpdate}
           onLoadedMetadata={handleLoadedMetadata}
           onPlay={() => setIsPlaying(true)}

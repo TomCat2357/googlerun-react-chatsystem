@@ -965,3 +965,66 @@ async def get_speaker_config(
     except Exception as e:
         logger.exception(f"スピーカー設定取得エラー: {file_hash}")
         return JSONResponse(status_code=500, content={"detail": f"スピーカー設定取得エラー: {str(e)}"})
+
+@router.get("/whisper/jobs/{file_hash}/audio_url")
+async def get_audio_url(
+    request: Request,
+    file_hash: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """音声ファイルの署名付きURLを動的生成して返す"""
+    try:
+        request_info: Dict[str, Any] = await log_request(
+            request, current_user, GENERAL_LOG_MAX_LENGTH
+        )
+        user_id = current_user["uid"]
+
+        # ユーザーの権限確認：file_hashに対応するジョブが存在し、そのユーザーのものかチェック
+        db = firestore.Client()
+        col = db.collection(WHISPER_JOBS_COLLECTION)
+        q = col.where(filter=FieldFilter("file_hash", "==", file_hash)).where(
+            filter=FieldFilter("user_id", "==", user_id)
+        )
+        doc = next(iter(q.stream()), None)
+        
+        if not doc:
+            raise HTTPException(status_code=404, detail="ジョブが見つかりません")
+
+        # WHISPER_AUDIO_BLOBテンプレートを使って音声ファイルのGCSパスを構築
+        audio_blob_filename = os.environ["WHISPER_AUDIO_BLOB"].format(
+            file_hash=file_hash,
+            ext="wav"  # whisper_batch/app/main.pyで常にwavに変換される
+        )
+        
+        storage_client = storage.Client()
+        bucket = storage_client.bucket(GCS_BUCKET_NAME)
+        blob = bucket.blob(audio_blob_filename)
+        
+        if not blob.exists():
+            raise HTTPException(status_code=404, detail="音声ファイルが見つかりません")
+        
+        # 署名付きURLを生成（1時間有効）
+        gcs_audio_url = blob.generate_signed_url(
+            version="v4",
+            expiration=datetime.timedelta(hours=1),
+            method="GET"
+        )
+        
+        logger.info(f"音声URL生成: {file_hash}")
+        response_data = {"audio_url": gcs_audio_url}
+        
+        return create_dict_logger(
+            response_data,
+            meta_info={
+                k: request_info[k]
+                for k in ("X-Request-Id", "path", "email")
+                if k in request_info
+            },
+            max_length=GENERAL_LOG_MAX_LENGTH,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"音声URL生成エラー: {file_hash}")
+        return JSONResponse(status_code=500, content={"detail": f"音声URL生成エラー: {str(e)}"})
