@@ -43,16 +43,26 @@ class TestBasicClass:
 
 
 def test_mock_basic():
-    """基本的なモックテスト"""
-    mock_obj = Mock()
-    mock_obj.method.return_value = "mocked"
+    """基本的なモックテスト（create_autospec推奨パターン）"""
+    # autospecを使用した安全なモック
+    class TestClass:
+        def method(self):
+            return "original"
     
-    assert mock_obj.method() == "mocked"
+    mock_class = create_autospec(TestClass, spec_set=True)
+    mock_instance = mock_class.return_value
+    mock_instance.method.return_value = "mocked"
+    
+    instance = mock_class()
+    assert instance.method() == "mocked"
 
 
-@patch('os.path.exists')
-def test_patch_decorator(mock_exists):
-    """patchデコレータのテスト"""
+def test_patch_decorator():
+    """patchデコレータのテスト（create_autospec推奨パターン）"""
+    # autospecを使用したos.path.existsのモック
+    mock_exists = create_autospec(os.path.exists, spec_set=True)
     mock_exists.return_value = True
     
-    assert os.path.exists("/fake/path") is True
+    with patch('os.path.exists', mock_exists):
+        assert os.path.exists("/fake/path") is True
+        mock_exists.assert_called_once_with("/fake/path")

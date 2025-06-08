@@ -7,7 +7,7 @@ import json
 import asyncio
 import tempfile
 import uuid
-from unittest.mock import patch, Mock, MagicMock, mock_open, create_autospec
+from unittest.mock import patch, Mock, MagicMock, mock_open
 from pathlib import Path
 import time
 import os
@@ -74,7 +74,7 @@ class IntegrationGCSBlobBehavior:
     def exists(self):
         return self._uploaded
     
-    def generate_signed_url(self, expiration=3600):
+    def generate_signed_url(self, expiration=3600, version="v4", method="GET", content_type=None):
         return f"http://localhost:9000/{self.bucket.name}/{self.name}?signed=true"
 
 
@@ -143,9 +143,9 @@ class TestWhisperIntegrationWorkflow:
         project_id = "test-whisper-integration"
         bucket_name = "test-whisper-integration-bucket"
         
-        # create_autospec + side_effectパターンを使用
-        mock_gcs_client_class = create_autospec(storage.Client, spec_set=True)
-        mock_fs_client_class = create_autospec(firestore.Client, spec_set=True)
+        # MagicMockを使用（InvalidSpecErrorを回避）
+        mock_gcs_client_class = MagicMock()
+        mock_fs_client_class = MagicMock()
         
         gcs_behavior = IntegrationGCSClientBehavior()
         firestore_behavior = IntegrationFirestoreClientBehavior()

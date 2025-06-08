@@ -189,7 +189,7 @@ class EnhancedGCSBlob:
         self._content = None
         self._size = 0
         
-    def generate_signed_url(self, expiration=None, method: str = "GET", **kwargs) -> str:
+    def generate_signed_url(self, expiration=None, method: str = "GET", version="v4", content_type=None, **kwargs) -> str:
         """署名付きURL生成（引数チェック付き）"""
         if method not in ["GET", "POST", "PUT", "DELETE"]:
             raise ValueError(f"Invalid method: {method}")

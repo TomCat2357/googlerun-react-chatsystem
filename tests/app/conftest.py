@@ -395,7 +395,7 @@ def sample_audio_file():
         audio.export(tmp_file.name, format="wav")
         yield tmp_file.name
     
-    # クリーンアップ
+        # クリーンアップ
     if os.path.exists(tmp_file.name):
         os.remove(tmp_file.name)
 
@@ -507,7 +507,7 @@ class EnhancedGCSBlob:
         self._content = None
         self._size = 0
         
-    def generate_signed_url(self, expiration=None, method: str = "GET", **kwargs) -> str:
+    def generate_signed_url(self, expiration=None, method: str = "GET", version="v4", content_type=None, **kwargs) -> str:
         if method not in ["GET", "POST", "PUT", "DELETE"]:
             raise ValueError(f"Invalid method: {method}")
         return f"https://storage.googleapis.com/{self.bucket_name}/{self.blob_name}?signed=true"
@@ -883,6 +883,78 @@ def sample_transcription_result():
     ]
 
 
+@pytest.fixture
+def sample_diarization_result():
+    """サンプルの話者分離結果データ"""
+    return [
+        {
+            "start": 0.0,
+            "end": 1.0,
+            "speaker": "SPEAKER_01"
+        },
+        {
+            "start": 1.0,
+            "end": 2.0,
+            "speaker": "SPEAKER_02"
+        },
+        {
+            "start": 2.0,
+            "end": 3.0,
+            "speaker": "SPEAKER_01"
+        }
+    ]
+
+
+@pytest.fixture
+def comprehensive_test_data():
+    """包括的なテストデータ（バリデーション・エラーケース含む）"""
+    return {
+        "valid_upload_requests": [
+            {
+                "audio_data": "VGVzdCBhdWRpbyBkYXRhIGVuY29kZWQgaW4gYmFzZTY0",
+                "filename": "test-audio.wav",
+                "gcs_object": "temp/test-audio.wav",
+                "original_name": "テスト音声.wav",
+                "language": "ja",
+                "num_speakers": 2
+            },
+            {
+                "audio_data": "QW5vdGhlciB0ZXN0IGF1ZGlvIGRhdGE=",
+                "filename": "meeting-recording.wav",
+                "gcs_object": "whisper/meeting-recording.wav",
+                "description": "会議の録音",
+                "tags": ["meeting", "important"],
+                "min_speakers": 1,
+                "max_speakers": 5
+            }
+        ],
+        "invalid_upload_requests": [
+            {
+                "filename": "incomplete.wav"
+                # audio_dataが欠落
+            },
+            {
+                "audio_data": 12345,  # 数値は無効
+                "filename": "invalid-type.wav"
+            },
+            {
+                "audio_data": "valid_data",
+                "filename": "document.pdf"  # 音声ファイルではない
+            }
+        ],
+        "realistic_transcription_segments": [
+            {"start": 0.0, "end": 2.3, "text": "おはようございます。今日は重要な会議の録音です。"},
+            {"start": 2.3, "end": 5.8, "text": "はい、よろしくお願いします。まず、プロジェクトの進捗状況についてお話しします。"},
+            {"start": 5.8, "end": 9.2, "text": "現在の開発進捗は約75%で、予定より少し遅れていますが、品質は良好です。"}
+        ],
+        "error_scenarios": {
+            "network_errors": ["Connection timeout", "Network unreachable"],
+            "permission_errors": ["Insufficient permissions", "Access denied"],
+            "validation_errors": ["Invalid file format", "File size too large"]
+        }
+    }
+
+
 # 重い依存関係を持つモジュールのインポートは後で行う
 @pytest_asyncio.fixture
 async def async_test_client(mock_gcp_services, mock_audio_processing, mock_whisper_services):
@@ -900,6 +972,104 @@ async def async_test_client(mock_gcp_services, mock_audio_processing, mock_whisp
     
     # クリーンアップ
     app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def performance_test_config():
+    """パフォーマンステスト用の設定"""
+    return {
+        "max_concurrent_requests": 5,
+        "response_timeout_seconds": 10.0,
+        "memory_threshold_mb": 100,
+        "large_file_size_mb": 50,
+        "stress_test_iterations": 10
+    }
+
+
+@pytest.fixture
+def advanced_mock_behaviors():
+    """高度なモック振る舞いのコレクション"""
+    return {
+        "gcs_error_simulation": {
+            "connection_timeout": lambda: Exception("Connection timeout"),
+            "permission_denied": lambda: Exception("Permission denied"),
+            "quota_exceeded": lambda: Exception("Quota exceeded")
+        },
+        "firestore_error_simulation": {
+            "document_not_found": lambda: Exception("Document not found"),
+            "transaction_failed": lambda: Exception("Transaction failed"),
+            "index_error": lambda: Exception("Index not found")
+        },
+        "whisper_processing_simulation": {
+            "model_load_error": lambda: Exception("Model loading failed"),
+            "transcription_error": lambda: Exception("Transcription failed"),
+            "unsupported_format": lambda: Exception("Unsupported audio format")
+        }
+    }
+
+
+@pytest.fixture
+def test_data_factory():
+    """テストデータのファクトリー関数"""
+    class TestDataFactory:
+        @staticmethod
+        def create_whisper_job(job_id=None, user_id=None, status="queued", **kwargs):
+            """基本的なWhisperジョブデータを作成"""
+            default_data = {
+                "job_id": job_id or f"test-job-{uuid.uuid4()}",
+                "user_id": user_id or TEST_USER["uid"],
+                "user_email": TEST_USER["email"],
+                "filename": "test-audio.wav",
+                "gcs_bucket_name": TEST_BUCKET_NAME,
+                "audio_size": 44100,
+                "audio_duration_ms": 1000,
+                "file_hash": f"hash-{uuid.uuid4().hex[:8]}",
+                "status": status,
+                "created_at": "2025-06-01T10:00:00Z",
+                "updated_at": "2025-06-01T10:00:00Z"
+            }
+            default_data.update(kwargs)
+            return default_data
+        
+        @staticmethod
+        def create_upload_request(valid=True, **kwargs):
+            """アップロードリクエストデータを作成"""
+            if valid:
+                default_data = {
+                    "audio_data": "VGVzdCBhdWRpbyBkYXRhIGVuY29kZWQgaW4gYmFzZTY0",
+                    "filename": "test-upload.wav",
+                    "gcs_object": "temp/test-upload.wav",
+                    "original_name": "テストアップロード.wav",
+                    "language": "ja",
+                    "num_speakers": 1
+                }
+            else:
+                # 無効なデータ（必須フィールド欠落）
+                default_data = {
+                    "filename": "incomplete.wav"
+                    # audio_data欠落
+                }
+            default_data.update(kwargs)
+            return default_data
+        
+        @staticmethod
+        def create_transcription_segments(count=3, language="ja"):
+            """文字起こしセグメントを作成"""
+            if language == "ja":
+                sample_texts = ["こんにちは", "今日はいい天気です", "ありがとうございます", "お疲れ様でした", "また明日"]
+            else:
+                sample_texts = ["Hello", "Good morning", "Thank you", "Good bye", "See you later"]
+            
+            segments = []
+            for i in range(min(count, len(sample_texts))):
+                segments.append({
+                    "start": float(i),
+                    "end": float(i + 1),
+                    "text": sample_texts[i]
+                })
+            return segments
+    
+    return TestDataFactory()
 
 
 @pytest.fixture
@@ -993,3 +1163,53 @@ def real_gcs_client(emulator_gcs):
         yield client
     except ImportError:
         pytest.skip("google-cloud-storage not available")
+
+
+@pytest.fixture
+def enhanced_test_metrics():
+    """テストメトリクスの収集と分析"""
+    import time
+    import psutil
+    import os
+    
+    class TestMetrics:
+        def __init__(self):
+            self.start_time = None
+            self.end_time = None
+            self.start_memory = None
+            self.peak_memory = None
+            self.process = psutil.Process(os.getpid())
+        
+        def start_measurement(self):
+            self.start_time = time.time()
+            self.start_memory = self.process.memory_info().rss
+        
+        def end_measurement(self):
+            self.end_time = time.time()
+            self.peak_memory = self.process.memory_info().rss
+        
+        def get_duration(self):
+            if self.start_time and self.end_time:
+                return self.end_time - self.start_time
+            return None
+        
+        def get_memory_usage(self):
+            if self.start_memory and self.peak_memory:
+                return {
+                    "start_mb": self.start_memory / 1024 / 1024,
+                    "peak_mb": self.peak_memory / 1024 / 1024,
+                    "increase_mb": (self.peak_memory - self.start_memory) / 1024 / 1024
+                }
+            return None
+        
+        def assert_performance_thresholds(self, max_duration_seconds=10.0, max_memory_increase_mb=50.0):
+            duration = self.get_duration()
+            memory_usage = self.get_memory_usage()
+            
+            if duration and duration > max_duration_seconds:
+                raise AssertionError(f"テスト実行時間が上限を超過: {duration:.2f}s > {max_duration_seconds}s")
+            
+            if memory_usage and memory_usage["increase_mb"] > max_memory_increase_mb:
+                raise AssertionError(f"メモリ使用量が上限を超過: {memory_usage['increase_mb']:.2f}MB > {max_memory_increase_mb}MB")
+    
+    return TestMetrics()

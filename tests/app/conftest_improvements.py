@@ -259,7 +259,7 @@ def enhanced_gcp_services_with_validation():
                 raise Exception("Blob does not exist")
             return self._content.decode('utf-8')
         
-        def generate_signed_url(self, expiration: int = 3600) -> str:
+        def generate_signed_url(self, expiration: int = 3600, version="v4", method="GET", content_type=None) -> str:
             return f"https://storage.googleapis.com/{self.bucket_name}/{self.name}?signed=true&exp={expiration}"
         
         def reload(self):
