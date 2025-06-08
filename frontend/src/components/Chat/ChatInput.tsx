@@ -105,7 +105,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
       const processedResults = await Promise.all(filePromises);
       
       // 結果を1次元配列に平坦化
-      let newFiles: FileData[] = [];
+      const newFiles: FileData[] = [];
       processedResults.forEach(result => {
         if (Array.isArray(result)) {
           newFiles.push(...result);
@@ -123,7 +123,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
       const totalTextCount = currentCounts.text + newCounts.text;
       
       let filteredFiles: FileData[] = [];
-      let errorMessages: string[] = [];
+      const errorMessages: string[] = [];
       
       // 画像ファイルの上限チェック
       if (totalImageCount > MAX_IMAGES) {
@@ -232,7 +232,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
       const processedResults = await Promise.all(fileDataPromises);
 
       // 結果を1次元配列に平坦化
-      let newFiles: FileData[] = [];
+      const newFiles: FileData[] = [];
       processedResults.forEach((result) => {
         if (Array.isArray(result)) {
           newFiles.push(...result);
@@ -250,7 +250,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
       const totalTextCount = currentCounts.text + newCounts.text;
       
       let filteredFiles: FileData[] = [];
-      let errorMessages: string[] = [];
+      const errorMessages: string[] = [];
       
       // 画像ファイルの上限チェック（画像アップロードの場合）
       if (isImageUpload) {

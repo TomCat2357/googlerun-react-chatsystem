@@ -153,7 +153,7 @@ const WhisperPage: React.FC = () => {
       
       // 利用可能なタグのリストを抽出
       const tagsSet = new Set<string>();
-      jobsList.forEach(job => {
+      jobsList.forEach((job: any) => {
         if (job.tags && Array.isArray(job.tags)) {
           job.tags.forEach((tag: string) => {
             tagsSet.add(tag);

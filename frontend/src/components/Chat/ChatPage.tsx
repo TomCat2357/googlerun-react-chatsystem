@@ -1,5 +1,5 @@
 // frontend/src/components/Chat/ChatPage.tsx
-import React, { useState, useRef, useEffect, ChangeEvent } from "react";
+import React, { useState, useRef, useEffect, ChangeEvent, useCallback } from "react";
 import { Message, ChatRequest, ChatHistory } from "../../types/apiTypes";
 import { useToken } from "../../hooks/useToken";
 import * as indexedDBUtils from "../../utils/indexedDBUtils";
@@ -50,37 +50,6 @@ const ChatPage: React.FC = () => {
   const MAX_LONG_EDGE = Config.getServerConfig().MAX_LONG_EDGE || 1568;
   const MAX_IMAGE_SIZE = Config.getServerConfig().MAX_IMAGE_SIZE || 5242880;
   
-
-  // ==========================
-  //  初期化処理
-  // ==========================
-  useEffect(() => {
-    const initDB = async () => {
-      try {
-        await openChatHistoryDB();
-        console.log("IndexedDB初期化成功");
-        loadChatHistories();
-      } catch (error) {
-        console.error("IndexedDB初期化エラー:", error);
-      }
-    };
-
-    initDB();
-  }, []);
-
-  // ==========================
-  //  利用可能なAIモデル一覧の取得
-  // ==========================
-  useEffect(() => {
-    const config = Config.getServerConfig();
-    if (config.MODELS) {
-      const { options: modelsArr, defaultOption } =
-        Config.parseOptionsWithDefault(config.MODELS);
-      setModels(modelsArr.filter((m) => m));
-      setSelectedModel(defaultOption);
-    }
-  }, []);
-
   // ==========================
   //  IndexedDB関連の処理
   // ==========================
@@ -92,7 +61,7 @@ const ChatPage: React.FC = () => {
     });
   }
 
-  const loadChatHistories = async () => {
+  const loadChatHistories = useCallback(async () => {
     try {
       const db = await openChatHistoryDB();
       const transaction = db.transaction(["chatHistory"], "readonly");
@@ -111,7 +80,37 @@ const ChatPage: React.FC = () => {
     } catch (error) {
       console.error("履歴読み込みエラー:", error);
     }
-  };
+  }, []);
+
+  // ==========================
+  //  初期化処理
+  // ==========================
+  useEffect(() => {
+    const initDB = async () => {
+      try {
+        await openChatHistoryDB();
+        console.log("IndexedDB初期化成功");
+        loadChatHistories();
+      } catch (error) {
+        console.error("IndexedDB初期化エラー:", error);
+      }
+    };
+
+    initDB();
+  }, [loadChatHistories]);
+
+  // ==========================
+  //  利用可能なAIモデル一覧の取得
+  // ==========================
+  useEffect(() => {
+    const config = Config.getServerConfig();
+    if (config.MODELS) {
+      const { options: modelsArr, defaultOption } =
+        Config.parseOptionsWithDefault(config.MODELS);
+      setModels(modelsArr.filter((m) => m));
+      setSelectedModel(defaultOption);
+    }
+  }, []);
 
   const saveChatHistory = async (
     currentMessages: Message[],

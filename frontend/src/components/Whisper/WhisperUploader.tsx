@@ -1,5 +1,5 @@
 // frontend/src/component/Whisper/WhisperUploader.tsx
-import React, { useRef, useState, useEffect } from "react";
+import React, { useRef, useState } from "react";
 import { toast } from "react-toastify";
 import * as Config from "../../config";
 import axios from "axios";
@@ -75,29 +75,25 @@ const WhisperUploader: React.FC<WhisperUploaderProps> = ({
     audio.src = url;
     
     try {
-      // 先に音声のメタデータを読み込む
-      await new Promise<void>((resolve, reject) => {
-        // ブラウザ差異を考慮した安全版の音声長さ取得
-        const getDurationSafely = (file: File): Promise<number> => {
-          return new Promise<number>(resolve => {
-            const audio = new Audio();
-            audio.preload = "metadata";
-            audio.onloadedmetadata = () => resolve(audio.duration);
-            audio.onerror = () => resolve(Number.MAX_VALUE);  // 失敗時はbackend側で検証
-            audio.src = URL.createObjectURL(file);
-          });
-        };
-        
-        // 音声長さを取得
-        const duration = await getDurationSafely(file);
-        
-        onAudioInfoChange({
-          duration: duration,
-          fileName: file.name,
-          fileSize: file.size,
-          mimeType: file.type,
+      // ブラウザ差異を考慮した安全版の音声長さ取得
+      const getDurationSafely = (file: File): Promise<number> => {
+        return new Promise<number>(resolve => {
+          const audio = new Audio();
+          audio.preload = "metadata";
+          audio.onloadedmetadata = () => resolve(audio.duration);
+          audio.onerror = () => resolve(Number.MAX_VALUE);  // 失敗時はbackend側で検証
+          audio.src = URL.createObjectURL(file);
         });
-        resolve();
+      };
+      
+      // 音声長さを取得
+      const duration = await getDurationSafely(file);
+        
+      onAudioInfoChange({
+        duration: duration,
+        fileName: file.name,
+        fileSize: file.size,
+        mimeType: file.type,
       });
       
       // 音声長さチェック

@@ -10,6 +10,7 @@ interface Segment {
   end: number;
   text: string;
   speaker: string;
+  showSpeaker?: boolean;
 }
 
 interface WhisperTranscriptPlayerProps {
@@ -424,7 +425,7 @@ const WhisperTranscriptPlayer: React.FC<WhisperTranscriptPlayerProps> = ({
 
     // 選択されたテキストがどのセグメントに属するかを特定
     const container = range.commonAncestorContainer;
-    let segmentElement = container.nodeType === Node.TEXT_NODE ? container.parentElement : container;
+    let segmentElement = container.nodeType === Node.TEXT_NODE ? container.parentElement : container as Element;
     
     // セグメント要素を見つけるまで上に遡る
     while (segmentElement && !segmentElement.getAttribute('data-segment-index')) {

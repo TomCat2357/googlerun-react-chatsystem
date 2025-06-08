@@ -80,8 +80,8 @@ const SpeechToTextPage = () => {
     // バイナリエンコーディングを削除し、JSONファイルとして保存
     const blob = new Blob([jsonString], { type: "application/json" });
 
-    let safeDescription = description.trim() ? description.trim() : "session";
-    let safeRecordingDate = recordingDate.trim()
+    const safeDescription = description.trim() ? description.trim() : "session";
+    const safeRecordingDate = recordingDate.trim()
       ? recordingDate.trim().replace(/[:]/g, "-")
       : new Date().toISOString().replace(/[:]/g, "-");
 
@@ -190,7 +190,7 @@ const SpeechToTextPage = () => {
       console.log(`音声送信リクエストID: ${requestId}`);
       
       // 標準のHTTPリクエストを使用
-      const response = await fetch(`${API_BASE_URL}/backend/speech2text`, {
+      const response = await fetch(`${API_BASE_URL}/speech2text`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
