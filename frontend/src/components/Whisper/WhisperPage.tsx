@@ -1,6 +1,7 @@
 // frontend/src/component/Whisper/WhisperPage.tsx
 import React, { useState, useEffect, useRef } from "react";
 import { useToken } from "../../hooks/useToken";
+import { useAuth } from "../../contexts/AuthContext";
 import * as Config from "../../config";
 import { generateRequestId } from '../../utils/requestIdUtils';
 import WhisperUploader from "./WhisperUploader";
@@ -11,6 +12,7 @@ import { WhisperUploadRequest, WhisperSegment } from "../../types/apiTypes";
 
 const WhisperPage: React.FC = () => {
   const token = useToken();
+  const { currentUser, loading } = useAuth();
   const API_BASE_URL: string = Config.API_BASE_URL;
 
   // 状態管理
@@ -102,7 +104,13 @@ const WhisperPage: React.FC = () => {
 
   // 初回読み込み時にジョブ一覧を取得
   useEffect(() => {
-    if (token) {
+    // ローディング中の場合は処理を待機
+    if (loading) {
+      return;
+    }
+    
+    // 認証されたユーザーとトークンが存在する場合のみ処理を実行
+    if (currentUser && token) {
       fetchJobs();
       
       // 既存のインターバルをクリア
@@ -119,14 +127,15 @@ const WhisperPage: React.FC = () => {
         }
       };
     }
-  }, [token, view]); // viewの変更も監視
+  }, [currentUser, token, loading, view]); // 認証状態とローディング状態も監視
   
   // view変更時にも更新
   useEffect(() => {
-    if (view === "jobs") {
+    // 認証状態とトークンをチェックしてからAPIを呼び出し
+    if (view === "jobs" && currentUser && token && !loading) {
       fetchJobs();
     }
-  }, [view]);
+  }, [view, currentUser, token, loading]);
 
   // ジョブ一覧を取得
   const fetchJobs = async () => {
@@ -438,6 +447,29 @@ const WhisperPage: React.FC = () => {
       setErrorMessage(error instanceof Error ? error.message : String(error));
     }
   };
+
+  // 認証状態チェック - ローディング中や未認証時の表示
+  if (loading) {
+    return (
+      <div className="p-4 overflow-y-auto bg-dark-primary text-white min-h-screen">
+        <h1 className="text-3xl font-bold mb-4">Whisper 音声文字起こし（バッチ処理）</h1>
+        <div className="flex items-center justify-center py-8">
+          <div className="text-gray-400">認証状態を確認中...</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!currentUser) {
+    return (
+      <div className="p-4 overflow-y-auto bg-dark-primary text-white min-h-screen">
+        <h1 className="text-3xl font-bold mb-4">Whisper 音声文字起こし（バッチ処理）</h1>
+        <div className="flex items-center justify-center py-8">
+          <div className="text-red-400">この機能を使用するにはログインが必要です。</div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="p-4 overflow-y-auto bg-dark-primary text-white min-h-screen">

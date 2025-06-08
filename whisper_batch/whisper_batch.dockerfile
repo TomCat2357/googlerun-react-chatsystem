@@ -33,6 +33,5 @@ COPY ./common_utils /common_utils
 RUN chmod +x /app/*.py
 
 # 6. デフォルトコマンド（メインのPythonスクリプトに変更）
-# 例: main.pyというファイルがある場合
-#CMD ["python3", "/app/main.py"]
-CMD ["bash"]
+# バッチ処理のメインスクリプトを実行
+CMD ["python3", "/app/main.py"]

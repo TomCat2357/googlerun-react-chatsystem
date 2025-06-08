@@ -187,8 +187,12 @@ def _process_job(db: firestore.Client, job: Dict[str, Any]) -> None:
         diarization_local_filename = f"{file_hash}_diarization.json" # Consistent naming
         diarization_local = tmp_dir / diarization_local_filename
 
-        is_single_speaker = num_speakers == 1 or (
-            num_speakers is None and max_speakers == 1 and min_speakers == 1 # min_speakersも考慮
+        # 単一話者判定ロジック: より明確で簡潔な判定
+        # 1. num_speakersが明示的に1の場合
+        # 2. num_speakersがNoneかつmax_speakersが1の場合（min_speakersは1がデフォルト）
+        is_single_speaker = (
+            num_speakers == 1 or 
+            (num_speakers is None and max_speakers == 1)
         )
 
         if is_single_speaker:

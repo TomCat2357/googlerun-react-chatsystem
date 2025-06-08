@@ -136,17 +136,20 @@ def _create_gcp_batch_job(job_data: WhisperFirestoreData) -> str:
     task_spec.max_retry_count = 2
     
     # Duration from audio_duration_ms
-    audio_duration_seconds = job_data.audio_duration_ms / 1000
+    audio_duration_seconds: float = job_data.audio_duration_ms / 1000
     # Ensure max_run_duration is at least a minimum value (e.g., 5 mins)
     # plus some buffer for the audio duration.
     # The logic from whisper_queue was max(300, audio_duration_seconds).
     # Let's use a base + audio duration * factor.
-    base_duration_sec = 300 # 5 minutes
+    base_duration_sec: int = 300  # 5 minutes
     # Timeout factor for audio, can be configured
-    audio_timeout_multiplier = float(_get_env_var("AUDIO_TIMEOUT_MULTIPLIER", "2.0"))
-    calculated_max_duration = base_duration_sec + (audio_duration_seconds * audio_timeout_multiplier)
+    audio_timeout_multiplier: float = float(_get_env_var("AUDIO_TIMEOUT_MULTIPLIER", "2.0"))
+    calculated_max_duration: float = base_duration_sec + (audio_duration_seconds * audio_timeout_multiplier)
 
-    task_spec.max_run_duration = Duration(seconds=int(calculated_max_duration))
+    # Ensure minimum duration and convert to int for Duration
+    # Support both int and float values from calculation
+    timeout_seconds: int = max(300, int(calculated_max_duration))
+    task_spec.max_run_duration = Duration(seconds=timeout_seconds)
 
 
     task_group = TaskGroup()
