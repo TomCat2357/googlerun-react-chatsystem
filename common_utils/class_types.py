@@ -11,17 +11,23 @@ class WhisperSegment(BaseModel):
     speaker: str
 
 
-# モデルクラス定義
+# モデルクラス定義（GeocodeLineDataは下で再定義）
+
+
 class GeocodeLineData(BaseModel):
     query: str
-    has_geocode_cache: Optional[bool] = False
-    has_satellite_cache: Optional[bool] = False
-    has_streetview_cache: Optional[bool] = False
+    hasGeocodeCache: Optional[bool] = Field(default=False, alias="has_geocode_cache")
+    hasSatelliteCache: Optional[bool] = Field(default=False, alias="has_satellite_cache")
+    hasStreetviewCache: Optional[bool] = Field(default=False, alias="has_streetview_cache")
     latitude: Optional[float] = None
     longitude: Optional[float] = None
 
+    class Config:
+        populate_by_name = True  # camelCaseとsnake_case両方を受け入れ
+        extra = "forbid"
 
-class GeocodeRequest(BaseModel):
+
+class GeocodingRequest(BaseModel):  # 名前をフロントエンドに合わせる
     mode: str
     lines: List[GeocodeLineData]
     options: Dict[str, Any]
@@ -30,6 +36,15 @@ class GeocodeRequest(BaseModel):
 class ChatRequest(BaseModel):
     messages: List[Dict[str, Any]]
     model: str
+    chunked: Optional[bool] = None
+    chunkId: Optional[str] = Field(default=None, alias="chunk_id")
+    chunkIndex: Optional[int] = Field(default=None, alias="chunk_index")
+    totalChunks: Optional[int] = Field(default=None, alias="total_chunks")
+    chunkData: Optional[str] = Field(default=None, alias="chunk_data")
+
+    class Config:
+        populate_by_name = True  # camelCaseとsnake_case両方を受け入れ
+        extra = "forbid"
 
 
 class SpeechToTextRequest(BaseModel):
@@ -49,69 +64,65 @@ class GenerateImageRequest(BaseModel):
     person_generation: Optional[str] = None
 
 
-# WhisperのuploadのAPI用モデルクラス
+# WhisperのuploadのAPI用モデルクラス（フロントエンドに合わせる）
 class WhisperUploadRequest(BaseModel):
-    audio_data: str
-    filename: str
+    audioData: Optional[str] = Field(default=None, alias="audio_data")  # 旧方式ではBase64データ
+    gcsObject: Optional[str] = Field(default=None, alias="gcs_object")  # 新方式ではGCSオブジェクト名
+    originalName: Optional[str] = Field(default=None, alias="original_name") # 元のファイル名
+    filename: Optional[str] = None    # 互換性のために残す
     description: Optional[str] = ""
-    recording_date: Optional[str] = ""
+    recordingDate: Optional[str] = Field(default="", alias="recording_date")
     tags: Optional[List[str]] = []  # タグのリスト
     # 話者数関連パラメータを追加
-    language: str = "ja" # 言語コード。デフォルトは日本語
-    initial_prompt: str = "" # Whisperの初期プロンプト。デフォルトは空文字列。
-    num_speakers: Optional[int] = None  # 明示的に指定された話者数
-    min_speakers: Optional[int] = 1  # 最小話者数（自動検出の範囲指定用）
-    max_speakers: Optional[int] = 6  # 最大話者数（自動検出の範囲指定用）
-    # GCSベースのワークフロー用フィールドを追加
-    gcs_object: Optional[str] = None  # GCSオブジェクト名（GCSベースワークフロー用）
-    original_name: Optional[str] = None  # 元のファイル名（GCSベースワークフロー用）
-
-
-# WhisperのFirestoreデータの型に segments を追加
-class WhisperFirestoreData(BaseModel):
-    job_id: str # ジョブID。リクエストIDをそのまま使用
-    user_id: str # ユーザーのID。Firebase AuthのUIDを使用
-    user_email: str # ユーザーのメールアドレス
-    filename: str # 元の音声ファイルの名前。GCS上のファイル名ではない。
-    description: str = "" # 音声ファイルの説明
-    recording_date: str = "" # 録音日時。YYYY-MM-DD形式。
-    gcs_bucket_name : str # GCSのバケット名
-    # 注意: 音声ファイルのGCSパスは WHISPER_AUDIO_BLOB テンプレート（{file_hash}/audio.wav）で決定される
-    audio_size: int  # 音声ファイルのサイズ (バイト単位)
-    audio_duration_ms: int  # 音声ファイルの再生時間 (ミリ秒単位)
-    file_hash: str # 音声ファイルのハッシュ値。SHA256を使用。
-    language: str = "ja" # 音声ファイルの言語。デフォルトは日本語。
-    initial_prompt: str = ""  # Whisperの初期プロンプト。デフォルトは空文字列。
-    status: str  # "queued", "processing", "completed", "failed", "canceled"
-    created_at: Any = None  # FirestoreのSERVER_TIMESTAMPを使用するため
-    updated_at: Any = None  # FirestoreのSERVER_TIMESTAMPを使用するため
-    process_started_at: Optional[Any] = None
-    process_ended_at: Optional[Any] = None
-    tags: List[str] = []
-
-    # 以下の話者数関連フィールドを追加
-    num_speakers: Optional[int] = None  # 指定された話者数
-    min_speakers: Optional[int] = 1  # 最小話者数（範囲指定の場合）
-    max_speakers: Optional[int] = 1  # 最大話者数（範囲指定の場合）
-
-    error_message: Optional[str] = None
+    language: Optional[str] = "ja" # 言語コード。デフォルトは日本語
+    initialPrompt: str = Field(default="", alias="initial_prompt") # Whisperの初期プロンプト。デフォルトは空文字列。
+    numSpeakers: Optional[int] = Field(default=None, alias="num_speakers")  # 明示的に指定された話者数
+    minSpeakers: Optional[int] = Field(default=1, alias="min_speakers")  # 最小話者数（自動検出の範囲指定用）
+    maxSpeakers: Optional[int] = Field(default=6, alias="max_speakers")  # 最大話者数（自動検出の範囲指定用）
 
     class Config:
-        # 追加のフィールドを許可しない
+        populate_by_name = True  # camelCaseとsnake_case両方を受け入れ
         extra = "forbid"
 
-    # 例：特定のフィールドのバリデーション
-    # クラス変数として有効なステータスを定義
-    VALID_STATUSES: ClassVar[List[str]] = ["queued", "launched", "processing", "completed", "failed", "canceled"]
-    
-    @field_validator("status")
-    @classmethod
-    def validate_status(cls, v):
-        if v not in cls.VALID_STATUSES:
-            raise ValueError(
-                f"無効なステータス: {v}. 有効なステータス: {cls.VALID_STATUSES}"
-            )
-        return v
+
+# WhisperのFirestoreデータの型に segments を追加（フロントエンドのWhisperJobDataと統一）
+class WhisperJobData(BaseModel):  # 名前をフロントエンドに合わせる
+    id: Optional[str] = None  # FirestoreドキュメントのID
+    jobId: str = Field(alias="job_id")  # ジョブID。リクエストIDをそのまま使用
+    userId: str = Field(alias="user_id")  # ユーザーのID。Firebase AuthのUIDを使用
+    userEmail: str = Field(alias="user_email")  # ユーザーのメールアドレス
+    filename: str # 元の音声ファイルの名前。GCS上のファイル名ではない。
+    description: Optional[str] = "" # 音声ファイルの説明
+    recordingDate: Optional[str] = Field(default="", alias="recording_date") # 録音日時。YYYY-MM-DD形式。
+    gcsBucketName: str = Field(alias="gcs_bucket_name") # GCSのバケット名
+    # 注意: 音声ファイルのGCSパスは WHISPER_AUDIO_BLOB テンプレート（{file_hash}/audio.wav）で決定される
+    audioSize: int = Field(alias="audio_size")  # 音声ファイルのサイズ (バイト単位)
+    audioDurationMs: int = Field(alias="audio_duration_ms")  # 音声ファイルの再生時間 (ミリ秒単位)
+    fileHash: str = Field(alias="file_hash") # 音声ファイルのハッシュ値。SHA256を使用。
+    language: Optional[str] = "ja" # 音声ファイルの言語。デフォルトは日本語。
+    initialPrompt: str = Field(default="", alias="initial_prompt")  # Whisperの初期プロンプト。デフォルトは空文字列。
+    status: str  # "queued", "launched", "processing", "completed", "failed", "canceled"
+    createdAt: Any = Field(default=None, alias="created_at")  # FirestoreのSERVER_TIMESTAMPを使用するため
+    updatedAt: Any = Field(default=None, alias="updated_at")  # FirestoreのSERVER_TIMESTAMPを使用するため
+    processStartedAt: Optional[Any] = Field(default=None, alias="process_started_at")
+    processEndedAt: Optional[Any] = Field(default=None, alias="process_ended_at")
+    tags: Optional[List[str]] = []
+
+    # 以下の話者数関連フィールドを追加
+    numSpeakers: Optional[int] = Field(default=None, alias="num_speakers")  # 指定された話者数
+    minSpeakers: Optional[int] = Field(default=1, alias="min_speakers")  # 最小話者数（範囲指定の場合）
+    maxSpeakers: Optional[int] = Field(default=1, alias="max_speakers")  # 最大話者数（範囲指定の場合）
+
+    errorMessage: Optional[str] = Field(default=None, alias="error_message")
+    segments: Optional[List[WhisperSegment]] = None  # 詳細表示時のみ含まれる
+
+    class Config:
+        populate_by_name = True  # camelCaseとsnake_case両方を受け入れ
+        extra = "forbid"
+
+
+# 下位互換性のためのエイリアス
+WhisperFirestoreData = WhisperJobData
 
 
 # Whisper編集リクエストの型
@@ -127,9 +138,10 @@ class SpeakerConfigItem(BaseModel):
         extra = "forbid"
 
 class WhisperSpeakerConfigRequest(BaseModel):
-    speaker_config: Dict[str, SpeakerConfigItem]
+    speakerConfig: Dict[str, SpeakerConfigItem] = Field(alias="speaker_config")
 
     class Config:
+        populate_by_name = True  # camelCaseとsnake_case両方を受け入れ
         extra = "forbid"
 
 # whisper関係のpub/subメッセージの型

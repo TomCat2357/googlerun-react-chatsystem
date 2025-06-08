@@ -3,13 +3,13 @@ import React, { useMemo } from "react";
 interface Job {
   id: string;
   filename: string;
-  created_at: string;
-  updated_at?: string;
+  createdAt: string;
+  updatedAt?: string;
   status: "queued" | "launched" | "processing" | "completed" | "failed" | "error" | "canceled"; // statusの型定義更新
   progress?: number;
-  error_message?: string;
+  errorMessage?: string;
   tags?: string[];
-  file_hash: string; // ファイルハッシュを追加
+  fileHash: string; // ファイルハッシュを追加
 }
 
 interface WhisperJobListProps {
@@ -45,9 +45,9 @@ const WhisperJobList: React.FC<WhisperJobListProps> = ({
       .sort((a, b) => {
         // ソートロジック
         if (sortOrder === "date-desc") 
-          return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+          return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
         if (sortOrder === "date-asc") 
-          return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+          return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
         if (sortOrder === "status") {
           // ステータス順（処理中→起動済み→待機中→完了→失敗）
           const statusOrder = {
@@ -132,11 +132,11 @@ const WhisperJobList: React.FC<WhisperJobListProps> = ({
                       </div>
                     )}
                     <div className="text-xs text-gray-400 mt-1">
-                      Hash: {job.file_hash ? job.file_hash.substring(0, 8) + '...' : 'N/A'}
+                      Hash: {job.fileHash ? job.fileHash.substring(0, 8) + '...' : 'N/A'}
                     </div>
                   </td>
                   <td className="px-4 py-2">
-                    {new Date(job.created_at).toLocaleString()}
+                    {new Date(job.createdAt).toLocaleString()}
                   </td>
                   <td className="px-4 py-2">
                     {job.status === "queued" && (
@@ -175,14 +175,14 @@ const WhisperJobList: React.FC<WhisperJobListProps> = ({
                       </span>
                     )}
                     {(job.status === "failed" || job.status === "error") && (
-                      <span className="text-red-400 flex items-center" title={job.error_message}>
+                      <span className="text-red-400 flex items-center" title={job.errorMessage}>
                         <span className="mr-2">❌</span> {job.status === "failed" ? "失敗" : "エラー"}
                       </span>
                     )}
                   </td>
                   <td className="px-4 py-2 flex gap-2">
                     <button
-                      onClick={() => onJobSelect(job.id, job.file_hash)}
+                      onClick={() => onJobSelect(job.id, job.fileHash)}
                       className="px-3 py-1 rounded bg-blue-500 hover:bg-blue-600"
                     >
                       {job.status === "completed" ? "再生・編集" : "詳細"}
@@ -191,7 +191,7 @@ const WhisperJobList: React.FC<WhisperJobListProps> = ({
                     {/* キュー待ちのジョブにはキャンセルボタンを表示 */}
                     {onCancel && job.status === "queued" && (
                       <button
-                        onClick={() => onCancel(job.id, job.file_hash)}
+                        onClick={() => onCancel(job.id, job.fileHash)}
                         className="px-3 py-1 rounded bg-red-600 hover:bg-red-700 text-white"
                       >
                         キャンセル
@@ -201,7 +201,7 @@ const WhisperJobList: React.FC<WhisperJobListProps> = ({
                     {/* 完了/失敗/キャンセル済みのジョブには再キューボタンを表示 */}
                     {onRetry && ["completed", "failed", "canceled"].includes(job.status) && (
                       <button
-                        onClick={() => onRetry(job.id, job.file_hash)}
+                        onClick={() => onRetry(job.id, job.fileHash)}
                         className="px-3 py-1 rounded bg-yellow-600 hover:bg-yellow-700 text-white"
                       >
                         再キュー

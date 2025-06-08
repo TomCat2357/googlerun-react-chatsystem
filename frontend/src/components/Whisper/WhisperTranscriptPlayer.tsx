@@ -18,9 +18,9 @@ interface WhisperTranscriptPlayerProps {
     id: string;
     filename: string;
     segments: Segment[];
-    audio_duration_ms?: number; // 音声全体の長さ（ミリ秒）
-    audio_size?: number; // 音声全体のサイズ（バイト）
-    file_hash: string; // ファイルハッシュ（音声URL生成に必要）
+    audioDurationMs?: number; // 音声全体の長さ（ミリ秒）
+    audioSize?: number; // 音声全体のサイズ（バイト）
+    fileHash: string; // ファイルハッシュ（音声URL生成に必要）
   };
   onSaveEdit: (editedSegments: any[]) => void;
 }
@@ -128,11 +128,11 @@ const WhisperTranscriptPlayer: React.FC<WhisperTranscriptPlayerProps> = ({
 
   // スピーカー設定をサーバーから取得
   const fetchSpeakerConfig = async () => {
-    if (!jobData.file_hash) return;
+    if (!jobData.fileHash) return;
     
     try {
       const requestId = generateRequestId();
-      const response = await fetch(`${API_BASE_URL}/backend/whisper/jobs/${jobData.file_hash}/speaker_config`, {
+      const response = await fetch(`${API_BASE_URL}/backend/whisper/jobs/${jobData.fileHash}/speaker_config`, {
         method: "GET",
         headers: {
           "Authorization": `Bearer ${token}`,
@@ -157,18 +157,18 @@ const WhisperTranscriptPlayer: React.FC<WhisperTranscriptPlayerProps> = ({
 
   // スピーカー設定をサーバーに保存
   const saveSpeakerConfig = async () => {
-    if (!jobData.file_hash) return;
+    if (!jobData.fileHash) return;
     
     try {
       const requestId = generateRequestId();
-      const response = await fetch(`${API_BASE_URL}/backend/whisper/jobs/${jobData.file_hash}/speaker_config`, {
+      const response = await fetch(`${API_BASE_URL}/backend/whisper/jobs/${jobData.fileHash}/speaker_config`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           "Authorization": `Bearer ${token}`,
           "X-Request-Id": requestId
         },
-        body: JSON.stringify({ speaker_config: speakerConfig })
+        body: JSON.stringify({ speakerConfig: speakerConfig })
       });
 
       if (response.ok) {
@@ -185,12 +185,12 @@ const WhisperTranscriptPlayer: React.FC<WhisperTranscriptPlayerProps> = ({
 
   // 音声URLを動的取得
   const fetchAudioUrl = async () => {
-    if (!jobData.file_hash || audioUrlLoading) return;
+    if (!jobData.fileHash || audioUrlLoading) return;
     
     try {
       setAudioUrlLoading(true);
       const requestId = generateRequestId();
-      const response = await fetch(`${API_BASE_URL}/backend/whisper/jobs/${jobData.file_hash}/audio_url`, {
+      const response = await fetch(`${API_BASE_URL}/backend/whisper/jobs/${jobData.fileHash}/audio_url`, {
         method: "GET",
         headers: {
           "Authorization": `Bearer ${token}`,
@@ -201,7 +201,7 @@ const WhisperTranscriptPlayer: React.FC<WhisperTranscriptPlayerProps> = ({
       if (response.ok) {
         const data = await response.json();
         setAudioUrl(data.audio_url);
-        console.log("音声URL取得成功:", jobData.file_hash);
+        console.log("音声URL取得成功:", jobData.fileHash);
       } else {
         throw new Error("音声URLの取得に失敗しました");
       }
@@ -228,17 +228,17 @@ const WhisperTranscriptPlayer: React.FC<WhisperTranscriptPlayerProps> = ({
 
   // 音声URL取得の初期化
   useEffect(() => {
-    if (jobData.file_hash) {
+    if (jobData.fileHash) {
       fetchAudioUrl();
     }
-  }, [jobData.file_hash]);
+  }, [jobData.fileHash]);
 
   // スピーカー設定の初期化
   useEffect(() => {
     if (uniqueSpeakers.length > 0) {
       fetchSpeakerConfig();
     }
-  }, [uniqueSpeakers, jobData.file_hash]);
+  }, [uniqueSpeakers, jobData.fileHash]);
 
   // スピーカー設定が空の場合にデフォルト設定を適用
   useEffect(() => {
@@ -317,9 +317,9 @@ const WhisperTranscriptPlayer: React.FC<WhisperTranscriptPlayerProps> = ({
     }
 
     const segment = jobData.segments[index];
-    const { audio_duration_ms, audio_size } = jobData;
+    const { audioDurationMs, audioSize } = jobData;
 
-    if (!audio_duration_ms || !audio_size || audio_duration_ms <= 0 || audio_size <= 0) {
+    if (!audioDurationMs || !audioSize || audioDurationMs <= 0 || audioSize <= 0) {
       console.error("音声長さまたはサイズのデータが不正です。フォールバック処理を実行します。");
       if (audioRef.current) {
         audioRef.current.currentTime = segment.start;
@@ -341,9 +341,9 @@ const WhisperTranscriptPlayer: React.FC<WhisperTranscriptPlayerProps> = ({
       setIsPlaying(false);
     }
 
-    const bytesPerSecond = audio_size / (audio_duration_ms / 1000);
+    const bytesPerSecond = audioSize / (audioDurationMs / 1000);
     const startByte = Math.floor(segment.start * bytesPerSecond);
-    const endByte = Math.min(audio_size - 1, Math.floor(segment.end * bytesPerSecond));
+    const endByte = Math.min(audioSize - 1, Math.floor(segment.end * bytesPerSecond));
 
     if (startByte >= endByte) {
       console.warn("計算された開始バイトが終了バイト以上です。セグメント再生をスキップします:", segment);

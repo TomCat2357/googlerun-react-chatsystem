@@ -69,7 +69,7 @@ const WhisperPage: React.FC = () => {
       // 日付範囲でフィルタリング
       if (dateFrom) {
         const fromDate = new Date(dateFrom);
-        const jobDate = new Date(job.created_at);
+        const jobDate = new Date(job.createdAt);
         if (jobDate < fromDate) {
           return false;
         }
@@ -78,7 +78,7 @@ const WhisperPage: React.FC = () => {
       if (dateTo) {
         const toDate = new Date(dateTo);
         toDate.setHours(23, 59, 59, 999); // その日の終わりにする
-        const jobDate = new Date(job.created_at);
+        const jobDate = new Date(job.createdAt);
         if (jobDate > toDate) {
           return false;
         }
@@ -207,13 +207,13 @@ const WhisperPage: React.FC = () => {
 
       const requestId = generateRequestId();
       const requestData: WhisperUploadRequest = {
-        gcs_object: audioData.startsWith("gs://") ? audioData.substring(5) : audioData,
-        original_name: audioInfo.fileName,
+        gcsObject: audioData.startsWith("gs://") ? audioData.substring(5) : audioData,
+        originalName: audioInfo.fileName,
         description: description,
-        recording_date: recordingDate,
+        recordingDate: recordingDate,
         tags: tags,
         language: language,
-        initial_prompt: initialPrompt
+        initialPrompt: initialPrompt
       };
 
       const response = await fetch(`${API_BASE_URL}/backend/whisper`, {
@@ -233,9 +233,9 @@ const WhisperPage: React.FC = () => {
 
       const responseData = await response.json();
       
-      // レスポンスからjob_idとfile_hashを取得
-      const jobId = responseData.job_id;
-      const fileHash = responseData.file_hash;
+      // レスポンスからjobIdとfileHashを取得
+      const jobId = responseData.jobId;
+      const fileHash = responseData.fileHash;
       
       // アップロード成功のメッセージを表示
       alert(`音声ファイルがアップロードされました。順番に処理が開始されます。`);
@@ -329,7 +329,7 @@ const WhisperPage: React.FC = () => {
       const combinedJobData = {
         ...firestoreData,
         segments: segments,
-        file_hash: fileHash // file_hashを明示的に追加
+        fileHash: fileHash // fileHashを明示的に追加
       };
 
       setJobData(combinedJobData);

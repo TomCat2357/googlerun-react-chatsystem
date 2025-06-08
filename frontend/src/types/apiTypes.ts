@@ -29,9 +29,19 @@ export interface ChatHistory {
   updatedAt: Date;
 }
 
+// GeocodeLineDataの型定義（バックエンドと統一）
+export interface GeocodeLineData {
+  query: string;
+  hasGeocodeCache?: boolean;
+  hasSatelliteCache?: boolean;
+  hasStreetviewCache?: boolean;
+  latitude?: number;
+  longitude?: number;
+}
+
 export interface GeocodingRequest {
   mode: string;
-  lines: string[];
+  lines: GeocodeLineData[];  // string[]からGeocodeLineData[]に変更
   options: Record<string, any>;
 }
 
@@ -46,20 +56,20 @@ export interface Config {
   [key: string]: any;
 }
 
-// WhisperのAPIリクエスト用の型
+// WhisperのAPIリクエスト用の型（バックエンドと完全統一）
 export interface WhisperUploadRequest {
-  audio_data?: string;  // 旧方式ではBase64データ
-  gcs_object?: string;  // 新方式ではGCSオブジェクト名
-  original_name?: string; // 元のファイル名
+  audioData?: string;  // 旧方式ではBase64データ（camelCase統一）
+  gcsObject?: string;  // 新方式ではGCSオブジェクト名（camelCase統一）
+  originalName?: string; // 元のファイル名（camelCase統一）
   filename?: string;    // 互換性のために残す
   description?: string;
-  recording_date?: string;
+  recordingDate?: string; // camelCase統一
   tags?: string[];
   language?: string;
-  initial_prompt?: string;
-  num_speakers?: number;
-  min_speakers?: number;
-  max_speakers?: number;
+  initialPrompt?: string; // camelCase統一
+  numSpeakers?: number;   // camelCase統一
+  minSpeakers?: number;   // camelCase統一
+  maxSpeakers?: number;   // camelCase統一
 }
 
 // Whisperのセグメント型
@@ -78,9 +88,9 @@ export interface SpeakerConfig {
   };
 }
 
-// スピーカー設定保存用のリクエスト型
+// スピーカー設定保存用のリクエスト型（バックエンドと統一）
 export interface WhisperSpeakerConfigRequest {
-  speakerConfig: SpeakerConfig;
+  speakerConfig: SpeakerConfig;  // camelCase統一済み
 }
 
 // スピーカー統計情報の型
@@ -92,31 +102,31 @@ export interface SpeakerStats {
   };
 }
 
-// Whisperジョブデータの型（バックエンドレスポンス用）
+// Whisperジョブデータの型（バックエンドと完全統一・camelCase）
 export interface WhisperJobData {
-  id: string;
-  job_id: string;
-  user_id: string;
-  user_email: string;
+  id?: string;                   // FirestoreドキュメントのID（オプショナル）
+  jobId: string;                 // camelCase統一
+  userId: string;                // camelCase統一
+  userEmail: string;             // camelCase統一
   filename: string;
   description?: string;
-  recording_date?: string;
-  gcs_bucket_name: string;
+  recordingDate?: string;        // camelCase統一
+  gcsBucketName: string;         // camelCase統一
   // 注意: 音声URLは動的生成される（/whisper/jobs/{file_hash}/audio_url エンドポイント）
-  audio_size: number;
-  audio_duration_ms: number;
-  file_hash: string;
+  audioSize: number;             // camelCase統一
+  audioDurationMs: number;       // camelCase統一
+  fileHash: string;              // camelCase統一
   language?: string;
-  initial_prompt?: string;
+  initialPrompt?: string;        // camelCase統一
   status: 'queued' | 'launched' | 'processing' | 'completed' | 'failed' | 'canceled';
-  created_at: any;
-  updated_at: any;
-  process_started_at?: any;
-  process_ended_at?: any;
+  createdAt: any;                // camelCase統一
+  updatedAt: any;                // camelCase統一
+  processStartedAt?: any;        // camelCase統一
+  processEndedAt?: any;          // camelCase統一
   tags?: string[];
-  num_speakers?: number;
-  min_speakers?: number;
-  max_speakers?: number;
-  error_message?: string;
-  segments?: WhisperSegment[];  // 詳細表示時のみ含まれる
+  numSpeakers?: number;          // camelCase統一
+  minSpeakers?: number;          // camelCase統一
+  maxSpeakers?: number;          // camelCase統一
+  errorMessage?: string;         // camelCase統一
+  segments?: WhisperSegment[];   // 詳細表示時のみ含まれる
 }
