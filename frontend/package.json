@@ -10,7 +10,15 @@
     "preview": "vite preview",
     "test": "vitest",
     "test:ui": "vitest --ui",
-    "test:run": "vitest run"
+    "test:run": "vitest run",
+    "test:watch": "vitest --watch",
+    "test:coverage": "vitest run --coverage",
+    "test:coverage:ui": "vitest --ui --coverage",
+    "test:components": "vitest run src/components",
+    "test:utils": "vitest run src/utils",
+    "test:hooks": "vitest run src/hooks",
+    "test:contexts": "vitest run src/contexts",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@firebase/auth": "^1.8.2",

@@ -1,6 +1,6 @@
 import { render, screen, fireEvent } from '@testing-library/react'
 import { describe, it, expect, vi } from 'vitest'
-import ChatInput from '../ChatInput'
+import ChatInput from '../Chat/ChatInput'
 
 // Contextをモック
 vi.mock('../../../contexts/AuthContext', () => ({
