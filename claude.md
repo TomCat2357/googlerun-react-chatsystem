@@ -19,7 +19,6 @@ Google Cloud Platform で稼働し、AI チャット・画像生成・音声文�
 ├── common_utils/      # 共通ユーティリティ
 ├── tests/
 │   ├── backend/       # バックエンドテストコード
-│   ├── frontend/      # フロントエンドテストコード
 │   └── whisper_batch/ # Whisperバッチテストコード
 ```
 
@@ -31,10 +30,10 @@ cd backend && python -m app.main   # バックエンド
 python tests/app/gcp_emulator_run.py # エミュレータ
 
 # テスト実行
-pytest                              # 全体テスト
+pytest                              # バックエンド・Whisperバッチテスト
 pytest tests/backend/              # バックエンドのみ
-pytest tests/frontend/             # フロントエンドのみ
 pytest tests/whisper_batch/        # Whisperバッチのみ
+cd frontend && npm run test         # フロントエンド（React）テスト
 
 # ビルド
 cd frontend && npm run build       # フロントエンドビルド
@@ -221,16 +220,6 @@ tests/
 │   │   ├── test_firebase_auth.py
 │   │   └── test_token_validation.py
 │   └── requirements.txt     # バックエンドテスト用依存関係（uv addで管理）
-├── frontend/                # フロントエンドテスト（React）
-│   ├── components/          # コンポーネントテスト
-│   │   ├── test_chat_component.tsx
-│   │   └── test_audio_recorder.tsx
-│   ├── utils/               # ユーティリティテスト
-│   │   ├── test_validation.ts
-│   │   └── test_api_client.ts
-│   ├── integration/         # 統合テスト
-│   │   └── test_app_flow.tsx
-│   └── package.json         # フロントエンドテスト用依存関係（npm/yarn管理）
 └── whisper_batch/           # Whisperバッチテスト
     ├── audio_processing/    # 音声処理テスト
     │   ├── test_whisper_transcription.py
@@ -241,6 +230,22 @@ tests/
     ├── storage/             # ストレージテスト
     │   └── test_gcs_operations.py
     └── requirements.txt     # Whisperバッチテスト用依存関係（uv addで管理）
+
+# フロントエンドテスト構造（React + Vitest）
+frontend/
+├── src/
+│   ├── test/                # テスト設定
+│   │   └── setup.ts         # Vitestセットアップ
+│   ├── components/          # コンポーネントテスト（*.test.tsx）
+│   │   ├── ChatComponent.test.tsx
+│   │   └── AudioRecorder.test.tsx
+│   ├── utils/               # ユーティリティテスト（*.test.ts）
+│   │   ├── validation.test.ts
+│   │   └── apiClient.test.ts
+│   └── __tests__/           # 統合テスト（オプション）
+│       └── app.test.tsx
+├── vitest.config.ts         # Vitest設定ファイル
+└── package.json             # フロントエンドテスト用依存関係（npm管理）
 
 # テストケースの階層化（pytest内部クラス使用）
 class TestWhisperAPI:
@@ -334,18 +339,22 @@ pytest tests/backend/test_emulator_availability.py -v
 
 # 通常のテスト（モックベース）
 pytest tests/backend/ -m "not emulator" -v
-pytest tests/frontend/ -m "not emulator" -v
 pytest tests/whisper_batch/ -m "not emulator" -v
 
 # エミュレータ統合テスト（主にバックエンドとWhisperバッチ）
 pytest tests/backend/ -m emulator -v
 pytest tests/whisper_batch/ -m emulator -v
 
+# フロントエンドテスト（React + Vitest）
+cd frontend && npm run test                  # インタラクティブモード
+cd frontend && npm run test:run              # 1回実行
+cd frontend && npm run test:ui               # UI付きテスト
+
 # 全てのテスト（エミュレータ込み）
 python tests/backend/gcp_emulator_run.py &  # エミュレータ起動
 pytest tests/backend/ -v                    # バックエンドテスト実行
-pytest tests/frontend/ -v                   # フロントエンドテスト実行
 pytest tests/whisper_batch/ -v              # Whisperバッチテスト実行
+cd frontend && npm run test:run              # フロントエンドテスト実行
 ```
 
 ### テスト命名規約
@@ -370,7 +379,7 @@ def test_validate_audio_file_サイズ100MB超過_ValidationErrorを発生させ
 ### テスト構成
 ```
 tests/
-├── backend/                       # バックエンドテスト
+├── backend/                       # バックエンドテスト（Python + pytest）
 │   ├── test_emulator_availability.py  # エミュレータ利用可能性テスト
 │   ├── test_whisper_emulator_example.py # エミュレータ使用例
 │   ├── gcp_emulator_run.py        # エミュレータ起動スクリプト
@@ -378,15 +387,7 @@ tests/
 │   ├── conftest.py               # pytest設定・フィクスチャ
 │   ├── pytest.ini               # pytest設定ファイル
 │   └── ...
-├── frontend/                      # フロントエンドテスト（React）
-│   ├── components/               # Reactコンポーネントテスト
-│   ├── utils/                    # ユーティリティテスト
-│   ├── integration/              # 統合テスト
-│   ├── package.json              # フロントエンドテスト用依存関係
-│   ├── vitest.config.ts          # Vitest設定ファイル
-│   ├── setup.ts                  # テストセットアップ
-│   └── ...
-├── whisper_batch/                 # Whisperバッチテスト
+├── whisper_batch/                 # Whisperバッチテスト（Python + pytest）
 │   ├── audio_processing/         # 音声処理テスト
 │   ├── batch_jobs/               # バッチジョブテスト
 │   ├── storage/                  # ストレージテスト
@@ -395,25 +396,51 @@ tests/
 │   ├── pytest.ini              # pytest設定ファイル
 │   └── ...
 └── pytest.ini                   # 全体のpytest設定ファイル
+
+frontend/                          # フロントエンドテスト（React + Vitest）
+├── src/
+│   ├── test/                     # テスト設定
+│   │   └── setup.ts              # Vitestセットアップ
+│   ├── components/               # コンポーネントと対応するテスト
+│   │   ├── ChatComponent.tsx
+│   │   ├── ChatComponent.test.tsx  # コンポーネントテスト
+│   │   ├── AudioRecorder.tsx
+│   │   └── AudioRecorder.test.tsx
+│   ├── utils/                    # ユーティリティと対応するテスト
+│   │   ├── validation.ts
+│   │   ├── validation.test.ts    # ユーティリティテスト
+│   │   ├── apiClient.ts
+│   │   └── apiClient.test.ts
+│   └── __tests__/                # 統合テスト（オプション）
+│       └── app.test.tsx
+├── vitest.config.ts              # Vitest設定ファイル
+└── package.json                  # フロントエンドテスト用依存関係（npm管理）
 ```
 
-### 推奨pytestオプション
+### 推奨テスト実行オプション
+
+#### バックエンドテスト（pytest）
 ```bash
-# バックエンドテスト
 pytest tests/backend/ -vv --tb=short -s                    # 詳細出力＋短縮トレースバック
 pytest tests/backend/ -k "pattern"                         # パターンマッチテスト実行
 pytest tests/backend/ --pdb                                # 失敗時デバッガ起動
 pytest tests/backend/test_specific.py::test_func           # 特定テスト実行
+```
 
-# フロントエンドテスト（React + Vitest）
-cd tests/frontend && npm test                              # Vitestでテスト実行
-cd tests/frontend && npm test -- --ui                      # テストUIでインタラクティブ実行
-cd tests/frontend && npm test -- --coverage                # カバレッジ付きテスト実行
-
-# Whisperバッチテスト
+#### Whisperバッチテスト（pytest）
+```bash
 pytest tests/whisper_batch/ -vv --tb=short -s              # 詳細出力＋短縮トレースバック
 pytest tests/whisper_batch/ -k "pattern"                   # パターンマッチテスト実行
 pytest tests/whisper_batch/ --pdb                          # 失敗時デバッガ起動
+```
+
+#### フロントエンドテスト（Vitest）
+```bash
+cd frontend && npm run test                                 # インタラクティブモード（ファイル監視）
+cd frontend && npm run test:run                             # 1回実行（CI用）
+cd frontend && npm run test:ui                              # Web UIでテスト結果表示
+cd frontend && npx vitest run --reporter=verbose            # 詳細出力
+cd frontend && npx vitest run src/components/Chat.test.tsx  # 特定ファイルのみ実行
 ```
 
 ### テストベストプラクティス
@@ -759,12 +786,12 @@ uv add --dev pytest-clarity pytest-cov    # テスト開発用パッケージ追
 
 #### フロントエンドパッケージ管理（React）
 ```bash
-# フロントエンドテスト専用パッケージ
-cd tests/frontend/
-npm init -y                               # 初回のみ：package.json作成
+# フロントエンドテスト環境（frontend/ディレクトリ内）
+cd frontend/
 npm install --save-dev vitest @vitest/ui  # Vitestテストフレームワーク
 npm install --save-dev @testing-library/react @testing-library/jest-dom  # Reactテスト用
-npm install --save-dev jsdom happy-dom   # テスト環境用DOM
+npm install --save-dev @testing-library/user-event  # ユーザーイベントテスト用
+npm install --save-dev jsdom  # テスト環境用DOM
 npm install --save-dev @types/react @types/react-dom  # TypeScript型定義
 ```
 
@@ -781,10 +808,11 @@ uv add librosa soundfile                   # 音声処理テスト用パッケ�
 #### 重要なポイント
 - **本番環境**: プロジェクトルートの `pyproject.toml` で `uv add` 使用
 - **バックエンドテスト**: `tests/backend/` で専用の `pyproject.toml` で管理
-- **フロントエンドテスト**: `tests/frontend/` で専用の `package.json` で管理（React + Vitest）
+- **フロントエンドテスト**: `frontend/` の `package.json` で管理（React + Vitest + Testing Library）
 - **Whisperバッチテスト**: `tests/whisper_batch/` で専用の `pyproject.toml` で管理
 - **依存関係分離**: 各環境ごとにライブラリバージョンを独立管理
 - **Reactテスト**: Testing Library + Vitestの組み合わせでコンポーネントテストを実現
+- **テスト配置**: フロントエンドテストは各ソースファイルと同じディレクトリまたは`src/test/`に配置
 
 ### 参考ファイル
 - `./.claude/KnowledgeTransfer.txt` - 保存形式の詳細ガイド
