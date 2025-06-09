@@ -1089,80 +1089,355 @@ def test_client(mock_gcp_services, mock_audio_processing, mock_whisper_services)
     app.dependency_overrides.clear()
 
 
-# GCPエミュレータ統合のためのフィクスチャ（オプション）
-@pytest.fixture(scope="session")
-def emulator_firestore():
-    """Firestoreエミュレータのセッションスコープフィクスチャ（オプション使用）"""
-    import shutil
-    
-    # 依存関係チェック
-    if not shutil.which('gcloud'):
-        pytest.skip("gcloudコマンドが利用できません。Google Cloud SDKをインストールしてください。")
-    
-    try:
-        from common_utils.gcp_emulator import firestore_emulator_context
-        with firestore_emulator_context(
-            host='localhost',
-            port=8090,  # テスト専用ポート
-            project_id='test-session-project'
-        ) as emulator:
-            yield emulator
-    except Exception as e:
-        # エミュレータが利用できない場合はスキップ
-        pytest.skip(f"Firestore emulator not available: {e}")
+# ==============================================================================
+# GCPエミュレータ統合フィクスチャ（pytest用包括的エミュレータ対応）
+# ==============================================================================
 
-
-@pytest.fixture(scope="session") 
-def emulator_gcs():
-    """GCSエミュレータのセッションスコープフィクスチャ（オプション使用）"""
+# エミュレータ利用可能性チェック
+def check_emulator_availability():
+    """エミュレータの利用可能性を詳細チェック"""
     import shutil
     import subprocess
+    import os
     
-    # Docker依存関係チェック
+    availability = {
+        "firestore": False,
+        "gcs": False,
+        "firestore_reason": "",
+        "gcs_reason": ""
+    }
+    
+    # Firestore エミュレータチェック
+    if not shutil.which('gcloud'):
+        availability["firestore_reason"] = "gcloudコマンドが見つかりません"
+    elif not os.environ.get('FIRESTORE_EMULATOR_HOST'):
+        availability["firestore_reason"] = "FIRESTORE_EMULATOR_HOST環境変数が設定されていません"
+    else:
+        try:
+            emulator_host = os.environ.get('FIRESTORE_EMULATOR_HOST')
+            host, port = emulator_host.split(':')
+            import socket
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(1)
+            result = sock.connect_ex((host, int(port)))
+            sock.close()
+            if result == 0:
+                availability["firestore"] = True
+            else:
+                availability["firestore_reason"] = f"Firestoreエミュレータに接続できません: {emulator_host}"
+        except Exception as e:
+            availability["firestore_reason"] = f"Firestoreエミュレータチェックエラー: {e}"
+    
+    # GCS エミュレータチェック
     if not shutil.which('docker'):
-        pytest.skip("Dockerが利用できません。GCSエミュレータはスキップします。")
+        availability["gcs_reason"] = "Dockerコマンドが見つかりません"
+    elif not os.environ.get('STORAGE_EMULATOR_HOST'):
+        availability["gcs_reason"] = "STORAGE_EMULATOR_HOST環境変数が設定されていません"
+    else:
+        try:
+            # Dockerデーモン動作確認
+            result = subprocess.run(['docker', 'info'], capture_output=True, timeout=3)
+            if result.returncode != 0:
+                availability["gcs_reason"] = "Dockerデーモンが動作していません"
+            else:
+                # GCSエミュレータ接続確認
+                emulator_host = os.environ.get('STORAGE_EMULATOR_HOST', 'http://localhost:9000')
+                import urllib.request
+                try:
+                    with urllib.request.urlopen(f"{emulator_host}/_internal/healthcheck", timeout=2) as response:
+                        if response.status == 200:
+                            availability["gcs"] = True
+                        else:
+                            availability["gcs_reason"] = f"GCSエミュレータ健康チェック失敗: status {response.status}"
+                except Exception as e:
+                    availability["gcs_reason"] = f"GCSエミュレータに接続できません: {e}"
+        except Exception as e:
+            availability["gcs_reason"] = f"GCSエミュレータチェックエラー: {e}"
     
-    # Dockerデーモン動作確認
-    try:
-        result = subprocess.run(['docker', 'info'], capture_output=True, timeout=5)
-        if result.returncode != 0:
-            pytest.skip("Dockerデーモンが動作していません。GCSエミュレータはスキップします。")
-    except:
-        pytest.skip("Docker動作確認に失敗しました。GCSエミュレータはスキップします。")
-    
-    try:
-        from common_utils.gcp_emulator import gcs_emulator_context
-        with gcs_emulator_context(
-            host='localhost',
-            port=9010,  # テスト専用ポート
-            project_id='test-session-gcs-project'
-        ) as emulator:
-            yield emulator
-    except Exception as e:
-        # エミュレータが利用できない場合はスキップ
-        pytest.skip(f"GCS emulator not available: {e}")
+    return availability
+
+
+@pytest.fixture(scope="session")
+def emulator_availability_check():
+    """エミュレータ利用可能性のセッションスコープチェック"""
+    return check_emulator_availability()
 
 
 @pytest.fixture
-def real_firestore_client(emulator_firestore):
+def real_firestore_client():
     """実際のFirestoreクライアント（エミュレータ接続）"""
+    # エミュレータ利用可能性チェック
+    if not os.environ.get('FIRESTORE_EMULATOR_HOST'):
+        pytest.skip("Firestoreエミュレータが起動していません。FIRESTORE_EMULATOR_HOST環境変数を設定してください。")
+    
     try:
-        from google.cloud import firestore
-        client = firestore.Client(project='test-session-project')
+        # モック解除：実際のFirestoreライブラリを使用
+        import sys
+        
+        # 一時的にモックを解除
+        original_modules = {}
+        modules_to_restore = [
+            'google.cloud.firestore',
+            'google.cloud.firestore_v1',
+            'google.api_core',
+            'google.auth'
+        ]
+        
+        for module_name in modules_to_restore:
+            if module_name in sys.modules:
+                original_modules[module_name] = sys.modules[module_name]
+                del sys.modules[module_name]
+        
+        # 実際のFirestoreをインポート
+        import google.cloud.firestore as firestore
+        
+        # エミュレータ用プロジェクトID（環境変数から取得）
+        project_id = os.environ.get('GOOGLE_CLOUD_PROJECT', 'test-emulator-project')
+        
+        # エミュレータ用Firestoreクライアント作成
+        client = firestore.Client(project=project_id)
+        
+        # 接続テスト
+        test_collection = client.collection('connection_test')
+        test_doc = test_collection.document('test')
+        test_doc.set({'test': True})
+        test_doc.delete()
+        
         yield client
-    except ImportError:
-        pytest.skip("google-cloud-firestore not available")
+        
+        # モックを復元
+        for module_name, module in original_modules.items():
+            sys.modules[module_name] = module
+        
+    except ImportError as e:
+        pytest.skip(f"google-cloud-firestore not available: {e}")
+    except Exception as e:
+        pytest.skip(f"Firestore emulator connection failed: {e}")
 
 
 @pytest.fixture
-def real_gcs_client(emulator_gcs):
+def real_gcs_client():
     """実際のGCSクライアント（エミュレータ接続）"""
+    # エミュレータ利用可能性チェック
+    if not os.environ.get('STORAGE_EMULATOR_HOST'):
+        pytest.skip("GCSエミュレータが起動していません。STORAGE_EMULATOR_HOST環境変数を設定してください。")
+    
     try:
-        from google.cloud import storage
-        client = storage.Client(project='test-session-gcs-project')
+        # モック解除：実際のStorageライブラリを使用
+        import sys
+        
+        # 一時的にモックを解除
+        original_modules = {}
+        modules_to_restore = [
+            'google.cloud.storage',
+            'google.api_core',
+            'google.auth'
+        ]
+        
+        for module_name in modules_to_restore:
+            if module_name in sys.modules:
+                original_modules[module_name] = sys.modules[module_name]
+                del sys.modules[module_name]
+        
+        # 実際のStorageをインポート
+        import google.cloud.storage as storage
+        
+        # エミュレータ用プロジェクトID（環境変数から取得）
+        project_id = os.environ.get('GOOGLE_CLOUD_PROJECT', 'test-emulator-project')
+        
+        # エミュレータ用GCSクライアント作成
+        client = storage.Client(project=project_id)
+        
+        # 接続テスト用バケット作成（存在しない場合）
+        bucket_name = 'test-connection-bucket'
+        try:
+            bucket = client.bucket(bucket_name)
+            bucket.create()
+        except Exception:
+            # バケットが既に存在する場合
+            bucket = client.bucket(bucket_name)
+        
+        # 接続テスト
+        test_blob = bucket.blob('connection_test.txt')
+        test_blob.upload_from_string('test')
+        test_blob.delete()
+        
         yield client
-    except ImportError:
-        pytest.skip("google-cloud-storage not available")
+        
+        # モックを復元
+        for module_name, module in original_modules.items():
+            sys.modules[module_name] = module
+        
+    except ImportError as e:
+        pytest.skip(f"google-cloud-storage not available: {e}")
+    except Exception as e:
+        pytest.skip(f"GCS emulator connection failed: {e}")
+
+
+@pytest.fixture
+def emulator_test_bucket(real_gcs_client):
+    """エミュレータ用テストバケットのセットアップ"""
+    bucket_name = 'test-whisper-emulator-bucket'
+    
+    try:
+        bucket = real_gcs_client.bucket(bucket_name)
+        bucket.create()
+    except Exception:
+        # バケットが既に存在する場合
+        bucket = real_gcs_client.bucket(bucket_name)
+    
+    yield bucket
+    
+    # クリーンアップ
+    try:
+        blobs = list(bucket.list_blobs())
+        for blob in blobs:
+            blob.delete()
+    except Exception as e:
+        logger.warning(f"テストバケットクリーンアップエラー: {e}")
+
+
+@pytest.fixture
+def emulator_firestore_collection(real_firestore_client):
+    """エミュレータ用Firestoreテストコレクションのセットアップ"""
+    collection_name = 'test_whisper_jobs'
+    collection = real_firestore_client.collection(collection_name)
+    
+    yield collection
+    
+    # クリーンアップ
+    try:
+        docs = collection.limit(100).stream()
+        for doc in docs:
+            doc.reference.delete()
+    except Exception as e:
+        logger.warning(f"テストコレクションクリーンアップエラー: {e}")
+
+
+@pytest.fixture
+def comprehensive_emulator_setup(real_firestore_client, real_gcs_client, emulator_test_bucket, emulator_firestore_collection):
+    """包括的なエミュレータ環境セットアップ"""
+    
+    class EmulatorTestEnvironment:
+        def __init__(self):
+            self.firestore_client = real_firestore_client
+            self.gcs_client = real_gcs_client
+            self.test_bucket = emulator_test_bucket
+            self.test_collection = emulator_firestore_collection
+            self.project_id = 'test-emulator-project'
+            
+        def create_test_audio_file(self, file_path: str, content: bytes = None) -> 'storage.Blob':
+            """テスト用音声ファイルをGCSに作成"""
+            if content is None:
+                # 模擬WAVファイルコンテンツ
+                content = b'RIFF' + b'\x00' * 4 + b'WAVE' + b'\x00' * 1000
+            
+            blob = self.test_bucket.blob(file_path)
+            blob.upload_from_string(content, content_type='audio/wav')
+            return blob
+            
+        def create_test_job_document(self, job_id: str, job_data: dict = None) -> 'firestore.DocumentReference':
+            """テスト用ジョブドキュメントをFirestoreに作成"""
+            if job_data is None:
+                job_data = {
+                    'jobId': job_id,
+                    'userId': 'test-user-123',
+                    'userEmail': 'test@example.com',
+                    'filename': 'test-audio.wav',
+                    'gcsBucketName': self.test_bucket.name,
+                    'audioSize': 1000,
+                    'audioDurationMs': 5000,
+                    'fileHash': f'hash-{job_id}',
+                    'status': 'queued',
+                    'language': 'ja',
+                    'createdAt': real_firestore_client.SERVER_TIMESTAMP,
+                    'updatedAt': real_firestore_client.SERVER_TIMESTAMP
+                }
+            
+            doc_ref = self.test_collection.document(job_id)
+            doc_ref.set(job_data)
+            return doc_ref
+            
+        def cleanup_all(self):
+            """全テストデータのクリーンアップ"""
+            # Firestoreクリーンアップ
+            try:
+                docs = self.test_collection.limit(100).stream()
+                for doc in docs:
+                    doc.reference.delete()
+            except Exception as e:
+                logger.warning(f"Firestoreクリーンアップエラー: {e}")
+            
+            # GCSクリーンアップ
+            try:
+                blobs = list(self.test_bucket.list_blobs())
+                for blob in blobs:
+                    blob.delete()
+            except Exception as e:
+                logger.warning(f"GCSクリーンアップエラー: {e}")
+    
+    env = EmulatorTestEnvironment()
+    yield env
+    
+    # 最終クリーンアップ
+    env.cleanup_all()
+
+
+# エミュレータテスト用のマーカー
+pytest_plugins = []
+
+def pytest_configure(config):
+    """pytest設定でカスタムマーカーを追加"""
+    config.addinivalue_line(
+        "markers", "emulator: mark test as emulator integration test (requires running emulators)"
+    )
+    config.addinivalue_line(
+        "markers", "firestore_emulator: mark test as Firestore emulator test"
+    )
+    config.addinivalue_line(
+        "markers", "gcs_emulator: mark test as GCS emulator test"
+    )
+    config.addinivalue_line(
+        "markers", "integration: mark test as integration test"
+    )
+
+
+def pytest_collection_modifyitems(config, items):
+    """エミュレータが利用できない場合、エミュレータテストをスキップ"""
+    emulator_check = check_emulator_availability()
+    
+    for item in items:
+        # Firestoreエミュレータマーカーのチェック
+        if item.get_closest_marker("firestore_emulator") and not emulator_check["firestore"]:
+            item.add_marker(pytest.mark.skip(reason=f"Firestore emulator not available: {emulator_check['firestore_reason']}"))
+        
+        # GCSエミュレータマーカーのチェック
+        if item.get_closest_marker("gcs_emulator") and not emulator_check["gcs"]:
+            item.add_marker(pytest.mark.skip(reason=f"GCS emulator not available: {emulator_check['gcs_reason']}"))
+        
+        # 総合エミュレータマーカーのチェック
+        if item.get_closest_marker("emulator"):
+            missing_emulators = []
+            if not emulator_check["firestore"]:
+                missing_emulators.append(f"Firestore: {emulator_check['firestore_reason']}")
+            if not emulator_check["gcs"]:
+                missing_emulators.append(f"GCS: {emulator_check['gcs_reason']}")
+            
+            if missing_emulators:
+                item.add_marker(pytest.mark.skip(reason=f"Emulators not available: {', '.join(missing_emulators)}"))
+
+
+# 従来のフィクスチャとの互換性のためのエイリアス
+@pytest.fixture
+def emulator_firestore():
+    """レガシー互換性のためのエイリアス"""
+    pytest.skip("Use real_firestore_client instead")
+
+
+@pytest.fixture  
+def emulator_gcs():
+    """レガシー互換性のためのエイリアス"""
+    pytest.skip("Use real_gcs_client instead")
 
 
 @pytest.fixture
