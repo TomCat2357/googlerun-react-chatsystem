@@ -183,7 +183,12 @@ class AudioValidationCore:
         if not filename or not isinstance(filename, str):
             return False
         
-        extension = Path(filename).suffix.lower().lstrip('.')
+        # 拡張子のみの場合の特別処理
+        if filename.startswith('.') and filename.count('.') == 1:
+            extension = filename[1:].lower()
+        else:
+            extension = Path(filename).suffix.lower().lstrip('.')
+        
         return extension in AudioValidationCore.VALID_FORMATS
     
     @staticmethod
@@ -509,11 +514,11 @@ class TestWhisperAPIIntegration:
     
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
-        ["test_scenario"],
+        ["file_name", "file_size", "speakers", "expected_priority_range"],
         [
-            ({"name": "small_file", "size": 1024*1024, "speakers": 1, "expected_priority_range": (50, 70)}),
-            ({"name": "medium_file", "size": 30*1024*1024, "speakers": 3, "expected_priority_range": (40, 60)}),
-            ({"name": "large_file", "size": 90*1024*1024, "speakers": 8, "expected_priority_range": (25, 45)}),
+            ("small_file", 1024*1024, 1, (50, 70)),
+            ("medium_file", 30*1024*1024, 3, (40, 60)),
+            ("large_file", 90*1024*1024, 8, (25, 45)),
         ],
         ids=[
             "小ファイル_単一話者_高優先度",
@@ -522,22 +527,22 @@ class TestWhisperAPIIntegration:
         ],
     )
     async def test_upload_processing_priority_calculation_各ケースで適切な優先度(
-        self, async_test_client, mock_auth_user, test_scenario
+        self, async_test_client, mock_auth_user, file_name, file_size, speakers, expected_priority_range
     ):
         """アップロード処理でファイルサイズ・話者数に応じた適切な優先度計算"""
         # Arrange（準備）
         factory = AudioTestDataFactory()
         upload_data = {
             "audio_data": factory.fake.sha256(),
-            "filename": f"{test_scenario['name']}_test.wav",
-            "gcs_object": f"temp/{test_scenario['name']}_test.wav",
-            "num_speakers": test_scenario["speakers"]
+            "filename": f"{file_name}_test.wav",
+            "gcs_object": f"temp/{file_name}_test.wav",
+            "num_speakers": speakers
         }
         
         # GCSファイル情報のモック
         with patch("backend.app.api.whisper.get_file_info_from_gcs") as mock_file_info:
             mock_file_info.return_value = {
-                "size": test_scenario["size"],
+                "size": file_size,
                 "content_type": "audio/wav"
             }
             
@@ -558,7 +563,7 @@ class TestWhisperAPIIntegration:
                 enqueue_args = mock_enqueue.call_args[0]
                 
                 # 優先度が期待範囲内であることを確認
-                min_priority, max_priority = test_scenario["expected_priority_range"]
+                min_priority, max_priority = expected_priority_range
                 # Note: 実際の優先度は処理ロジック内で計算されるため、
                 # ここでは処理が正常に完了することを確認
 

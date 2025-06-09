@@ -978,12 +978,12 @@ class TestBatchProcessingErrorHandling:
     """バッチ処理エラーハンドリングテスト"""
     
     @pytest.mark.parametrize(
-        ["error_scenario"],
+        ["scenario_name", "expected_status", "retry_possible"],
         [
-            ({"scenario_name": "ファイル見つからない", "expected_status": "failed", "retry_possible": False}),
-            ({"scenario_name": "メモリ不足", "expected_status": "failed", "retry_possible": True}),
-            ({"scenario_name": "処理タイムアウト", "expected_status": "failed", "retry_possible": True}),
-            ({"scenario_name": "Whisperモデル読み込み失敗", "expected_status": "failed", "retry_possible": True}),
+            ("ファイル見つからない", "failed", False),
+            ("メモリ不足", "failed", True),
+            ("処理タイムアウト", "failed", True),
+            ("Whisperモデル読み込み失敗", "failed", True),
         ],
         ids=[
             "ファイル見つからない_永続的失敗",
@@ -993,12 +993,12 @@ class TestBatchProcessingErrorHandling:
         ],
     )
     @pytest.mark.asyncio
-    async def test_error_scenarios_各エラーで適切なハンドリング(self, error_scenario):
+    async def test_error_scenarios_各エラーで適切なハンドリング(self, scenario_name, expected_status, retry_possible):
         """各エラーシナリオで適切なエラーハンドリングが動作すること"""
         # Arrange（準備）
         factory = BatchJobDataFactory()
         job_data = factory.create_batch_job_data(
-            job_id=f"error-test-{error_scenario['scenario_name']}"
+            job_id=f"error-test-{scenario_name}"
         )
         
         # Act（実行）
@@ -1007,10 +1007,10 @@ class TestBatchProcessingErrorHandling:
         
         # Assert（検証）
         assert fail_transition["valid"] == True
-        assert fail_transition["new_status"] == "failed"
+        assert fail_transition["new_status"] == expected_status
         
         # 再試行可能性の確認
-        if error_scenario["retry_possible"]:
+        if retry_possible:
             retry_transition = BatchJobValidationCore.determine_job_status_transition("failed", "retry")
             assert retry_transition["valid"] == True
             assert retry_transition["new_status"] == "queued"

@@ -835,38 +835,13 @@ class TestWhisperAPIErrorHandling:
     """Whisper API エラーハンドリング高度テスト"""
     
     @pytest.mark.parametrize(
-        ["error_scenario"],
+        ["scenario_name", "http_status", "error_setup", "expected_message"],
         [
-            ({
-                "scenario_name": "認証失敗",
-                "http_status": 401,
-                "error_setup": "no_auth_header",
-                "expected_message": "authentication.*required"
-            }),
-            ({
-                "scenario_name": "無効フォーマット",
-                "http_status": 400,
-                "error_setup": "invalid_format",
-                "expected_message": "無効な音声フォーマット"
-            }),
-            ({
-                "scenario_name": "ファイルサイズ超過",
-                "http_status": 413,
-                "error_setup": "file_too_large",
-                "expected_message": "ファイルサイズが大きすぎます"
-            }),
-            ({
-                "scenario_name": "処理キュー満杯",
-                "http_status": 429,
-                "error_setup": "queue_full",
-                "expected_message": "too.*many.*requests"
-            }),
-            ({
-                "scenario_name": "ストレージサービス障害",
-                "http_status": 503,
-                "error_setup": "storage_unavailable",
-                "expected_message": "service.*unavailable"
-            }),
+            ("認証失敗", 401, "no_auth_header", "authentication.*required"),
+            ("無効フォーマット", 400, "invalid_format", "無効な音声フォーマット"),
+            ("ファイルサイズ超過", 413, "file_too_large", "ファイルサイズが大きすぎます"),
+            ("処理キュー満杯", 429, "queue_full", "too.*many.*requests"),
+            ("ストレージサービス障害", 503, "storage_unavailable", "service.*unavailable"),
         ],
         ids=[
             "認証失敗_401エラー",
@@ -878,25 +853,25 @@ class TestWhisperAPIErrorHandling:
     )
     @pytest.mark.asyncio
     async def test_error_scenarios_各エラーケースで適切なレスポンス(
-        self, async_test_client, error_scenario
+        self, async_test_client, scenario_name, http_status, error_setup, expected_message
     ):
         """各エラーシナリオで適切なHTTPステータスとメッセージを返すこと"""
         # Arrange（準備）
         factory = WhisperAPIDataFactory()
         
-        if error_scenario["error_setup"] == "no_auth_header":
+        if error_setup == "no_auth_header":
             # 認証ヘッダーなしでリクエスト
             upload_data = factory.create_upload_request_data()
             headers = {}  # Authorization ヘッダーなし
             
-        elif error_scenario["error_setup"] == "invalid_format":
+        elif error_setup == "invalid_format":
             upload_data = factory.create_upload_request_data(
                 filename="document.pdf",
                 content_type="application/pdf"
             )
             headers = {"Authorization": "Bearer test-token"}
             
-        elif error_scenario["error_setup"] == "file_too_large":
+        elif error_setup == "file_too_large":
             upload_data = factory.create_upload_request_data(
                 filename="huge-file.wav"
             )
@@ -909,7 +884,7 @@ class TestWhisperAPIErrorHandling:
                     "content_type": "audio/wav"
                 }
                 
-        elif error_scenario["error_setup"] == "queue_full":
+        elif error_setup == "queue_full":
             upload_data = factory.create_upload_request_data()
             headers = {"Authorization": "Bearer test-token"}
             
@@ -918,7 +893,7 @@ class TestWhisperAPIErrorHandling:
                  patch("backend.app.api.whisper._get_env_var", return_value="10"):  # 上限10
                 pass
                 
-        elif error_scenario["error_setup"] == "storage_unavailable":
+        elif error_setup == "storage_unavailable":
             upload_data = factory.create_upload_request_data()
             headers = {"Authorization": "Bearer test-token"}
             
@@ -934,15 +909,15 @@ class TestWhisperAPIErrorHandling:
         )
         
         # Assert（検証）
-        assert response.status_code == error_scenario["http_status"]
+        assert response.status_code == http_status
         
         if response.status_code != 401:  # 401以外はJSONレスポンスを期待
             response_data = response.json()
             error_message = response_data.get("detail", "")
             
             import re
-            assert re.search(error_scenario["expected_message"], error_message, re.IGNORECASE), \
-                f"Expected pattern '{error_scenario['expected_message']}' not found in '{error_message}'"
+            assert re.search(expected_message, error_message, re.IGNORECASE), \
+                f"Expected pattern '{expected_message}' not found in '{error_message}'"
 
 
 # ==============================================================================
