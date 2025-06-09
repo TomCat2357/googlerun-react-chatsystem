@@ -17,7 +17,10 @@ Google Cloud Platform で稼働し、AI チャット・画像生成・音声文�
 ├── frontend/          # React アプリ  
 ├── whisper_batch/     # 音声バッチ処理
 ├── common_utils/      # 共通ユーティリティ
-└── tests/            # テストコード
+├── tests/
+│   ├── backend/       # バックエンドテストコード
+│   ├── frontend/      # フロントエンドテストコード
+│   └── whisper_batch/ # Whisperバッチテストコード
 ```
 
 ## 開発コマンド
@@ -29,7 +32,9 @@ python tests/app/gcp_emulator_run.py # エミュレータ
 
 # テスト実行
 pytest                              # 全体テスト
-cd backend && pytest               # バックエンドのみ
+pytest tests/backend/              # バックエンドのみ
+pytest tests/frontend/             # フロントエンドのみ
+pytest tests/whisper_batch/        # Whisperバッチのみ
 
 # ビルド
 cd frontend && npm run build       # フロントエンドビルド
@@ -148,7 +153,7 @@ pkill -f gcp_emulator_run.py
 ```
 
 ## コーディングルール
-- **Python**: Black フォーマット, 型ヒント必須, `common_utils.logger` 使用
+- **Python**: Black フォーマット, 型ヒント必須, `common_utils.logger` 使用, パッケージ管理は `uv add` を使用
 - **TypeScript**: ESLint準拠, 関数コンポーネント + Hooks, Tailwind CSS のみ
 - **Git**: 日本語コミットメッセージ, 実際のコミットは禁止（メッセージのみ出力）
 
@@ -205,15 +210,37 @@ class TestFinalPriceCalculation:
 ```python
 # パッケージ構造：垂直分割（業務観点）で設計
 tests/
-├── chat/                    # チャット機能
-│   ├── test_message_handling.py
-│   └── test_ai_integration.py
-├── whisper/                 # 音声文字起こし機能
-│   ├── test_audio_processing.py
-│   └── test_batch_processing.py
-└── auth/                    # 認証機能
-    ├── test_firebase_auth.py
-    └── test_token_validation.py
+├── backend/                 # バックエンドテスト
+│   ├── chat/                # チャット機能
+│   │   ├── test_message_handling.py
+│   │   └── test_ai_integration.py
+│   ├── whisper/             # 音声文字起こし機能（API部分）
+│   │   ├── test_whisper_api.py
+│   │   └── test_audio_validation.py
+│   ├── auth/                # 認証機能
+│   │   ├── test_firebase_auth.py
+│   │   └── test_token_validation.py
+│   └── requirements.txt     # バックエンドテスト用依存関係（uv addで管理）
+├── frontend/                # フロントエンドテスト（React）
+│   ├── components/          # コンポーネントテスト
+│   │   ├── test_chat_component.tsx
+│   │   └── test_audio_recorder.tsx
+│   ├── utils/               # ユーティリティテスト
+│   │   ├── test_validation.ts
+│   │   └── test_api_client.ts
+│   ├── integration/         # 統合テスト
+│   │   └── test_app_flow.tsx
+│   └── package.json         # フロントエンドテスト用依存関係（npm/yarn管理）
+└── whisper_batch/           # Whisperバッチテスト
+    ├── audio_processing/    # 音声処理テスト
+    │   ├── test_whisper_transcription.py
+    │   └── test_speaker_diarization.py
+    ├── batch_jobs/          # バッチジョブテスト
+    │   ├── test_gcp_batch.py
+    │   └── test_job_monitoring.py
+    ├── storage/             # ストレージテスト
+    │   └── test_gcs_operations.py
+    └── requirements.txt     # Whisperバッチテスト用依存関係（uv addで管理）
 
 # テストケースの階層化（pytest内部クラス使用）
 class TestWhisperAPI:
@@ -303,17 +330,22 @@ def test_whisper_batch_job_正常なパラメータで処理開始されるこ�
 #### エミュレータテストの実行
 ```bash
 # エミュレータ利用可能性の確認
-pytest tests/app/test_emulator_availability.py -v
+pytest tests/backend/test_emulator_availability.py -v
 
 # 通常のテスト（モックベース）
-pytest tests/app/ -m "not emulator" -v
+pytest tests/backend/ -m "not emulator" -v
+pytest tests/frontend/ -m "not emulator" -v
+pytest tests/whisper_batch/ -m "not emulator" -v
 
-# エミュレータ統合テスト
-pytest tests/app/ -m emulator -v
+# エミュレータ統合テスト（主にバックエンドとWhisperバッチ）
+pytest tests/backend/ -m emulator -v
+pytest tests/whisper_batch/ -m emulator -v
 
 # 全てのテスト（エミュレータ込み）
-python tests/app/gcp_emulator_run.py &  # エミュレータ起動
-pytest tests/app/ -v                    # 全テスト実行
+python tests/backend/gcp_emulator_run.py &  # エミュレータ起動
+pytest tests/backend/ -v                    # バックエンドテスト実行
+pytest tests/frontend/ -v                   # フロントエンドテスト実行
+pytest tests/whisper_batch/ -v              # Whisperバッチテスト実行
 ```
 
 ### テスト命名規約
@@ -338,22 +370,50 @@ def test_validate_audio_file_サイズ100MB超過_ValidationErrorを発生させ
 ### テスト構成
 ```
 tests/
-├── app/                           # アプリケーションテスト
+├── backend/                       # バックエンドテスト
 │   ├── test_emulator_availability.py  # エミュレータ利用可能性テスト
 │   ├── test_whisper_emulator_example.py # エミュレータ使用例
 │   ├── gcp_emulator_run.py        # エミュレータ起動スクリプト
+│   ├── requirements.txt           # バックエンドテスト用依存関係
+│   ├── conftest.py               # pytest設定・フィクスチャ
+│   ├── pytest.ini               # pytest設定ファイル
 │   └── ...
-├── requirements.txt               # テスト用依存関係
-├── conftest.py                   # pytest設定・フィクスチャ
-└── pytest.ini                   # pytest設定ファイル
+├── frontend/                      # フロントエンドテスト（React）
+│   ├── components/               # Reactコンポーネントテスト
+│   ├── utils/                    # ユーティリティテスト
+│   ├── integration/              # 統合テスト
+│   ├── package.json              # フロントエンドテスト用依存関係
+│   ├── vitest.config.ts          # Vitest設定ファイル
+│   ├── setup.ts                  # テストセットアップ
+│   └── ...
+├── whisper_batch/                 # Whisperバッチテスト
+│   ├── audio_processing/         # 音声処理テスト
+│   ├── batch_jobs/               # バッチジョブテスト
+│   ├── storage/                  # ストレージテスト
+│   ├── requirements.txt          # Whisperバッチテスト用依存関係
+│   ├── conftest.py              # pytest設定・フィクスチャ
+│   ├── pytest.ini              # pytest設定ファイル
+│   └── ...
+└── pytest.ini                   # 全体のpytest設定ファイル
 ```
 
 ### 推奨pytestオプション
 ```bash
-pytest -vv --tb=short -s                    # 詳細出力＋短縮トレースバック
-pytest -k "pattern"                         # パターンマッチテスト実行
-pytest --pdb                                # 失敗時デバッガ起動
-pytest tests/app/test_specific.py::test_func # 特定テスト実行
+# バックエンドテスト
+pytest tests/backend/ -vv --tb=short -s                    # 詳細出力＋短縮トレースバック
+pytest tests/backend/ -k "pattern"                         # パターンマッチテスト実行
+pytest tests/backend/ --pdb                                # 失敗時デバッガ起動
+pytest tests/backend/test_specific.py::test_func           # 特定テスト実行
+
+# フロントエンドテスト（React + Vitest）
+cd tests/frontend && npm test                              # Vitestでテスト実行
+cd tests/frontend && npm test -- --ui                      # テストUIでインタラクティブ実行
+cd tests/frontend && npm test -- --coverage                # カバレッジ付きテスト実行
+
+# Whisperバッチテスト
+pytest tests/whisper_batch/ -vv --tb=short -s              # 詳細出力＋短縮トレースバック
+pytest tests/whisper_batch/ -k "pattern"                   # パターンマッチテスト実行
+pytest tests/whisper_batch/ --pdb                          # 失敗時デバッガ起動
 ```
 
 ### テストベストプラクティス
@@ -620,7 +680,7 @@ python tests/app/gcp_emulator_run.py
 #### テスト実行時の問題
 ```bash
 # エミュレータ依存関係エラー
-pytest tests/app/test_emulator_availability.py -v  # 依存関係確認
+pytest tests/backend/test_emulator_availability.py -v  # 依存関係確認
 
 # Docker未インストール時
 # → GCSエミュレータテストは自動的にスキップされます
@@ -681,6 +741,50 @@ docker system prune -f             # 不要なDockerリソース削除
 # テスト改善完了時の保存例（新形式）
 echo "Whisperテスト改善完了レポート" > ./ContextSave/whisper_test_improvement_20250607_110204.md
 ```
+
+### パッケージ管理とライブラリ追加
+
+#### バックエンドパッケージ管理
+```bash
+# プロジェクトルートでの基本パッケージ管理
+uv add package_name                        # 本番用パッケージ追加
+uv add --dev package_name                  # 開発用パッケージ追加
+
+# バックエンドテスト専用パッケージ
+cd tests/backend/
+uv init                                    # 初回のみ：テスト環境初期化
+uv add pytest pytest-mock pytest-asyncio  # テスト用パッケージ追加
+uv add --dev pytest-clarity pytest-cov    # テスト開発用パッケージ追加
+```
+
+#### フロントエンドパッケージ管理（React）
+```bash
+# フロントエンドテスト専用パッケージ
+cd tests/frontend/
+npm init -y                               # 初回のみ：package.json作成
+npm install --save-dev vitest @vitest/ui  # Vitestテストフレームワーク
+npm install --save-dev @testing-library/react @testing-library/jest-dom  # Reactテスト用
+npm install --save-dev jsdom happy-dom   # テスト環境用DOM
+npm install --save-dev @types/react @types/react-dom  # TypeScript型定義
+```
+
+#### Whisperバッチパッケージ管理
+```bash
+# Whisperバッチテスト専用パッケージ
+cd tests/whisper_batch/
+uv init                                    # 初回のみ：テスト環境初期化
+uv add pytest pytest-mock pytest-asyncio  # テスト用パッケージ追加
+uv add --dev pytest-clarity pytest-cov    # テスト開発用パッケージ追加
+uv add librosa soundfile                   # 音声処理テスト用パッケージ
+```
+
+#### 重要なポイント
+- **本番環境**: プロジェクトルートの `pyproject.toml` で `uv add` 使用
+- **バックエンドテスト**: `tests/backend/` で専用の `pyproject.toml` で管理
+- **フロントエンドテスト**: `tests/frontend/` で専用の `package.json` で管理（React + Vitest）
+- **Whisperバッチテスト**: `tests/whisper_batch/` で専用の `pyproject.toml` で管理
+- **依存関係分離**: 各環境ごとにライブラリバージョンを独立管理
+- **Reactテスト**: Testing Library + Vitestの組み合わせでコンポーネントテストを実現
 
 ### 参考ファイル
 - `./.claude/KnowledgeTransfer.txt` - 保存形式の詳細ガイド
