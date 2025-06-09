@@ -8,6 +8,8 @@ import WhisperUploader from "./WhisperUploader";
 import WhisperJobList from "./WhisperJobList";
 import WhisperTranscriptPlayer from "./WhisperTranscriptPlayer";
 import WhisperMetadataEditor from "./WhisperMetadataEditor";
+import WhisperTranscriptActions from "./WhisperTranscriptActions";
+import WhisperExporter from "./WhisperExporter";
 import { WhisperUploadRequest, WhisperSegment } from "../../types/apiTypes";
 
 const WhisperPage: React.FC = () => {

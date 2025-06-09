@@ -317,3 +317,71 @@ export const validateArray = <T>(
   
   return null;
 };
+
+/**
+ * 画像ファイルの検証
+ */
+export const validateImageFile = (
+  file: File,
+  maxSize: number = 5 * 1024 * 1024,
+  allowedTypes: string[] = ['image/jpeg', 'image/png', 'image/gif', 'image/webp']
+): string | null => {
+  // ファイルサイズチェック
+  const sizeError = validateFileSize(file, maxSize);
+  if (sizeError) return sizeError;
+  
+  // ファイルタイプチェック
+  const typeError = validateFileType(file, allowedTypes);
+  if (typeError) return typeError;
+  
+  return null;
+};
+
+/**
+ * 音声ファイルの検証
+ */
+export const validateAudioFile = (
+  file: File,
+  maxSize: number = 50 * 1024 * 1024,
+  allowedTypes: string[] = ['audio/mp3', 'audio/wav', 'audio/m4a', 'audio/ogg']
+): string | null => {
+  // ファイルサイズチェック
+  const sizeError = validateFileSize(file, maxSize);
+  if (sizeError) return sizeError;
+  
+  // ファイルタイプチェック
+  const typeError = validateFileType(file, allowedTypes);
+  if (typeError) return typeError;
+  
+  return null;
+};
+
+/**
+ * テキストファイルの検証
+ */
+export const validateTextFile = (
+  file: File,
+  maxSize: number = 10 * 1024 * 1024,
+  allowedTypes: string[] = ['text/plain', 'text/csv', 'application/json', '.txt', '.csv', '.json']
+): string | null => {
+  // ファイルサイズチェック
+  const sizeError = validateFileSize(file, maxSize);
+  if (sizeError) return sizeError;
+  
+  // ファイルタイプチェック
+  const typeError = validateFileType(file, allowedTypes);
+  if (typeError) return typeError;
+  
+  return null;
+};
+
+/**
+ * ファイル名から拡張子を取得
+ */
+export const getFileExtension = (fileName: string): string => {
+  const lastDotIndex = fileName.lastIndexOf('.');
+  if (lastDotIndex === -1 || lastDotIndex === fileName.length - 1) {
+    return '';
+  }
+  return fileName.substring(lastDotIndex + 1).toLowerCase();
+};

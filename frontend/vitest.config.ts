@@ -9,7 +9,7 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: './src/test/setup.ts',
     coverage: {
-      reporter: ['text', 'html', 'json'],
+      reporter: ['text', 'html', 'json', 'lcov'],
       exclude: [
         'node_modules/',
         'dist/',
@@ -17,8 +17,23 @@ export default defineConfig({
         '**/*.d.ts',
         '**/*.config.*',
         '**/index.ts',
-        '**/index.tsx'
-      ]
+        '**/index.tsx',
+        'src/firebase/',
+        'src/vite-env.d.ts'
+      ],
+      include: [
+        'src/**/*.{ts,tsx}',
+        '!src/**/*.{test,spec}.{ts,tsx}',
+        '!src/test/**/*'
+      ],
+      thresholds: {
+        global: {
+          branches: 70,
+          functions: 70,
+          lines: 70,
+          statements: 70
+        }
+      }
     },
     // テストファイルのパターン
     include: [
@@ -29,6 +44,15 @@ export default defineConfig({
     // モックのリセット
     clearMocks: true,
     restoreMocks: true,
+    // 並列実行設定
+    pool: 'threads',
+    poolOptions: {
+      threads: {
+        singleThread: false,
+        maxThreads: 4,
+        minThreads: 1
+      }
+    }
   },
   resolve: {
     alias: {

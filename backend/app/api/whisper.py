@@ -49,6 +49,14 @@ FIRESTORE_MAX_DAYS = int(os.environ.get("FIRESTORE_MAX_DAYS", "30")) # 追加：
 
 router = APIRouter()
 
+# Google Translate APIを使用するためのインポート
+try:
+    from google.cloud import translate_v2 as translate
+    TRANSLATE_CLIENT = translate.Client()
+except ImportError:
+    logger.warning("Google Cloud Translate API not available")
+    TRANSLATE_CLIENT = None
+
 # 署名付きURL用のレスポンスモデル
 class UploadUrlResponse(BaseModel):
     upload_url: str
@@ -967,6 +975,204 @@ async def get_speaker_config(
         return JSONResponse(status_code=500, content={"detail": f"スピーカー設定取得エラー: {str(e)}"})
 
 @router.get("/whisper/jobs/{file_hash}/audio_url")
+@router.post("/translate")
+async def translate_transcript(
+    request: Request,
+    body: Dict[str, Any] = Body(...),
+    current_user=Depends(get_current_user)
+):
+    """
+    文字起こし結果を翻訳する
+    """
+    request_id = log_request(request, body, SENSITIVE_KEYS)
+    
+    try:
+        # リクエストパラメータの検証
+        job_id = body.get("job_id")
+        file_hash = body.get("file_hash")
+        target_language = body.get("target_language", "en")
+        
+        if not job_id or not file_hash:
+            raise HTTPException(status_code=400, detail="job_idとfile_hashが必要です")
+        
+        if not TRANSLATE_CLIENT:
+            raise HTTPException(status_code=503, detail="翻訳サービスが利用できません")
+        
+        # Firestoreからジョブ情報を取得
+        db = firestore.Client()
+        doc_ref = db.collection(WHISPER_JOBS_COLLECTION).document(job_id)
+        doc = doc_ref.get()
+        
+        if not doc.exists:
+            raise HTTPException(status_code=404, detail="ジョブが見つかりません")
+        
+        job_data = doc.to_dict()
+        
+        # ユーザー権限チェック
+        if job_data.get("user_id") != current_user["uid"]:
+            raise HTTPException(status_code=403, detail="アクセスが拒否されました")
+        
+        # 文字起こし結果を取得
+        original_segments = job_data.get("segments", [])
+        if not original_segments:
+            raise HTTPException(status_code=400, detail="翻訳するテキストがありません")
+        
+        # セグメントごとに翻訳を実行
+        translated_segments = []
+        for segment in original_segments:
+            original_text = segment.get("text", "")
+            if original_text.strip():
+                try:
+                    # Google Translate APIで翻訳
+                    result = TRANSLATE_CLIENT.translate(
+                        original_text,
+                        target_language=target_language
+                    )
+                    translated_text = result['translatedText']
+                except Exception as e:
+                    logger.error(f"翻訳エラー: {str(e)}")
+                    translated_text = original_text  # エラー時は元テキストを使用
+                
+                translated_segment = segment.copy()
+                translated_segment["original_text"] = original_text
+                translated_segment["text"] = translated_text
+                translated_segment["translated_language"] = target_language
+                translated_segments.append(translated_segment)
+            else:
+                translated_segments.append(segment)
+        
+        # 翻訳結果をFirestoreに保存
+        translation_data = {
+            "translated_segments": translated_segments,
+            "target_language": target_language,
+            "translated_at": datetime.datetime.now(datetime.timezone.utc),
+            "request_id": request_id
+        }
+        
+        doc_ref.update({
+            f"translations.{target_language}": translation_data
+        })
+        
+        logger.info(f"翻訳完了: job_id={job_id}, target_language={target_language}")
+        
+        return JSONResponse(
+            status_code=200,
+            content={
+                "success": True,
+                "translated_segments": translated_segments,
+                "target_language": target_language,
+                "request_id": request_id
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"翻訳処理エラー: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"翻訳処理中にエラーが発生しました: {str(e)}")
+
+
+@router.post("/summarize")
+async def summarize_transcript(
+    request: Request,
+    body: Dict[str, Any] = Body(...),
+    current_user=Depends(get_current_user)
+):
+    """
+    文字起こし結果を要約する
+    """
+    request_id = log_request(request, body, SENSITIVE_KEYS)
+    
+    try:
+        # リクエストパラメータの検証
+        job_id = body.get("job_id")
+        file_hash = body.get("file_hash")
+        summary_type = body.get("summary_type", "brief")  # brief, detailed, bullet_points
+        max_length = body.get("max_length", 300)
+        
+        if not job_id or not file_hash:
+            raise HTTPException(status_code=400, detail="job_idとfile_hashが必要です")
+        
+        # Firestoreからジョブ情報を取得
+        db = firestore.Client()
+        doc_ref = db.collection(WHISPER_JOBS_COLLECTION).document(job_id)
+        doc = doc_ref.get()
+        
+        if not doc.exists:
+            raise HTTPException(status_code=404, detail="ジョブが見つかりません")
+        
+        job_data = doc.to_dict()
+        
+        # ユーザー権限チェック
+        if job_data.get("user_id") != current_user["uid"]:
+            raise HTTPException(status_code=403, detail="アクセスが拒否されました")
+        
+        # 文字起こし結果を取得
+        segments = job_data.get("segments", [])
+        if not segments:
+            raise HTTPException(status_code=400, detail="要約するテキストがありません")
+        
+        # セグメントからテキストを結合
+        full_text = " ".join([segment.get("text", "") for segment in segments])
+        
+        # 簡易的な要約処理（実際の産業グレードでは、より高度なAIモデルを使用）
+        sentences = full_text.split('。')
+        
+        if summary_type == "brief":
+            # 簡潔な要約：最初の数文を取得
+            summary_sentences = sentences[:3]
+            summary = '。'.join(summary_sentences)
+            if len(summary) > max_length:
+                summary = summary[:max_length] + "..."
+        elif summary_type == "bullet_points":
+            # 箇条書き形式
+            key_sentences = sentences[:5]
+            summary = "\n".join([f"\u2022 {sentence.strip()}" for sentence in key_sentences if sentence.strip()])
+        else:  # detailed
+            # 詳細な要約
+            important_sentences = sentences[:int(len(sentences) * 0.3)]  # 30%を選択
+            summary = '。'.join(important_sentences)
+            if len(summary) > max_length:
+                summary = summary[:max_length] + "..."
+        
+        # 要約結果をFirestoreに保存
+        summary_data = {
+            "summary": summary,
+            "summary_type": summary_type,
+            "max_length": max_length,
+            "original_length": len(full_text),
+            "summary_length": len(summary),
+            "compression_ratio": len(summary) / len(full_text) if full_text else 0,
+            "summarized_at": datetime.datetime.now(datetime.timezone.utc),
+            "request_id": request_id
+        }
+        
+        doc_ref.update({
+            f"summaries.{summary_type}": summary_data
+        })
+        
+        logger.info(f"要約完了: job_id={job_id}, summary_type={summary_type}")
+        
+        return JSONResponse(
+            status_code=200,
+            content={
+                "success": True,
+                "summary": summary,
+                "summary_type": summary_type,
+                "original_length": len(full_text),
+                "summary_length": len(summary),
+                "compression_ratio": len(summary) / len(full_text) if full_text else 0,
+                "request_id": request_id
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"要約処理エラー: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"要約処理中にエラーが発生しました: {str(e)}")
+
+
 async def get_audio_url(
     request: Request,
     file_hash: str,

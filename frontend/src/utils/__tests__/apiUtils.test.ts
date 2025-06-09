@@ -1,9 +1,20 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { 
   buildApiUrl,
   handleApiError,
-  createFormData
+  createFormData,
+  createApiHeaders,
+  getStatusMessage
 } from '../apiUtils'
+
+// Mock the Response constructor for handleApiError tests
+global.Response = vi.fn().mockImplementation((body, init) => ({
+  ok: init?.status ? init.status >= 200 && init.status < 300 : true,
+  status: init?.status || 200,
+  json: vi.fn().mockResolvedValue(JSON.parse(body || '{}')),
+  text: vi.fn().mockResolvedValue(body || ''),
+  headers: new Map(Object.entries(init?.headers || {}))
+}))
 
 describe('apiUtils', () => {
   describe('buildApiUrl', () => {
@@ -36,39 +47,31 @@ describe('apiUtils', () => {
   })
 
   describe('handleApiError', () => {
-    it('Axiosエラーが正しく処理される', () => {
-      const axiosError = {
-        isAxiosError: true,
-        response: {
-          status: 400,
-          data: { message: 'Bad Request' }
-        }
+    it('レスポンスエラーが正しく処理される', async () => {
+      const mockResponse = {
+        ok: false,
+        status: 400,
+        json: vi.fn().mockResolvedValue({ message: 'Bad Request', code: 'VALIDATION_ERROR' })
       }
       
-      const result = handleApiError(axiosError)
-      
-      expect(result).toContain('400')
-      expect(result).toContain('Bad Request')
+      await expect(handleApiError(mockResponse as any)).rejects.toMatchObject({
+        status: 400,
+        message: 'Bad Request',
+        code: 'VALIDATION_ERROR'
+      })
     })
 
-    it('ネットワークエラーが正しく処理される', () => {
-      const networkError = {
-        isAxiosError: true,
-        request: {},
-        message: 'Network Error'
+    it('JSONパースエラー時のフォールバック処理', async () => {
+      const mockResponse = {
+        ok: false,
+        status: 500,
+        json: vi.fn().mockRejectedValue(new Error('JSON parse error'))
       }
       
-      const result = handleApiError(networkError)
-      
-      expect(result).toContain('ネットワークエラー')
-    })
-
-    it('一般的なエラーが正しく処理される', () => {
-      const generalError = new Error('Something went wrong')
-      
-      const result = handleApiError(generalError)
-      
-      expect(result).toContain('Something went wrong')
+      await expect(handleApiError(mockResponse as any)).rejects.toMatchObject({
+        status: 500,
+        message: 'HTTP error! status: 500'
+      })
     })
   })
 
@@ -76,7 +79,7 @@ describe('apiUtils', () => {
     it('オブジェクトからFormDataが正しく作成される', () => {
       const data = {
         name: 'John',
-        age: '30',
+        age: 30,
         file: new File(['test'], 'test.txt')
       }
       
@@ -94,6 +97,50 @@ describe('apiUtils', () => {
       const formData = createFormData(data)
       
       expect(formData).toBeInstanceOf(FormData)
+    })
+
+    it('配列が正しく処理される', () => {
+      const data = {
+        tags: ['tag1', 'tag2', 'tag3']
+      }
+      
+      const formData = createFormData(data)
+      
+      expect(formData.get('tags[0]')).toBe('tag1')
+      expect(formData.get('tags[1]')).toBe('tag2')
+      expect(formData.get('tags[2]')).toBe('tag3')
+    })
+  })
+
+  describe('createApiHeaders', () => {
+    it('標準ヘッダーが正しく作成される', () => {
+      const token = 'test-token'
+      const headers = createApiHeaders(token)
+      
+      expect(headers['Content-Type']).toBe('application/json')
+      expect(headers['Authorization']).toBe('Bearer test-token')
+      expect(headers['X-Request-Id']).toMatch(/^F[0-9a-f]{12}$/i)
+    })
+
+    it('カスタムヘッダーが追加される', () => {
+      const token = 'test-token'
+      const customHeaders = { 'Custom-Header': 'custom-value' }
+      const headers = createApiHeaders(token, 'custom-id', customHeaders)
+      
+      expect(headers['X-Request-Id']).toBe('custom-id')
+      expect(headers['Custom-Header']).toBe('custom-value')
+    })
+  })
+
+  describe('getStatusMessage', () => {
+    it('既知のステータスコードの説明を返す', () => {
+      expect(getStatusMessage(200)).toBe('OK')
+      expect(getStatusMessage(400)).toBe('不正なリクエスト')
+      expect(getStatusMessage(500)).toBe('サーバーエラーが発生しました')
+    })
+
+    it('未知のステータスコードの場合はデフォルトメッセージを返す', () => {
+      expect(getStatusMessage(999)).toBe('HTTPエラー: 999')
     })
   })
 })

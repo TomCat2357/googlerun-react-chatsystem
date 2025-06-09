@@ -26,6 +26,8 @@ from whisper_batch.app.combine_results import (
     read_json,
     save_dataframe,
 )
+from whisper_batch.app.translate import translate_segments
+from whisper_batch.app.summarize import summarize_transcript
 
 # ── .env 読み込み ────────────────────────────────
 BASE_DIR = Path(__file__).resolve().parent.parent
