@@ -969,8 +969,8 @@ class TestWhisperBatchUtilities:
         # WhisperFirestoreDataで検証
         try:
             validated_data = WhisperFirestoreData(**valid_data)
-            assert validated_data.job_id == "test-validation"
-            assert validated_data.num_speakers == 1
+            assert validated_data.jobId == "test-validation"
+            assert validated_data.numSpeakers == 1
         except Exception as e:
             pytest.fail(f"有効なデータの検証に失敗: {e}")
         

@@ -115,16 +115,16 @@ def _process_job(db: firestore.Client, job: Dict[str, Any]) -> None:
     # WhisperFirestoreDataでデータ検証を試みる
     try:
         firestore_data = WhisperFirestoreData(**job)
-        job_id = firestore_data.job_id
+        job_id = firestore_data.jobId
         filename = firestore_data.filename
-        bucket = firestore_data.gcs_bucket_name
-        file_hash = firestore_data.file_hash
+        bucket = firestore_data.gcsBucketName
+        file_hash = firestore_data.fileHash
         # language, initial_prompt, num_speakers, min_speakers, max_speakers を取得
         language = firestore_data.language
-        initial_prompt = firestore_data.initial_prompt
-        num_speakers = firestore_data.num_speakers
-        min_speakers = firestore_data.min_speakers
-        max_speakers = firestore_data.max_speakers
+        initial_prompt = firestore_data.initialPrompt
+        num_speakers = firestore_data.numSpeakers
+        min_speakers = firestore_data.minSpeakers
+        max_speakers = firestore_data.maxSpeakers
 
     except Exception as e:
         job_id = job.get("job_id", "<unknown>")

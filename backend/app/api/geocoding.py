@@ -8,7 +8,7 @@ import os, json, asyncio, time
 from app.api.auth import get_current_user
 from app.services.geocoding_service import get_google_maps_api_key, process_optimized_geocode
 from common_utils.logger import logger, wrap_asyncgenerator_logger, log_request
-from common_utils.class_types import GeocodeRequest
+from common_utils.class_types import GeocodingRequest
 
 # 環境変数から設定を読み込み
 from dotenv import load_dotenv
@@ -28,7 +28,7 @@ router = APIRouter()
 @router.post("/geocoding")
 async def geocoding_endpoint(
     request: Request,
-    geocoding_request: GeocodeRequest,
+    geocoding_request: GeocodingRequest,
     current_user: Dict[str, Any] = Depends(get_current_user),
 ) -> StreamingResponse:
     """

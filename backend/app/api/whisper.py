@@ -54,8 +54,8 @@ class UploadUrlResponse(BaseModel):
     upload_url: str
     object_name: str
 
-# 有効なステータス一覧 (WhisperFirestoreDataから取得)
-VALID_STATUSES = set(WhisperFirestoreData.VALID_STATUSES)
+# 有効なステータス一覧 (WhisperJobDataのstatusフィールドのコメントより)
+VALID_STATUSES = {"queued", "launched", "processing", "completed", "failed", "canceled"}
 
 # 辞書ロガーのセットアップ
 create_dict_logger = partial(create_dict_logger, sensitive_keys=SENSITIVE_KEYS)
@@ -109,13 +109,13 @@ async def upload_audio(
             return JSONResponse(status_code=500, content={"detail": "X-Request-Idがリクエスト情報に含まれていません"})
 
         # GCSオブジェクト名が必要
-        if not whisper_request.gcs_object:
+        if not whisper_request.gcsObject:
             return JSONResponse(status_code=400, content={"detail": "GCSオブジェクト名が提供されていません"})
             
         # GCSから音声データを取得して検証
         storage_client_instance: storage.Client = storage.Client()
         bucket = storage_client_instance.bucket(GCS_BUCKET_NAME)
-        blob = bucket.blob(whisper_request.gcs_object)
+        blob = bucket.blob(whisper_request.gcsObject)
         
         # オブジェクトの存在確認
         if not blob.exists():
@@ -133,7 +133,7 @@ async def upload_audio(
             return JSONResponse(status_code=413, content={"detail": f"音声ファイルが大きすぎます（最大{WHISPER_MAX_BYTES/1024/1024:.1f}MB）"})
             
         # 音声データをメモリに読み込まずにハッシュを計算（ランダムなUUIDを代わりに使用）
-        file_hash = hashlib.sha256(f"{whisper_request.gcs_object}-{datetime.datetime.now().isoformat()}".encode()).hexdigest()
+        file_hash = hashlib.sha256(f"{whisper_request.gcsObject}-{datetime.datetime.now().isoformat()}".encode()).hexdigest()
         
         # MIMEタイプから拡張子を取得
         mime_mapping: Dict[str, str] = {
@@ -153,7 +153,7 @@ async def upload_audio(
         audio_duration_ms = 0
         converted_wav_path = ""
         final_audio_size = audio_size
-        original_filename_for_probe = whisper_request.original_name or f"audio{audio_file_extension or '.tmp'}"
+        original_filename_for_probe = whisper_request.originalName or f"audio{audio_file_extension or '.tmp'}"
 
         try:
             # 一時ファイルにダウンロード
@@ -204,10 +204,10 @@ async def upload_audio(
         logger.info(f"変換された音声をアップロードしました: {audio_gcs_full_path}")
 
         # 元のアップロード用の一時GCSオブジェクトを削除
-        temp_gcs_blob = storage_client_instance.bucket(GCS_BUCKET_NAME).blob(whisper_request.gcs_object)
+        temp_gcs_blob = storage_client_instance.bucket(GCS_BUCKET_NAME).blob(whisper_request.gcsObject)
         if temp_gcs_blob.exists():
             temp_gcs_blob.delete()
-            logger.info(f"一時GCSオブジェクトを削除しました: gs://{GCS_BUCKET_NAME}/{whisper_request.gcs_object}")
+            logger.info(f"一時GCSオブジェクトを削除しました: gs://{GCS_BUCKET_NAME}/{whisper_request.gcsObject}")
             
         # ローカル一時ファイルを削除
         if os.path.exists(original_local_path):
@@ -223,22 +223,22 @@ async def upload_audio(
             job_id=job_id,
             user_id=user_id,
             user_email=current_user.get("email", ""), 
-            filename=whisper_request.original_name or os.path.basename(whisper_request.gcs_object),
+            filename=whisper_request.originalName or os.path.basename(whisper_request.gcsObject),
             description=whisper_request.description,
-            recording_date=whisper_request.recording_date,
+            recording_date=whisper_request.recordingDate,
             gcs_bucket_name=GCS_BUCKET_NAME,
             audio_duration_ms=audio_duration_ms, 
             audio_size=final_audio_size, # 変換後のファイルサイズを使用
             file_hash=file_hash,
             language=whisper_request.language,
-            initial_prompt=whisper_request.initial_prompt,
+            initial_prompt=whisper_request.initialPrompt,
             status="queued", # Initial status
             created_at=timestamp,
             updated_at=timestamp,
             tags=whisper_request.tags or [],
-            num_speakers=whisper_request.num_speakers,
-            min_speakers=whisper_request.min_speakers or 1, 
-            max_speakers=whisper_request.max_speakers or 1
+            num_speakers=whisper_request.numSpeakers,
+            min_speakers=whisper_request.minSpeakers or 1, 
+            max_speakers=whisper_request.maxSpeakers or 1
         )
 
         # トランザクションを使ってジョブを登録
