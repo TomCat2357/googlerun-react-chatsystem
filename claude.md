@@ -728,7 +728,7 @@ docker system prune -f             # 不要なDockerリソース削除
 ## ナレッジ管理とコンテキスト保存
 
 ### 作業記録の保存方法
-作業完了時は `./ContextSave/` に結果を保存すること。以下の形式に従う：
+作業完了時は `/root/.local/share/wcgw/memory/` に結果を保存すること。以下の形式に従う：
 
 #### 保存タイミング
 - 大きなバグ修正完了時
@@ -740,13 +740,13 @@ docker system prune -f             # 不要なDockerリソース削除
 **2025年6月8日より、すべてのContextSaveファイルおよびプロジェクトガイドラインファイルは以下の形式で統一**
 
 ```
-./ContextSave/{作業内容}_{yyyyMMdd}_{HHmmss}.md
+/root/.local/share/wcgw/memory/{作業内容}_{yyyyMMdd}_{HHmmss}.md
 ```
 
 **例**：
-- `whisper_test_improvement_20250607_174029.md`
-- `firebase_auth_fix_20250607_201028.md`
-- `project_guidelines_20250608_040815.md`
+- `/root/.local/share/wcgw/memory/whisper_test_improvement_20250607_174029.md`
+- `/root/.local/share/wcgw/memory/firebase_auth_fix_20250607_201028.md`
+- `/root/.local/share/wcgw/memory/project_guidelines_20250608_040815.md`
 
 #### 命名規則のポイント
 - **作業内容**: 英語の小文字とアンダースコアで構成
@@ -766,7 +766,7 @@ docker system prune -f             # 不要なDockerリソース削除
 #### 実行例
 ```bash
 # テスト改善完了時の保存例（新形式）
-echo "Whisperテスト改善完了レポート" > ./ContextSave/whisper_test_improvement_20250607_110204.md
+echo "Whisperテスト改善完了レポート" > /root/.local/share/wcgw/memory/whisper_test_improvement_20250607_110204.md
 ```
 
 ### パッケージ管理とライブラリ追加
@@ -816,7 +816,7 @@ uv add librosa soundfile                   # 音声処理テスト用パッケ�
 
 ### 参考ファイル
 - `./.claude/KnowledgeTransfer.txt` - 保存形式の詳細ガイド
-- 過去の保存例: `./ContextSave/` 内の既存ファイルのうち、最近の（created_atが最新の）ファイルを参照
+- 過去の保存例: `/root/.local/share/wcgw/memory/` 内の既存ファイルのうち、最近の（created_atが最新の）ファイルを参照
 
 ### 重要事項
 - **詳細記録**: エラーログ、コードスニペット、実行結果を可能な限り詳細に記録
